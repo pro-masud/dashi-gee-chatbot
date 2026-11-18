@@ -18,11 +18,15 @@ import {
   DEFAULT_CHATBOT_CONFIG,
   ChatbotConfigDoc,
   ChatbotFaqDoc,
+  ChatbotFeedbackDoc,
   ChatbotKbDocRecord,
   ChatbotLogRecord,
   ChatbotSupportRequestRecord,
   ChatbotVersionRecord,
+  type FeedbackReason,
 } from './chatbot/types';
+import { buildOverlappingChunks } from './chatbot/hybridRag';
+import { ALLOWED_ADMIN_GEMINI_MODELS } from './chatbot/schema';
 import { OperationType, db, handleFirestoreError } from './firebase';
 
 function sanitizeConfigPayload(cfg: ChatbotConfigDoc): Record<string, unknown> {
@@ -46,6 +50,26 @@ function sanitizeConfigPayload(cfg: ChatbotConfigDoc): Record<string, unknown> {
     shelfLife: String(cfg.shelfLife || '').slice(0, 300),
     storageInstructions: String(cfg.storageInstructions || '').slice(0, 800),
     approvedClaims: String(cfg.approvedClaims || '').slice(0, 1200),
+    blockedClaims: String(cfg.blockedClaims || '').slice(0, 800),
+    approvedClaimsMeta: (Array.isArray(cfg.approvedClaimsMeta) ? cfg.approvedClaimsMeta : [])
+      .slice(0, 20)
+      .map((item) => ({
+        claim: String(item?.claim || '').trim().slice(0, 200),
+        evidenceNote: String(item?.evidenceNote || '').trim().slice(0, 300),
+        expiresAt: String(item?.expiresAt || '').trim().slice(0, 32),
+        updatedAt: String(item?.updatedAt || '').trim().slice(0, 40),
+        updatedBy: String(item?.updatedBy || '').trim().slice(0, 120),
+      }))
+      .filter((item) => item.claim.length > 0),
+    claimAuditHistory: (Array.isArray(cfg.claimAuditHistory) ? cfg.claimAuditHistory : [])
+      .slice(0, 30)
+      .map((entry) => ({
+        timestamp: String(entry?.timestamp || '').trim().slice(0, 40),
+        actor: String(entry?.actor || '').trim().slice(0, 120),
+        action: String(entry?.action || '').trim().slice(0, 60),
+        summary: String(entry?.summary || '').trim().slice(0, 240),
+      }))
+      .filter((entry) => entry.summary.length > 0),
     currentOffers: String(cfg.currentOffers || '').slice(0, 800),
     district: String(cfg.district || '').slice(0, 80),
     city: String(cfg.city || '').slice(0, 80),
@@ -68,9 +92,38 @@ function sanitizeConfigPayload(cfg: ChatbotConfigDoc): Record<string, unknown> {
     responseLength: ['short', 'balanced', 'detailed'].includes(cfg.responseLength)
       ? cfg.responseLength
       : 'short',
-    languageBehavior: ['auto', 'prefer_bn', 'prefer_en'].includes(cfg.languageBehavior)
+    languageBehavior: [
+      'auto',
+      'prefer_bn',
+      'prefer_en',
+      'always_bn',
+      'mirror',
+      'customer_choice',
+    ].includes(cfg.languageBehavior)
       ? cfg.languageBehavior
       : 'auto',
+    synonyms: Object.fromEntries(
+      Object.entries(cfg.synonyms || {})
+        .slice(0, 40)
+        .map(([k, arr]) => [
+          String(k).trim().slice(0, 40),
+          (Array.isArray(arr) ? arr : [])
+            .map((v) => String(v).trim().slice(0, 40))
+            .filter(Boolean)
+            .slice(0, 12),
+        ])
+        .filter(([k, arr]) => (k as string).length > 0 && (arr as string[]).length > 0)
+    ),
+    primaryModel: (ALLOWED_ADMIN_GEMINI_MODELS as readonly string[]).includes(
+      String(cfg.primaryModel || '')
+    )
+      ? cfg.primaryModel
+      : 'gemini-4-hydrogen',
+    fallbackModel: (ALLOWED_ADMIN_GEMINI_MODELS as readonly string[]).includes(
+      String(cfg.fallbackModel || '')
+    )
+      ? cfg.fallbackModel
+      : 'gemini-3.1-flash-lite',
     fallbackMessageBn: String(cfg.fallbackMessageBn || '').slice(0, 400),
     fallbackMessageEn: String(cfg.fallbackMessageEn || '').slice(0, 400),
     welcomeMessageBn: String(cfg.welcomeMessageBn || '').slice(0, 500),
@@ -265,18 +318,56 @@ export async function saveAdminChatbotKbDoc(docItem: ChatbotKbDocRecord): Promis
     docItem.id && /^[a-zA-Z0-9_-]{2,128}$/.test(docItem.id)
       ? docItem.id
       : `kb_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const cleanContent = docItem.content.trim().slice(0, 60000);
+  const chunks = buildOverlappingChunks(cleanContent);
+  const chunkCount = Math.max(1, Math.min(200, chunks.length || docItem.chunkCount || 1));
+  const status: 'draft' | 'published' = docItem.status === 'published' ? 'published' : 'draft';
+  const language = ['bn', 'en', 'both'].includes(String(docItem.language || 'both'))
+    ? (docItem.language as 'bn' | 'en' | 'both')
+    : 'both';
+  const accessScope: 'public' | 'internal' =
+    docItem.accessScope === 'internal' ? 'internal' : 'public';
+
   try {
-    await setDoc(doc(db, 'chatbot_kb_docs', id), {
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'chatbot_kb_docs', id), {
       title: docItem.title.trim().slice(0, 160),
       category: (docItem.category.trim() || 'General').slice(0, 60),
       sourceType: docItem.sourceType || 'manual',
       fileName: (docItem.fileName || 'manual-entry.txt').slice(0, 160),
-      content: docItem.content.trim().slice(0, 60000),
-      chunkCount: Math.max(1, Math.min(200, Math.round(docItem.chunkCount || 1))),
-      status: docItem.status === 'published' ? 'published' : 'draft',
+      content: cleanContent,
+      chunkCount,
+      status,
       syncStatus: (docItem.syncStatus || 'Synced & Ready').slice(0, 120),
+      version: Math.max(1, Math.min(1000, Math.round(Number(docItem.version) || 1))),
+      owner: (docItem.owner || 'Admin').slice(0, 120),
+      language,
+      effectiveDate: (docItem.effectiveDate || '').slice(0, 32),
+      reviewDate: (docItem.reviewDate || '').slice(0, 32),
+      contentHash: (docItem.contentHash || '').slice(0, 64),
+      accessScope,
       updatedAt: serverTimestamp(),
     });
+
+    for (const c of chunks.slice(0, 80)) {
+      const chunkId = `${id}_c${c.chunkIndex}`;
+      batch.set(doc(db, 'knowledge_chunks', chunkId), {
+        docId: id,
+        title: docItem.title.trim().slice(0, 160),
+        category: (docItem.category.trim() || 'General').slice(0, 60),
+        chunkIndex: c.chunkIndex,
+        sectionHeading: c.sectionHeading.slice(0, 80),
+        text: c.text.slice(0, 4000),
+        tokenEstimate: Math.max(1, Math.min(8000, c.tokenEstimate)),
+        contentHash: c.contentHash.slice(0, 64),
+        language,
+        status,
+        accessScope,
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    await batch.commit();
     return id;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `chatbot_kb_docs/${id}`);
@@ -286,6 +377,13 @@ export async function saveAdminChatbotKbDoc(docItem: ChatbotKbDocRecord): Promis
 export async function deleteAdminChatbotKbDoc(docId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'chatbot_kb_docs', docId));
+    const q = query(collection(db, 'knowledge_chunks'), where('docId', '==', docId));
+    const chunkSnap = await getDocs(q);
+    if (!chunkSnap.empty) {
+      const batch = writeBatch(db);
+      chunkSnap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `chatbot_kb_docs/${docId}`);
   }
@@ -349,5 +447,41 @@ export async function updateSupportRequestStatus(
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `chatbot_support_requests/${reqId}`);
+  }
+}
+
+export async function fetchAdminChatbotFeedback(): Promise<ChatbotFeedbackDoc[]> {
+  try {
+    const q = query(collection(db, 'chatbot_feedback'), orderBy('createdAt', 'desc'));
+    const snap = await getDocs(q);
+    return snap.docs.slice(0, 200).map((d) => ({
+      id: d.id,
+      ...(d.data() as Omit<ChatbotFeedbackDoc, 'id'>),
+    }));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'chatbot_feedback');
+  }
+}
+
+export async function resolveChatbotFeedback(feedbackId: string, resolved: boolean): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'chatbot_feedback', feedbackId), { resolved });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `chatbot_feedback/${feedbackId}`);
+  }
+}
+
+export async function updateChatbotLogFeedback(
+  logId: string,
+  feedback: 'up' | 'down' | '',
+  feedbackReason: FeedbackReason = ''
+): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'chatbot_logs', logId), {
+      feedback,
+      feedbackReason,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `chatbot_logs/${logId}`);
   }
 }

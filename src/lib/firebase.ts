@@ -172,6 +172,21 @@ export async function createOrderAtomically(
   const orderRef = doc(db, 'orders', order.orderNumber);
   const trackingId = `${order.orderNumber}_${order.phone}`;
   const trackingRef = doc(db, 'order_tracking', trackingId);
+  const settingsRef = doc(db, 'store_settings', 'main');
+  const auditRef = doc(
+    collection(db, 'order_audit_logs'),
+    `aud_${order.orderNumber}_created`
+  );
+
+  let settingsData: Partial<StoreSettingsDoc> | null = null;
+  try {
+    const settingsSnap = await getDoc(settingsRef);
+    if (settingsSnap.exists()) {
+      settingsData = settingsSnap.data() as Partial<StoreSettingsDoc>;
+    }
+  } catch {
+    settingsData = null;
+  }
 
   const batch = writeBatch(db);
   batch.set(orderRef, {
@@ -183,14 +198,46 @@ export async function createOrderAtomically(
     orderNumber: order.orderNumber,
     weight: order.weight,
     qty: order.qty,
+    qty250g: order.qty250g,
+    qty500g: order.qty500g,
+    qty1kg: order.qty1kg,
     itemsSummary: order.itemsSummary,
+    subtotalBdt: order.subtotalBdt,
+    deliveryFeeBdt: order.deliveryFeeBdt,
+    discountBdt: order.discountBdt,
     totalBdt: order.totalBdt,
+    couponCode: order.couponCode || '',
+    deliveryZone: order.deliveryZone,
+    district: order.district,
     paymentMethod: order.paymentMethod,
     paymentStatus: order.paymentStatus,
     status: order.status,
+    reviewStatus: order.reviewStatus || 'none',
     estimatedDelivery: order.estimatedDelivery,
     updatedAt: serverTimestamp(),
   });
+  batch.set(auditRef, {
+    orderNumber: order.orderNumber,
+    action: 'created',
+    actorType: 'customer',
+    summary: `Checkout order created (${order.itemsSummary}, Total ৳${order.totalBdt})`,
+    previousStatus: '',
+    nextStatus: order.status,
+    createdAt: serverTimestamp(),
+  });
+
+  if (settingsData) {
+    const cur250 = Number(settingsData.stock250g ?? DEFAULT_STORE_SETTINGS.stock250g);
+    const cur500 = Number(settingsData.stock500g ?? DEFAULT_STORE_SETTINGS.stock500g);
+    const cur1k = Number(settingsData.stock1kg ?? DEFAULT_STORE_SETTINGS.stock1kg);
+    batch.update(settingsRef, {
+      stock250g: Math.max(0, cur250 - Number(order.qty250g || 0)),
+      stock500g: Math.max(0, cur500 - Number(order.qty500g || 0)),
+      stock1kg: Math.max(0, cur1k - Number(order.qty1kg || 0)),
+      lastOrderNumber: order.orderNumber,
+      updatedAt: serverTimestamp(),
+    });
+  }
 
   try {
     await batch.commit();

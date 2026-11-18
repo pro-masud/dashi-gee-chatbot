@@ -3,15 +3,22 @@ import { CHATBOT_BUILD_CONFIG } from '../../../src/lib/chatbot/build-config';
 import {
   checkAndIncrementFirestoreRateLimit,
   checkOrderIdempotency,
+  checkRecentOrderFingerprint,
   createServerOrderAtomically,
   fetchServerCouponByCode,
   fetchServerStoreSettings,
 } from '../../../src/lib/chatbot/firestoreRest';
+import { checkCompositeOrderRateLimit } from '../../../src/lib/chatbot/rateLimit';
 import {
+  assessAddressCompleteness,
+  assessOrderRiskSignals,
+  buildDuplicateFingerprintHash,
   computeOrderPricingInPoisha,
-  createSignedOrderToken,
+  getDispatchWindowInfo,
   isValidBangladeshPhone,
+  normalizeVariantQuantities,
   resolveConfiguredDistrictAndZone,
+  tryCreateSignedOrderToken,
   verifySignedOrderToken,
 } from '../../../src/lib/chatbot/orderToken';
 import { sanitizeUserText } from '../../../src/lib/chatbot/security';
@@ -46,7 +53,6 @@ export async function POST(request: Request) {
   const uiLang: 'en' | 'bn' = body.uiLang === 'bn' ? 'bn' : 'en';
   const bn = uiLang === 'bn';
 
-  // Bot honeypot guard
   if (typeof body.website === 'string' && body.website.trim().length > 0) {
     return Response.json(
       {
@@ -58,33 +64,41 @@ export async function POST(request: Request) {
     );
   }
 
-  const clientIp =
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'anon_ip';
+  const confirmationToken = String(body.confirmationToken || '').trim();
+  const sessionId = sanitizeUserText(String(body.sessionId || ''), 64);
 
-  // Persistent IP rate limit for order submissions (max 5/min)
-  const ipRate = await checkAndIncrementFirestoreRateLimit(
-    `order_ip_min_${clientIp}`,
-    CHATBOT_BUILD_CONFIG.ORDER_IP_PER_MIN,
-    60_000
-  );
-  if (!ipRate.allowed) {
-    return Response.json(
+  const orderRate = await checkCompositeOrderRateLimit({
+    request,
+    sessionId: sessionId || 'anon_order',
+  });
+
+  const jsonResp = (data: Record<string, unknown>, status = 200) => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+    };
+    if (orderRate.setCookieHeader) {
+      headers['Set-Cookie'] = orderRate.setCookieHeader;
+    }
+    return new Response(JSON.stringify(data), { status, headers });
+  };
+
+  if (!orderRate.allowed) {
+    return jsonResp(
       {
         ok: false,
         code: 'rate_limit',
+        retryAfterSec: orderRate.retryAfterSec,
         error: bn
           ? 'অনেক দ্রুত অর্ডার অনুরোধ পাঠানো হয়েছে। অনুগ্রহ করে ১ মিনিট পর চেষ্টা করুন।'
           : 'Too many order attempts right now. Please wait a minute and try again.',
       },
-      { status: 429 }
+      429
     );
   }
 
-  const confirmationToken = String(body.confirmationToken || '').trim();
-  const sessionId = sanitizeUserText(String(body.sessionId || ''), 64);
-
   if (!confirmationToken || !sessionId) {
-    return Response.json(
+    return jsonResp(
       {
         ok: false,
         code: 'missing_token',
@@ -92,15 +106,28 @@ export async function POST(request: Request) {
           ? 'অর্ডার কনফার্মেশন টোকেন পাওয়া যায়নি। অনুগ্রহ করে আবার সারাংশ তৈরি করুন।'
           : 'Confirmation token is missing. Please prepare a fresh order summary.',
       },
-      { status: 400 }
+      400
     );
   }
 
   // 1. Verify HMAC signature, previewHash integrity, and 10-min expiry
   const verified = verifySignedOrderToken(confirmationToken);
   if (!verified.ok) {
+    if (verified.reason === 'order_secret_missing') {
+      console.error(JSON.stringify({ event: 'order_token_error', code: 'order_secret_missing' }));
+      return jsonResp(
+        {
+          ok: false,
+          code: 'order_secret_missing',
+          error: bn
+            ? 'দুঃখিত, অনলাইন অর্ডার কনফার্মেশন সিস্টেমটি সাময়িকভাবে কনফিগার করা নেই। অনুগ্রহ করে সরাসরি ফোন বা WhatsApp-এ অর্ডার করুন।'
+            : 'Online order confirmation is temporarily unavailable due to server configuration. Please order directly via Phone or WhatsApp.',
+        },
+        503
+      );
+    }
     const isExpired = verified.reason === 'expired_token';
-    return Response.json(
+    return jsonResp(
       {
         ok: false,
         code: verified.reason,
@@ -112,7 +139,7 @@ export async function POST(request: Request) {
             ? 'অর্ডার কনফার্মেশন টোকেনটি বৈধ নয়।'
             : 'Invalid or tampered order confirmation token.',
       },
-      { status: 400 }
+      400
     );
   }
 
@@ -120,7 +147,7 @@ export async function POST(request: Request) {
 
   // 2. Enforce session ownership
   if (payload.sessionId !== sessionId) {
-    return Response.json(
+    return jsonResp(
       {
         ok: false,
         code: 'session_mismatch',
@@ -128,17 +155,25 @@ export async function POST(request: Request) {
           ? 'সেশন মিলছে না। অনুগ্রহ করে বর্তমান চ্যাটে নতুন সারাংশ নিন।'
           : 'Session ownership mismatch. Please generate a new order summary in this session.',
       },
-      { status: 403 }
+      403
     );
   }
 
+  const normVariants = normalizeVariantQuantities({
+    weight: payload.weight,
+    qty: payload.qty,
+    qty250g: payload.qty250g,
+    qty500g: payload.qty500g,
+    qty1kg: payload.qty1kg,
+  });
+
   // 3. Revalidate order data integrity
   if (
-    payload.qty < 1 ||
-    payload.qty > CHATBOT_BUILD_CONFIG.MAX_QTY_PER_ORDER ||
+    normVariants.totalQty < 1 ||
+    normVariants.totalQty > CHATBOT_BUILD_CONFIG.MAX_QTY_PER_ORDER ||
     !isValidBangladeshPhone(payload.phone)
   ) {
-    return Response.json(
+    return jsonResp(
       {
         ok: false,
         code: 'invalid_order_data',
@@ -146,13 +181,17 @@ export async function POST(request: Request) {
           ? 'অর্ডার তথ্য বা মোবাইল নম্বর সঠিক নয়।'
           : 'Invalid quantity or Bangladesh mobile number.',
       },
-      { status: 400 }
+      400
     );
   }
 
-  const zoneCheck = resolveConfiguredDistrictAndZone(payload.district, payload.deliveryZone);
+  const zoneCheck = resolveConfiguredDistrictAndZone(
+    payload.district,
+    payload.deliveryZone,
+    `${payload.area} ${payload.address}`
+  );
   if (!zoneCheck.valid) {
-    return Response.json(
+    return jsonResp(
       {
         ok: false,
         code: 'unsupported_delivery_area',
@@ -160,7 +199,7 @@ export async function POST(request: Request) {
           ? 'ডেলিভারি জেলাটি কনফিগারকৃত এলাকায় পাওয়া যায়নি।'
           : 'Selected delivery district is not configured.',
       },
-      { status: 400 }
+      400
     );
   }
 
@@ -168,7 +207,7 @@ export async function POST(request: Request) {
     (payload.paymentMethod === 'bkash' || payload.paymentMethod === 'nagad') &&
     payload.txnId.trim().length < 4
   ) {
-    return Response.json(
+    return jsonResp(
       {
         ok: false,
         code: 'missing_txn_id',
@@ -176,14 +215,14 @@ export async function POST(request: Request) {
           ? 'bKash/Nagad পেমেন্টের জন্য বৈধ Transaction ID প্রয়োজন।'
           : 'A valid Transaction ID is required for bKash/Nagad orders.',
       },
-      { status: 400 }
+      400
     );
   }
 
   // 4. Duplicate idempotency check (same session+phone+items+total+area within 10 min returns original order)
   const existingIdem = await checkOrderIdempotency(payload.idempotencyKey);
   if (existingIdem.found && existingIdem.orderNumber) {
-    return Response.json({
+    return jsonResp({
       ok: true,
       duplicatePrevented: true,
       orderNumber: existingIdem.orderNumber,
@@ -195,47 +234,64 @@ export async function POST(request: Request) {
     });
   }
 
-  // 5. Re-fetch live prices, coupons, stock, and delivery fee from Firestore
-  const [settings, coupon] = await Promise.all([
+  // 5. Re-fetch live prices, coupons, stock, delivery fee, and fingerprint check from Firestore
+  const fingerprintHash = buildDuplicateFingerprintHash({
+    phone: payload.phone,
+    district: zoneCheck.canonicalDistrict,
+    address: payload.address,
+    qty250g: normVariants.qty250g,
+    qty500g: normVariants.qty500g,
+    qty1kg: normVariants.qty1kg,
+  });
+
+  const [settings, coupon, duplicateCheck] = await Promise.all([
     fetchServerStoreSettings(),
     payload.couponCode ? fetchServerCouponByCode(payload.couponCode) : Promise.resolve(null),
+    checkRecentOrderFingerprint(fingerprintHash),
   ]);
 
   const livePricing = computeOrderPricingInPoisha({
     settings,
-    weight: payload.weight,
-    qty: payload.qty,
+    weight: normVariants.primaryWeight,
+    qty: normVariants.totalQty,
+    qty250g: normVariants.qty250g,
+    qty500g: normVariants.qty500g,
+    qty1kg: normVariants.qty1kg,
     deliveryZone: zoneCheck.deliveryZone,
     paymentMethod: payload.paymentMethod,
     coupon,
   });
 
-  if (livePricing.availableStock < payload.qty) {
-    return Response.json(
+  if (!livePricing.stockSufficient) {
+    return jsonResp(
       {
         ok: false,
         outOfStock: true,
+        insufficientWeights: livePricing.insufficientWeights,
         availableStock: livePricing.availableStock,
         error: bn
-          ? `দুঃখিত, ${payload.weight} সাইজের পর্যাপ্ত স্টক এখন নেই (অবশিষ্ট: ${livePricing.availableStock}টি)।`
-          : `Sorry, insufficient stock for ${payload.weight} (${livePricing.availableStock} jars remaining).`,
+          ? `দুঃখিত, ${livePricing.insufficientWeights.join(', ')} সাইজের পর্যাপ্ত স্টক এখন নেই।`
+          : `Sorry, insufficient stock for ${livePricing.insufficientWeights.join(', ')} right now.`,
       },
-      { status: 409 }
+      409
     );
   }
 
-  // If unit price, delivery charge, discount, or total changed since preview, require fresh confirmation
+  // If subtotal, unit price, delivery charge, discount, or total changed since preview, require fresh confirmation
   if (
-    livePricing.unitPriceBdt !== payload.unitPriceBdt ||
+    livePricing.subtotalBdt !== payload.subtotalBdt ||
     livePricing.deliveryFeeBdt !== payload.deliveryFeeBdt ||
     livePricing.discountBdt !== payload.discountBdt ||
     livePricing.totalBdt !== payload.totalBdt
   ) {
-    const refreshed = createSignedOrderToken({
+    const refreshed = tryCreateSignedOrderToken({
       sessionId: payload.sessionId,
       draft: {
-        weight: payload.weight,
-        qty: payload.qty,
+        weight: livePricing.primaryWeight,
+        qty: livePricing.totalQty,
+        qty250g: livePricing.qty250g,
+        qty500g: livePricing.qty500g,
+        qty1kg: livePricing.qty1kg,
         customerName: payload.customerName,
         phone: payload.phone,
         district: zoneCheck.canonicalDistrict,
@@ -244,10 +300,14 @@ export async function POST(request: Request) {
         deliveryZone: zoneCheck.deliveryZone,
         paymentMethod: payload.paymentMethod,
         txnId: payload.txnId,
-        couponCode: payload.couponCode,
+        couponCode: livePricing.couponEvaluation?.valid ? payload.couponCode : '',
         note: payload.note,
       },
       pricing: {
+        qty250g: livePricing.qty250g,
+        qty500g: livePricing.qty500g,
+        qty1kg: livePricing.qty1kg,
+        itemsSummary: livePricing.itemsSummary,
         unitPriceBdt: livePricing.unitPriceBdt,
         subtotalBdt: livePricing.subtotalBdt,
         deliveryFeeBdt: livePricing.deliveryFeeBdt,
@@ -256,17 +316,37 @@ export async function POST(request: Request) {
       },
     });
 
-    return Response.json(
+    if (!refreshed.ok) {
+      return jsonResp(
+        {
+          ok: false,
+          code: 'order_secret_missing',
+          error: bn
+            ? 'অর্ডার কনফার্মেশন সিস্টেম কনফিগার করা নেই। অনুগ্রহ করে সরাসরি সাপোর্টে যোগাযোগ করুন।'
+            : 'Order confirmation signing is unavailable. Please contact support directly.',
+        },
+        503
+      );
+    }
+
+    const dispatchInfo = getDispatchWindowInfo(settings);
+
+    return jsonResp(
       {
         ok: false,
         priceChanged: true,
         error: bn
-          ? `দাম বা ডেলিভারি চার্জ হালনাগাদ হয়েছে। নতুন সর্বমোট ৳${livePricing.totalBdt}। অনুগ্রহ করে আপডেট করা সারাংশ দেখে পুনরায় কনফার্ম করুন।`
-          : `Live pricing or delivery fees updated (new total: ৳${livePricing.totalBdt}). Please review the updated summary and confirm again.`,
+          ? `দাম, কুপন বা ডেলিভারি চার্জ হালনাগাদ হয়েছে। নতুন সর্বমোট ৳${livePricing.totalBdt}। অনুগ্রহ করে আপডেট করা সারাংশ দেখে পুনরায় কনফার্ম করুন।`
+          : `Live pricing, coupon eligibility, or delivery fees updated (new total: ৳${livePricing.totalBdt}). Please review the updated summary and confirm again.`,
         updatedSummary: {
           productName: bn ? settings.productNameBn : settings.productNameEn,
-          weight: payload.weight,
-          qty: payload.qty,
+          weight: livePricing.primaryWeight,
+          qty: livePricing.totalQty,
+          qty250g: livePricing.qty250g,
+          qty500g: livePricing.qty500g,
+          qty1kg: livePricing.qty1kg,
+          variantLines: livePricing.variantBreakdown,
+          itemsSummary: livePricing.itemsSummary,
           unitPriceBdt: livePricing.unitPriceBdt,
           subtotalBdt: livePricing.subtotalBdt,
           deliveryFeeBdt: livePricing.deliveryFeeBdt,
@@ -277,18 +357,21 @@ export async function POST(request: Request) {
           district: zoneCheck.canonicalDistrict,
           area: payload.area,
           deliveryArea: `${payload.area}, ${zoneCheck.canonicalDistrict}`,
+          deliveryZone: zoneCheck.deliveryZone,
           address: payload.address,
           note: payload.note,
           txnId: payload.txnId,
-          couponCode: payload.couponCode,
+          couponCode: livePricing.couponEvaluation?.valid ? payload.couponCode : '',
           paymentMethod: payload.paymentMethod,
           confirmationToken: refreshed.token,
           expiresAt: refreshed.payload.exp,
           confirmed: false,
           orderState: 'summary_shown',
+          estimatedDelivery: livePricing.estimatedDelivery,
+          dispatchCutoffNote: bn ? dispatchInfo.noticeBn : dispatchInfo.noticeEn,
         },
       },
-      { status: 409 }
+      409
     );
   }
 
@@ -307,7 +390,7 @@ export async function POST(request: Request) {
   ]);
 
   if (!phoneHourly.allowed || !phoneDaily.allowed) {
-    return Response.json(
+    return jsonResp(
       {
         ok: false,
         code: 'phone_order_limit',
@@ -315,19 +398,37 @@ export async function POST(request: Request) {
           ? 'এই মোবাইল নম্বর থেকে স্বল্প সময়ে অনেক অর্ডার করা হয়েছে। অতিরিক্ত সহায়তার জন্য সরাসরি ফোন বা WhatsApp-এ যোগাযোগ করুন।'
           : 'Maximum chatbot order limit reached for this phone number. Please contact our support team for assistance.',
       },
-      { status: 429 }
+      429
     );
   }
 
-  // 7. Build OrderRecord & commit atomically with single-use token + idempotency lock
+  // 7. Build OrderRecord with Risk Signals + Atomic Stock Lock Commit
+  const addressCheck = assessAddressCompleteness(
+    payload.address,
+    payload.area,
+    zoneCheck.canonicalDistrict
+  );
+  const risk = assessOrderRiskSignals({
+    phone: payload.phone,
+    addressComplete: addressCheck.complete,
+    duplicateRecentCount: duplicateCheck.duplicateFound ? 1 : 0,
+    recentOrdersLastHour: phoneHourly.count - 1,
+    paymentMethod: payload.paymentMethod,
+    totalBdt: livePricing.totalBdt,
+    codHighValueThresholdBdt: settings.codHighValueThresholdBdt,
+  });
+
   const orderNumber = `DG-${Math.floor(10000 + Math.random() * 89999)}`;
   const paymentStatus =
     payload.paymentMethod === 'cod' ? 'cod_due' : 'pending_verification';
-  const estimatedDelivery =
-    zoneCheck.deliveryZone === 'dhaka'
-      ? settings.estimatedDhakaDays
-      : settings.estimatedOutsideDays;
-  const itemsSummary = `${payload.weight} × ${payload.qty}`;
+  const estimatedDelivery = livePricing.estimatedDelivery;
+  const itemsSummary = livePricing.itemsSummary;
+
+  const duplicateWarning = duplicateCheck.duplicateFound
+    ? bn
+      ? `গত ২ ঘণ্টার মধ্যে একই ঠিকানায় অনুরূপ অর্ডার (${duplicateCheck.recentOrderNumber}) পাওয়া গেছে।`
+      : `Similar order (${duplicateCheck.recentOrderNumber}) placed within the last 2 hours.`
+    : '';
 
   const webhookTargets = [
     { channel: 'owner_webhook', url: process.env.OWNER_WEBHOOK_URL },
@@ -345,18 +446,18 @@ export async function POST(request: Request) {
     address: payload.address,
     note: (payload.note || 'Confirmed via Deshi Gee AI Assistant').slice(0, 240),
     deliveryZone: zoneCheck.deliveryZone,
-    weight: payload.weight,
-    qty: payload.qty,
-    qty250g: payload.weight === '250g' ? payload.qty : 0,
-    qty500g: payload.weight === '500g' ? payload.qty : 0,
-    qty1kg: payload.weight === '1kg' ? payload.qty : 0,
+    weight: livePricing.primaryWeight,
+    qty: livePricing.totalQty,
+    qty250g: livePricing.qty250g,
+    qty500g: livePricing.qty500g,
+    qty1kg: livePricing.qty1kg,
     itemsSummary,
     unitPriceBdt: livePricing.unitPriceBdt,
     subtotalBdt: livePricing.subtotalBdt,
     deliveryFeeBdt: livePricing.deliveryFeeBdt,
     discountBdt: livePricing.discountBdt,
     totalBdt: livePricing.totalBdt,
-    couponCode: payload.couponCode,
+    couponCode: livePricing.couponEvaluation?.valid ? payload.couponCode : '',
     paymentMethod: payload.paymentMethod,
     paymentStatus,
     txnId: payload.txnId,
@@ -365,19 +466,45 @@ export async function POST(request: Request) {
     estimatedDelivery,
     webhookStatus:
       webhookTargets.length > 0 ? 'pending_server_dispatch' : 'not_configured',
+    riskScore: risk.riskScore,
+    riskSignals: risk.riskSignals,
+    reviewStatus: risk.reviewStatus,
+    ...(duplicateWarning ? { duplicateWarning } : {}),
+    codVerificationStatus:
+      payload.paymentMethod === 'cod' && settings.codConfirmEnabled
+        ? 'not_configured'
+        : 'not_required',
   };
 
-  const writeRes = await createServerOrderAtomically(orderDoc, {
-    tokenId: payload.tokenId,
-    sessionId: payload.sessionId,
-    idemKey: payload.idempotencyKey,
-  });
+  const writeRes = await createServerOrderAtomically(
+    orderDoc,
+    {
+      tokenId: payload.tokenId,
+      sessionId: payload.sessionId,
+      idemKey: payload.idempotencyKey,
+    },
+    { fingerprintHash }
+  );
 
   if (!writeRes.ok) {
+    if (writeRes.outOfStock) {
+      return jsonResp(
+        {
+          ok: false,
+          outOfStock: true,
+          code: 'out_of_stock',
+          error: bn
+            ? 'দুঃখিত, এই মুহূর্তে পর্যাপ্ত স্টক শেষ হয়ে গেছে।'
+            : 'Sorry, the last available jars were just claimed by another order.',
+        },
+        409
+      );
+    }
+
     if (writeRes.conflict) {
       const retryIdem = await checkOrderIdempotency(payload.idempotencyKey);
       if (retryIdem.found && retryIdem.orderNumber) {
-        return Response.json({
+        return jsonResp({
           ok: true,
           duplicatePrevented: true,
           orderNumber: retryIdem.orderNumber,
@@ -388,7 +515,7 @@ export async function POST(request: Request) {
             : `Order already recorded cleanly. Order ID: ${retryIdem.orderNumber}.`,
         });
       }
-      return Response.json(
+      return jsonResp(
         {
           ok: false,
           code: 'token_already_used',
@@ -396,11 +523,11 @@ export async function POST(request: Request) {
             ? 'এই কনফার্মেশন টোকেনটি একবার ব্যবহার করা হয়েছে। নতুন অর্ডারের জন্য আবার সারাংশ তৈরি করুন।'
             : 'This confirmation token has already been used.',
         },
-        { status: 409 }
+        409
       );
     }
 
-    return Response.json(
+    return jsonResp(
       {
         ok: false,
         code: 'database_error',
@@ -408,12 +535,11 @@ export async function POST(request: Request) {
           ? 'দুঃখিত, এই মুহূর্তে অর্ডার সংরক্ষণ করা যায়নি। অনুগ্রহ করে সরাসরি ফোন বা WhatsApp-এ যোগাযোগ করুন।'
           : 'Could not save order right now. Please contact our support team via Phone or WhatsApp.',
       },
-      { status: 500 }
+      500
     );
   }
 
   // 8. Dispatch Owner Notification AFTER successful DB save (3 retries + exponential backoff)
-  // Notification failures are logged cleanly and NEVER cancel the saved order.
   let notificationStatus: 'delivered' | 'failed' | 'not_configured' = 'not_configured';
 
   if (webhookTargets.length === 0) {
@@ -430,8 +556,9 @@ export async function POST(request: Request) {
       orderId: orderNumber,
       orderNumber,
       product: settings.productNameEn,
-      weight: payload.weight,
-      quantity: payload.qty,
+      weight: livePricing.primaryWeight,
+      quantity: livePricing.totalQty,
+      itemsSummary,
       totalBdt: livePricing.totalBdt,
       customerName: payload.customerName,
       customerPhone: payload.phone,
@@ -441,6 +568,7 @@ export async function POST(request: Request) {
       note: orderDoc.note,
       paymentMethod: payload.paymentMethod,
       paymentStatus,
+      reviewStatus: risk.reviewStatus,
       orderTime: new Date().toISOString(),
       source: 'chatbot',
     };
@@ -462,7 +590,7 @@ export async function POST(request: Request) {
     notificationStatus = results.some((r) => r.status === 'sent') ? 'delivered' : 'failed';
   }
 
-  return Response.json({
+  return jsonResp({
     ok: true,
     duplicatePrevented: false,
     orderNumber,
@@ -471,10 +599,18 @@ export async function POST(request: Request) {
     paymentMethod: payload.paymentMethod,
     paymentStatus,
     estimatedDelivery,
+    reviewStatus: risk.reviewStatus,
+    riskSignals: risk.riskSignals,
+    ...(duplicateWarning ? { duplicateWarning } : {}),
     notificationStatus,
     trackingHref: `/track?order=${encodeURIComponent(orderNumber)}`,
-    message: bn
-      ? `ধন্যবাদ! আপনার অর্ডারটি সফলভাবে গ্রহণ করা হয়েছে। আমাদের টিম অর্ডারটি যাচাই করে আপনাকে ফোনে যোগাযোগ করবে। আপনার অর্ডার নম্বর: ${orderNumber}।`
-      : `Thank you! Your order has been received successfully. Our team will verify and call you shortly. Your Order ID: ${orderNumber}.`,
+    message:
+      risk.reviewStatus === 'manual_review'
+        ? bn
+          ? `ধন্যবাদ! আপনার অর্ডার নম্বর ${orderNumber} গৃহীত হয়েছে। দ্রুত ভেরিফিকেশনের পর আমাদের টিম ডিসপ্যাচ নিশ্চিত করবে।`
+          : `Thank you! Order ${orderNumber} has been received and queued for quick team verification before dispatch.`
+        : bn
+          ? `ধন্যবাদ! আপনার অর্ডারটি সফলভাবে গ্রহণ করা হয়েছে। আমাদের টিম অর্ডারটি যাচাই করে আপনাকে ফোনে যোগাযোগ করবে। আপনার অর্ডার নম্বর: ${orderNumber}।`
+          : `Thank you! Your order has been received successfully. Our team will verify and call you shortly. Your Order ID: ${orderNumber}.`,
   });
 }

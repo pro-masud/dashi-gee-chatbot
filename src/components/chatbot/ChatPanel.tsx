@@ -20,9 +20,15 @@ import {
 import { CHATBOT_BUILD_CONFIG } from '../../lib/chatbot/build-config';
 import type {
   ChatActionItem,
+  ChatDiagnosticsMeta,
   ChatMessageItem,
   ChatbotConfigDoc,
+  FeedbackReason,
+  KnowledgeSourceRef,
+  OrderDraftDoc,
   OrderSummaryCard,
+  ProductCardItem,
+  TrackingCardData,
 } from '../../lib/chatbot/types';
 import type { Lang } from '../../data/deshiGeeData';
 import { ChatMessageBubble } from './ChatMessageBubble';
@@ -76,7 +82,9 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
-  const [streaming, setStreaming] = useState(false);
+  const [awaitingReply, setAwaitingReply] = useState(false);
+  const [rolloverNotice, setRolloverNotice] = useState(false);
+  const [resumedDraft, setResumedDraft] = useState<OrderDraftDoc | null>(null);
   const [confirmingOrderMsgId, setConfirmingOrderMsgId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState('dg_init');
   const scrollEndRef = useRef<HTMLDivElement | null>(null);
@@ -85,7 +93,8 @@ export function ChatPanel({
   const bn = lang === 'bn';
 
   useEffect(() => {
-    setSessionId(getOrCreateSessionId());
+    const activeId = getOrCreateSessionId();
+    setSessionId(activeId);
     try {
       const saved = sessionStorage.getItem(MESSAGES_STORAGE_KEY);
       if (saved) {
@@ -97,7 +106,38 @@ export function ChatPanel({
     } catch {
       // ignore storage failures
     }
-  }, []);
+
+    let cancelled = false;
+    fetch(`/api/chat/session?sessionId=${encodeURIComponent(activeId)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then(
+        (data: {
+          session?: { lockedLang?: 'bn' | 'en' | '' } | null;
+          orderDraft?: OrderDraftDoc | null;
+        } | null) => {
+          if (cancelled || !data) return;
+          if (data.session?.lockedLang === 'bn' || data.session?.lockedLang === 'en') {
+            setLang(data.session.lockedLang);
+          }
+          if (
+            data.orderDraft &&
+            data.orderDraft.state !== 'confirmed' &&
+            data.orderDraft.state !== 'cancelled' &&
+            data.orderDraft.state !== 'expired' &&
+            (data.orderDraft.weight || data.orderDraft.phone || data.orderDraft.address)
+          ) {
+            setResumedDraft(data.orderDraft);
+          }
+        }
+      )
+      .catch(() => {
+        // ignore network errors on mount restore
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setLang]);
 
   useEffect(() => {
     if (messages.length === 0) return;
@@ -112,7 +152,7 @@ export function ChatPanel({
     if (open && !minimized) {
       scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, streaming, confirmingOrderMsgId, open, minimized]);
+  }, [messages, awaitingReply, confirmingOrderMsgId, open, minimized]);
 
   useEffect(() => {
     if (open && !minimized) {
@@ -152,30 +192,38 @@ export function ChatPanel({
     [bn, chatbotConfig.quickQuestionsBn, chatbotConfig.quickQuestionsEn]
   );
 
+  const latestAssistantId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'assistant') return messages[i].id;
+    }
+    return null;
+  }, [messages]);
+
   if (!open || minimized) {
     return null;
   }
 
-  const sessionLimitReached = messages.length >= CHATBOT_BUILD_CONFIG.SESSION_MAX_MESSAGES;
-
   const sendMessage = async (rawText: string, replaceFromRetry = false) => {
     const trimmed = rawText.trim().slice(0, CHATBOT_BUILD_CONFIG.MAX_MESSAGE_CHARS);
-    if (!trimmed || streaming || confirmingOrderMsgId) return;
+    if (!trimmed || awaitingReply || confirmingOrderMsgId) return;
 
-    if (sessionLimitReached && !replaceFromRetry) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `limit_${Date.now()}`,
-          role: 'assistant',
-          text: bn
-            ? 'এই সেশনে ৪০টি মেসেজের সীমা পূর্ণ হয়েছে। অনুগ্রহ করে ওপরের রিসেট বাটন দিয়ে নতুন চ্যাট শুরু করুন।'
-            : 'Session limit (40 messages) reached. Please clear conversation above to start a fresh chat.',
-          timestamp: createTimeLabel(),
-          isError: true,
-        },
-      ]);
-      return;
+    setResumedDraft(null);
+    let activeSessionId = sessionId;
+    const needsRollover =
+      !replaceFromRetry &&
+      messages.length >= CHATBOT_BUILD_CONFIG.SESSION_ROLLOVER_THRESHOLD;
+    let workingHistory = messages;
+
+    if (needsRollover) {
+      activeSessionId = `dg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      setSessionId(activeSessionId);
+      setRolloverNotice(true);
+      try {
+        sessionStorage.setItem(SESSION_STORAGE_KEY, activeSessionId);
+      } catch {
+        // ignore
+      }
+      workingHistory = messages.slice(-CHATBOT_BUILD_CONFIG.MAX_CONTEXT_MESSAGES);
     }
 
     const userMsg: ChatMessageItem = {
@@ -185,9 +233,13 @@ export function ChatPanel({
       timestamp: createTimeLabel(),
     };
 
-    const baseHistory = replaceFromRetry ? messages : [...messages, userMsg];
+    const nextDisplayMessages = replaceFromRetry ? messages : [...messages, userMsg];
+    const requestHistory = replaceFromRetry
+      ? workingHistory.slice(-CHATBOT_BUILD_CONFIG.MAX_CONTEXT_MESSAGES)
+      : [...workingHistory, userMsg].slice(-CHATBOT_BUILD_CONFIG.MAX_CONTEXT_MESSAGES);
+
     if (!replaceFromRetry) {
-      setMessages(baseHistory);
+      setMessages(nextDisplayMessages);
       setInput('');
     }
 
@@ -202,8 +254,9 @@ export function ChatPanel({
         retryPrompt: trimmed,
       },
     ]);
-    setStreaming(true);
+    setAwaitingReply(true);
 
+    let errActions: ChatActionItem[] = [];
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -213,16 +266,17 @@ export function ChatPanel({
         },
         body: JSON.stringify({
           mode: 'published',
-          sessionId,
+          sessionId: activeSessionId,
           uiLang: lang,
-          messages: baseHistory
-            .slice(-CHATBOT_BUILD_CONFIG.MAX_CONTEXT_MESSAGES)
-            .map((m) => ({ role: m.role, text: m.text })),
+          messages: requestHistory.map((m) => ({ role: m.role, text: m.text })),
         }),
       });
 
       if (!res.ok || !res.body) {
         const errBody = await res.json().catch(() => ({}));
+        if (Array.isArray(errBody.actions)) {
+          errActions = errBody.actions as ChatActionItem[];
+        }
         throw new Error(
           errBody.error ||
             (bn
@@ -237,6 +291,12 @@ export function ChatPanel({
       let assembledText = '';
       let metaActions: ChatActionItem[] = [];
       let metaOrderSummary: OrderSummaryCard | undefined;
+      let metaProductCards: ProductCardItem[] | undefined;
+      let metaTrackingCard: TrackingCardData | undefined;
+      let metaSuggestedReplies: string[] | undefined;
+      let metaSources: KnowledgeSourceRef[] | undefined;
+      let metaDiagnostics: ChatDiagnosticsMeta | undefined;
+      let metaLogId: string | undefined;
       let metaIsError = false;
 
       while (true) {
@@ -255,6 +315,13 @@ export function ChatPanel({
               text?: string;
               actions?: ChatActionItem[];
               orderSummary?: OrderSummaryCard | null;
+              productCards?: ProductCardItem[] | null;
+              trackingCard?: TrackingCardData | null;
+              suggestedReplies?: string[] | null;
+              sources?: KnowledgeSourceRef[] | null;
+              diagnostics?: ChatDiagnosticsMeta | null;
+              logId?: string | null;
+              lockedLang?: 'bn' | 'en' | '' | null;
               isError?: boolean;
             };
             if (event.type === 'delta' && event.text) {
@@ -267,7 +334,23 @@ export function ChatPanel({
             } else if (event.type === 'meta') {
               metaActions = event.actions || [];
               metaOrderSummary = event.orderSummary || undefined;
+              metaProductCards =
+                event.productCards && event.productCards.length > 0
+                  ? event.productCards
+                  : undefined;
+              metaTrackingCard = event.trackingCard || undefined;
+              metaSuggestedReplies =
+                event.suggestedReplies && event.suggestedReplies.length > 0
+                  ? event.suggestedReplies
+                  : undefined;
+              metaSources =
+                event.sources && event.sources.length > 0 ? event.sources : undefined;
+              metaDiagnostics = event.diagnostics || undefined;
+              metaLogId = event.logId || undefined;
               metaIsError = Boolean(event.isError);
+              if (event.lockedLang === 'bn' || event.lockedLang === 'en') {
+                setLang(event.lockedLang);
+              }
             }
           } catch {
             // ignore malformed partial chunk
@@ -285,6 +368,12 @@ export function ChatPanel({
                   (bn ? chatbotConfig.fallbackMessageBn : chatbotConfig.fallbackMessageEn),
                 actions: metaActions,
                 orderSummary: metaOrderSummary,
+                productCards: metaProductCards,
+                trackingCard: metaTrackingCard,
+                suggestedReplies: metaSuggestedReplies,
+                sources: metaSources,
+                diagnostics: metaDiagnostics,
+                logId: metaLogId,
                 isError: metaIsError,
                 retryPrompt: trimmed,
               }
@@ -304,6 +393,7 @@ export function ChatPanel({
             ? {
                 ...m,
                 text: msgText,
+                actions: errActions.length > 0 ? errActions : m.actions,
                 isError: true,
                 retryPrompt: trimmed,
               }
@@ -311,12 +401,12 @@ export function ChatPanel({
         )
       );
     } finally {
-      setStreaming(false);
+      setAwaitingReply(false);
     }
   };
 
   const handleConfirmOrder = async (msgId: string, summary: OrderSummaryCard) => {
-    if (!summary.confirmationToken || confirmingOrderMsgId || streaming) return;
+    if (!summary.confirmationToken || confirmingOrderMsgId || awaitingReply) return;
     setConfirmingOrderMsgId(msgId);
 
     try {
@@ -360,6 +450,31 @@ export function ChatPanel({
         return;
       }
 
+      if (res.status === 409 && data.outOfStock) {
+        setMessages((prev) => [
+          ...prev.map((m) =>
+            m.id === msgId && m.orderSummary
+              ? {
+                  ...m,
+                  orderSummary: { ...m.orderSummary, confirmed: true, confirmationToken: undefined },
+                }
+              : m
+          ),
+          {
+            id: `oos_${Date.now()}`,
+            role: 'assistant',
+            text:
+              data.error ||
+              (bn
+                ? 'দুঃখিত, এই মুহূর্তে পর্যাপ্ত জার স্টকে নেই। অনুগ্রহ করে পরিমাণ কমিয়ে বা অন্য সাইজ বেছে নিন।'
+                : 'Sorry, there is insufficient stock for one or more jars right now. Please adjust quantity or pick another size.'),
+            timestamp: createTimeLabel(),
+            isError: true,
+          },
+        ]);
+        return;
+      }
+
       if (!res.ok || !data.ok) {
         setMessages((prev) => [
           ...prev,
@@ -379,6 +494,7 @@ export function ChatPanel({
       }
 
       const confirmedOrderNum = String(data.orderNumber || '');
+      setResumedDraft(null);
       setMessages((prev) => [
         ...prev.map((m) =>
           m.id === msgId && m.orderSummary
@@ -431,7 +547,7 @@ export function ChatPanel({
   };
 
   const handleEditOrder = (msgId: string) => {
-    if (confirmingOrderMsgId || streaming) return;
+    if (confirmingOrderMsgId || awaitingReply) return;
     setMessages((prev) => [
       ...prev.map((m) =>
         m.id === msgId && m.orderSummary
@@ -457,12 +573,65 @@ export function ChatPanel({
     setTimeout(() => inputRef.current?.focus(), 100);
   };
 
-  const handleClearChat = () => {
-    setMessages([]);
+  const handleSubmitFeedback = async (
+    msgId: string,
+    rating: 'up' | 'down',
+    reason?: FeedbackReason
+  ) => {
+    const target = messages.find((m) => m.id === msgId);
+    if (!target || target.role !== 'assistant' || target.feedback) return;
+
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === msgId ? { ...m, feedback: rating, feedbackReason: reason || '' } : m
+      )
+    );
+
     try {
+      await fetch('/api/chatbot/feedback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+        },
+        body: JSON.stringify({
+          sessionId,
+          logId: target.logId || '',
+          rating,
+          reason: reason || '',
+          userMessage: target.retryPrompt || '',
+          assistantReply: target.text,
+          lang,
+          intent: target.diagnostics?.intent || 'general',
+        }),
+      });
+    } catch {
+      // keep optimistic UI state silently
+    }
+  };
+
+  const handleClearChat = () => {
+    const prevSession = sessionId;
+    setMessages([]);
+    setRolloverNotice(false);
+    setResumedDraft(null);
+    const fresh = `dg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    setSessionId(fresh);
+    try {
+      sessionStorage.setItem(SESSION_STORAGE_KEY, fresh);
       sessionStorage.removeItem(MESSAGES_STORAGE_KEY);
     } catch {
       // ignore
+    }
+    if (prevSession && prevSession !== 'dg_init') {
+      fetch(`/api/chat/session?sessionId=${encodeURIComponent(prevSession)}`, {
+        method: 'DELETE',
+        headers: {
+          'x-requested-with': 'DeshiGeeStorefront',
+        },
+      }).catch(() => {
+        // ignore cleanup error
+      });
     }
   };
 
@@ -555,6 +724,42 @@ export function ChatPanel({
           <p>{welcomeMessage}</p>
         </div>
 
+        {resumedDraft && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(180,123,43,0.35)] bg-[#FFFDF9] px-3 py-2 text-[11px] text-[#1E1710]">
+            <span>
+              {bn ? 'সংরক্ষিত অর্ডার খসড়া পাওয়া গেছে: ' : 'Active order draft restored: '}
+              {[
+                resumedDraft.qty250g ? `250g×${resumedDraft.qty250g}` : '',
+                resumedDraft.qty500g ? `500g×${resumedDraft.qty500g}` : '',
+                resumedDraft.qty1kg ? `1kg×${resumedDraft.qty1kg}` : '',
+              ]
+                .filter(Boolean)
+                .join(' + ') ||
+                `${resumedDraft.weight || 'Jar'}${resumedDraft.qty ? ` × ${resumedDraft.qty}` : ''}`}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  sendMessage(
+                    bn ? 'আমার অর্ডারটা সম্পূর্ণ করতে চাই' : 'Continue my order draft'
+                  )
+                }
+                className="font-semibold text-[#8A5A17] hover:underline"
+              >
+                {bn ? 'চালিয়ে যান' : 'Continue'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setResumedDraft(null)}
+                className="text-[#635647] hover:text-[#1E1710]"
+              >
+                {bn ? 'লুকান' : 'Dismiss'}
+              </button>
+            </div>
+          </div>
+        )}
+
         {messages.length === 0 && quickQuestions.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-[11px] font-medium text-[#635647]">
@@ -580,18 +785,34 @@ export function ChatPanel({
             key={msg.id}
             msg={msg}
             lang={lang}
+            isLatestAssistant={msg.id === latestAssistantId}
             onRetry={(prompt) => sendMessage(prompt, true)}
             onConfirmOrder={handleConfirmOrder}
             onEditOrder={(id) => handleEditOrder(id)}
             confirmingOrderMsgId={confirmingOrderMsgId}
             onNavigateTrack={onNavigateTrack}
+            onSelectProductVariant={(weight) =>
+              sendMessage(bn ? `${weight} জার অর্ডার করতে চাই` : `I want to order ${weight} jar`)
+            }
+            onSuggestedReply={(q) => sendMessage(q)}
+            onSubmitFeedback={handleSubmitFeedback}
           />
         ))}
 
-        {streaming && messages[messages.length - 1]?.text === '' && (
+        {rolloverNotice && (
+          <div className="rounded-xl border border-[rgba(180,123,43,0.28)] bg-[#F2ECE1]/60 px-3 py-2 text-[11px] text-[#635647]">
+            {bn
+              ? 'দ্রুত ও নির্ভুল উত্তরের জন্য একটি নতুন ধারাবাহিক সেশন চালু হয়েছে — আপনি নিশ্চিন্তে কথা চালিয়ে যেতে পারেন।'
+              : 'Continuing in a fresh seamless session to keep responses fast — please keep chatting.'}
+          </div>
+        )}
+
+        {awaitingReply && messages[messages.length - 1]?.text === '' && (
           <div className="flex items-center gap-2 px-1 text-xs text-[#635647]">
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[#B47B2B]" />
-            <span>{bn ? 'উত্তর লেখা হচ্ছে...' : 'Typing reply...'}</span>
+            <span>
+              {bn ? 'তথ্য যাচাই ও উত্তর তৈরি হচ্ছে...' : 'Checking live details & composing reply...'}
+            </span>
           </div>
         )}
 
@@ -610,7 +831,6 @@ export function ChatPanel({
             }
             onKeyDown={handleKeyDown}
             maxLength={CHATBOT_BUILD_CONFIG.MAX_MESSAGE_CHARS}
-            disabled={sessionLimitReached}
             placeholder={
               bn
                 ? 'দাম, অর্ডার বা ডেলিভারি সম্পর্কে লিখুন...'
@@ -622,15 +842,14 @@ export function ChatPanel({
             type="button"
             disabled={
               !input.trim() ||
-              streaming ||
-              sessionLimitReached ||
+              awaitingReply ||
               Boolean(confirmingOrderMsgId)
             }
             onClick={() => sendMessage(input)}
             aria-label={bn ? 'মেসেজ পাঠান' : 'Send message'}
             className="inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-xl bg-[#B47B2B] text-[#FFFDF9] transition-colors hover:bg-[#9D6820] disabled:cursor-not-allowed disabled:opacity-45"
           >
-            {streaming ? (
+            {awaitingReply ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Send className="h-4 w-4" />

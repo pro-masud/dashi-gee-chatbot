@@ -1,9 +1,20 @@
 import { NextResponse } from 'next/server';
+import { buildRuntimeHealthReport } from '../../../src/lib/chatbot/runtimeHealth';
 
-export async function GET() {
-  return NextResponse.json({
-    ok: true,
-    service: 'deshi-gee-storefront',
-    runtime: 'nextjs-app-router',
+export const dynamic = 'force-dynamic';
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const bypassCache = url.searchParams.get('refresh') === '1';
+
+  const report = await buildRuntimeHealthReport({ bypassCache });
+  const httpStatus =
+    !report.supportedModelConfigured || !report.checks.sdk.compatible ? 503 : 200;
+
+  return NextResponse.json(report, {
+    status: httpStatus,
+    headers: {
+      'Cache-Control': 'no-store',
+    },
   });
 }

@@ -17,10 +17,20 @@
         "stock500g": { "type": "number" },
         "stock1kg": { "type": "number" },
         "insideDhakaFee": { "type": "number" },
+        "dhakaSuburbanFee": { "type": "number" },
         "outsideDhakaFee": { "type": "number" },
+        "remoteDistrictFee": { "type": "number" },
         "freeDeliveryThreshold": { "type": "number" },
         "estimatedDhakaDays": { "type": "string", "maxLength": 80 },
+        "estimatedSuburbanDays": { "type": "string", "maxLength": 80 },
         "estimatedOutsideDays": { "type": "string", "maxLength": 80 },
+        "estimatedRemoteDays": { "type": "string", "maxLength": 80 },
+        "dispatchCutoffHourBst": { "type": "number" },
+        "cutoffNoticeEn": { "type": "string", "maxLength": 240 },
+        "cutoffNoticeBn": { "type": "string", "maxLength": 300 },
+        "codConfirmEnabled": { "type": "boolean" },
+        "codHighValueThresholdBdt": { "type": "number" },
+        "lastOrderNumber": { "type": "string", "maxLength": 20 },
         "bkashNumber": { "type": "string", "maxLength": 30 },
         "nagadNumber": { "type": "string", "maxLength": 30 },
         "advanceDiscountPct": { "type": "number" },
@@ -55,7 +65,7 @@
         "area": { "type": "string", "minLength": 2, "maxLength": 100 },
         "address": { "type": "string", "minLength": 5, "maxLength": 300 },
         "note": { "type": "string", "maxLength": 240 },
-        "deliveryZone": { "type": "string", "enum": ["dhaka", "nationwide"] },
+        "deliveryZone": { "type": "string", "enum": ["dhaka", "suburban", "nationwide", "remote"] },
         "weight": { "type": "string", "enum": ["250g", "500g", "1kg"] },
         "qty": { "type": "number" },
         "qty250g": { "type": "number" },
@@ -75,6 +85,11 @@
         "status": { "type": "string", "enum": ["pending", "confirmed", "processing", "shipped", "delivered", "cancelled"] },
         "estimatedDelivery": { "type": "string", "maxLength": 80 },
         "webhookStatus": { "type": "string", "maxLength": 80 },
+        "riskScore": { "type": "number" },
+        "riskSignals": { "type": "array" },
+        "reviewStatus": { "type": "string", "enum": ["none", "manual_review", "approved", "rejected"] },
+        "duplicateWarning": { "type": "string", "maxLength": 240 },
+        "codVerificationStatus": { "type": "string", "enum": ["not_required", "not_configured", "pending", "verified"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -111,11 +126,21 @@
         "orderNumber": { "type": "string", "pattern": "^DG-[0-9]{4,8}$", "maxLength": 16 },
         "weight": { "type": "string", "enum": ["250g", "500g", "1kg"] },
         "qty": { "type": "number" },
+        "qty250g": { "type": "number" },
+        "qty500g": { "type": "number" },
+        "qty1kg": { "type": "number" },
         "itemsSummary": { "type": "string", "minLength": 3, "maxLength": 80 },
+        "subtotalBdt": { "type": "number" },
+        "deliveryFeeBdt": { "type": "number" },
+        "discountBdt": { "type": "number" },
+        "couponCode": { "type": "string", "maxLength": 32 },
+        "deliveryZone": { "type": "string", "enum": ["dhaka", "suburban", "nationwide", "remote"] },
+        "district": { "type": "string", "maxLength": 80 },
         "totalBdt": { "type": "number" },
         "paymentMethod": { "type": "string", "enum": ["cod", "bkash", "nagad"] },
         "paymentStatus": { "type": "string", "enum": ["cod_due", "pending_verification", "verified", "failed"] },
         "status": { "type": "string", "enum": ["pending", "confirmed", "processing", "shipped", "delivered", "cancelled"] },
+        "reviewStatus": { "type": "string", "enum": ["none", "manual_review", "approved", "rejected"] },
         "estimatedDelivery": { "type": "string", "maxLength": 80 },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -176,6 +201,11 @@
         "discountPct": { "type": "number" },
         "minSubtotalBdt": { "type": "number" },
         "active": { "type": "boolean" },
+        "expiresAt": { "type": "string", "maxLength": 40 },
+        "maxUses": { "type": "number" },
+        "usedCount": { "type": "number" },
+        "stackableWithAdvance": { "type": "boolean" },
+        "descriptionEn": { "type": "string", "maxLength": 160 },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["code", "discountPct", "minSubtotalBdt", "active"]
@@ -225,6 +255,9 @@
         "shelfLife": { "type": "string", "maxLength": 300 },
         "storageInstructions": { "type": "string", "maxLength": 800 },
         "approvedClaims": { "type": "string", "maxLength": 1200 },
+        "blockedClaims": { "type": "string", "maxLength": 800 },
+        "approvedClaimsMeta": { "type": "array" },
+        "claimAuditHistory": { "type": "array" },
         "currentOffers": { "type": "string", "maxLength": 800 },
         "district": { "type": "string", "maxLength": 80 },
         "city": { "type": "string", "maxLength": 80 },
@@ -243,7 +276,10 @@
         "customInstructions": { "type": "string", "maxLength": 4000 },
         "responseTone": { "type": "string", "enum": ["warm", "concise", "formal"] },
         "responseLength": { "type": "string", "enum": ["short", "balanced", "detailed"] },
-        "languageBehavior": { "type": "string", "enum": ["auto", "prefer_bn", "prefer_en"] },
+        "languageBehavior": { "type": "string", "enum": ["auto", "prefer_bn", "prefer_en", "always_bn", "mirror", "customer_choice"] },
+        "synonyms": { "type": "object" },
+        "primaryModel": { "type": "string", "maxLength": 60 },
+        "fallbackModel": { "type": "string", "maxLength": 60 },
         "fallbackMessageBn": { "type": "string", "maxLength": 400 },
         "fallbackMessageEn": { "type": "string", "maxLength": 400 },
         "welcomeMessageBn": { "type": "string", "maxLength": 500 },
@@ -309,6 +345,13 @@
         "chunkCount": { "type": "number" },
         "status": { "type": "string", "enum": ["draft", "published"] },
         "syncStatus": { "type": "string", "maxLength": 120 },
+        "version": { "type": "number" },
+        "owner": { "type": "string", "maxLength": 120 },
+        "language": { "type": "string", "enum": ["bn", "en", "both"] },
+        "effectiveDate": { "type": "string", "maxLength": 32 },
+        "reviewDate": { "type": "string", "maxLength": 32 },
+        "contentHash": { "type": "string", "maxLength": 64 },
+        "accessScope": { "type": "string", "enum": ["public", "internal"] },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["title", "category", "sourceType", "fileName", "content", "chunkCount", "status", "syncStatus", "updatedAt"]
@@ -332,6 +375,21 @@
         "estimatedCostUsd": { "type": "number" },
         "errorCode": { "type": "string", "maxLength": 80 },
         "isTestPlayground": { "type": "boolean" },
+        "path": { "type": "string", "enum": ["gemini", "fallback"] },
+        "model": { "type": "string", "maxLength": 80 },
+        "isError": { "type": "boolean" },
+        "finishReason": { "type": "string", "maxLength": 60 },
+        "guardCategory": { "type": "string", "maxLength": 60 },
+        "retryCount": { "type": "number" },
+        "toolCallCount": { "type": "number" },
+        "factsVersion": { "type": "string", "maxLength": 40 },
+        "ragMs": { "type": "number" },
+        "modelMs": { "type": "number" },
+        "toolMs": { "type": "number" },
+        "ragSources": { "type": "array" },
+        "confidence": { "type": "number" },
+        "feedback": { "type": "string", "enum": ["", "up", "down"] },
+        "feedbackReason": { "type": "string", "maxLength": 60 },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": [
@@ -398,6 +456,136 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["count", "windowStartMs", "updatedAt"]
+    },
+    "ChatbotCostLedger": {
+      "title": "ChatbotCostLedger",
+      "description": "Persistent daily token and estimated USD cost ledger for daily cost-cap circuit breaking.",
+      "type": "object",
+      "properties": {
+        "dateKey": { "type": "string", "pattern": "^20[0-9]{2}-[0-9]{2}-[0-9]{2}$", "maxLength": 10 },
+        "totalUsd": { "type": "number" },
+        "requestCount": { "type": "number" },
+        "promptTokens": { "type": "number" },
+        "outputTokens": { "type": "number" },
+        "capHit": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["dateKey", "totalUsd", "requestCount", "promptTokens", "outputTokens", "capHit", "updatedAt"]
+    },
+    "KnowledgeChunk": {
+      "title": "KnowledgeChunk",
+      "description": "Indexed overlapping RAG chunk derived from ChatbotKbDoc with optional semantic embedding.",
+      "type": "object",
+      "properties": {
+        "docId": { "type": "string", "minLength": 2, "maxLength": 128 },
+        "title": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "category": { "type": "string", "maxLength": 60 },
+        "chunkIndex": { "type": "number" },
+        "sectionHeading": { "type": "string", "maxLength": 80 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "tokenEstimate": { "type": "number" },
+        "contentHash": { "type": "string", "maxLength": 64 },
+        "language": { "type": "string", "enum": ["bn", "en", "both"] },
+        "status": { "type": "string", "enum": ["draft", "published"] },
+        "accessScope": { "type": "string", "enum": ["public", "internal"] },
+        "embedding": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["docId", "title", "category", "chunkIndex", "sectionHeading", "text", "tokenEstimate", "contentHash", "language", "status", "accessScope", "updatedAt"]
+    },
+    "ChatSession": {
+      "title": "ChatSession",
+      "description": "Server-persisted chat session language lock, script preference, and active order draft link.",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "language": { "type": "string", "enum": ["bn", "en"] },
+        "lockedLang": { "type": "string", "enum": ["", "bn", "en"] },
+        "scriptPreference": { "type": "string", "enum": ["bn_script", "banglish_roman", "en"] },
+        "consent": { "type": "boolean" },
+        "currentIntent": { "type": "string", "maxLength": 60 },
+        "orderDraftId": { "type": "string", "maxLength": 96 },
+        "turnCount": { "type": "number" },
+        "lastTurnAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sessionId", "language", "lockedLang", "scriptPreference", "consent", "currentIntent", "orderDraftId", "turnCount", "lastTurnAt"]
+    },
+    "OrderDraft": {
+      "title": "OrderDraft",
+      "description": "Server-side TTL-bounded guided order state machine tracking slots and quote version.",
+      "type": "object",
+      "properties": {
+        "draftId": { "type": "string", "minLength": 4, "maxLength": 96 },
+        "sessionId": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "weight": { "type": "string", "enum": ["", "250g", "500g", "1kg"] },
+        "qty": { "type": "number" },
+        "qty250g": { "type": "number" },
+        "qty500g": { "type": "number" },
+        "qty1kg": { "type": "number" },
+        "customerName": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 15 },
+        "district": { "type": "string", "maxLength": 80 },
+        "area": { "type": "string", "maxLength": 100 },
+        "address": { "type": "string", "maxLength": 300 },
+        "addressQualityNote": { "type": "string", "maxLength": 240 },
+        "paymentMethod": { "type": "string", "enum": ["", "cod", "bkash", "nagad"] },
+        "txnId": { "type": "string", "maxLength": 64 },
+        "couponCode": { "type": "string", "maxLength": 32 },
+        "note": { "type": "string", "maxLength": 240 },
+        "state": { "type": "string", "enum": ["collecting_details", "quote_ready", "awaiting_confirmation", "confirmed", "expired", "cancelled"] },
+        "priceQuoteVersion": { "type": "number" },
+        "validationErrors": { "type": "array" },
+        "expiresAt": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["draftId", "sessionId", "state", "priceQuoteVersion", "expiresAt", "updatedAt"]
+    },
+    "ChatbotFeedback": {
+      "title": "ChatbotFeedback",
+      "description": "Customer CSAT thumbs-up/down and negative feedback reason for continuous improvement.",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "logId": { "type": "string", "maxLength": 128 },
+        "rating": { "type": "string", "enum": ["up", "down"] },
+        "reason": { "type": "string", "enum": ["", "wrong_price", "unclear", "missing_info", "wrong_language", "other"] },
+        "userMessage": { "type": "string", "maxLength": 1000 },
+        "assistantReply": { "type": "string", "maxLength": 2500 },
+        "lang": { "type": "string", "enum": ["bn", "en"] },
+        "intent": { "type": "string", "maxLength": 60 },
+        "resolved": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sessionId", "rating", "userMessage", "assistantReply", "lang", "intent", "resolved", "createdAt"]
+    },
+    "OrderFingerprint": {
+      "title": "OrderFingerprint",
+      "description": "Zero-PII SHA-256 fingerprint hash detecting duplicate orders within 2 hours.",
+      "type": "object",
+      "properties": {
+        "orderNumber": { "type": "string", "pattern": "^DG-[0-9]{4,8}$", "maxLength": 16 },
+        "createdAtMs": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderNumber", "createdAtMs", "updatedAt"]
+    },
+    "OrderAuditLog": {
+      "title": "OrderAuditLog",
+      "description": "Immutable append-only order lifecycle audit trail (create, edit_address, cancel, review).",
+      "type": "object",
+      "properties": {
+        "orderNumber": { "type": "string", "pattern": "^DG-[0-9]{4,8}$", "maxLength": 16 },
+        "action": { "type": "string", "enum": ["created", "address_updated", "cancelled", "review_approved", "review_rejected", "status_updated", "cod_verification"] },
+        "actorType": { "type": "string", "enum": ["customer", "admin", "system"] },
+        "summary": { "type": "string", "minLength": 3, "maxLength": 300 },
+        "previousStatus": { "type": "string", "maxLength": 40 },
+        "nextStatus": { "type": "string", "maxLength": 40 },
+        "previousTotalBdt": { "type": "number" },
+        "nextTotalBdt": { "type": "number" },
+        "metadata": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderNumber", "action", "actorType", "summary", "createdAt"]
     }
   },
   "firestore": {
@@ -447,7 +635,7 @@
     },
     "/chatbot_kb_docs/{docId}": {
       "schema": { "$ref": "#/entities/ChatbotKbDoc" },
-      "description": "Knowledge base text entries and uploaded document extracts; public reads published docs only."
+      "description": "Knowledge base text entries and uploaded document extracts; public reads published public-scope docs only."
     },
     "/chatbot_logs/{logId}": {
       "schema": { "$ref": "#/entities/ChatbotLog" },
@@ -468,6 +656,34 @@
     "/chatbot_rate_buckets/{bucketId}": {
       "schema": { "$ref": "#/entities/ChatbotRateBucket" },
       "description": "Hashed rate-limit counters shared across serverless instances."
+    },
+    "/chatbot_cost_ledger/{dateKey}": {
+      "schema": { "$ref": "#/entities/ChatbotCostLedger" },
+      "description": "Persistent daily Gemini API usage & estimated USD cost ledger for circuit breaking."
+    },
+    "/knowledge_chunks/{chunkId}": {
+      "schema": { "$ref": "#/entities/KnowledgeChunk" },
+      "description": "Indexed overlapping KB chunks; public reads only published + public accessScope chunks."
+    },
+    "/chat_sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/ChatSession" },
+      "description": "Server-persisted chat session state (lockedLang, scriptPreference, turnCount) readable by exact sessionId only."
+    },
+    "/order_drafts/{draftId}": {
+      "schema": { "$ref": "#/entities/OrderDraft" },
+      "description": "Server-persisted TTL-bounded order draft slots & priceQuoteVersion readable by exact draftId only."
+    },
+    "/chatbot_feedback/{feedbackId}": {
+      "schema": { "$ref": "#/entities/ChatbotFeedback" },
+      "description": "Customer CSAT feedback records (thumbs up/down + reason) readable and triaged by Admin."
+    },
+    "/order_fingerprints/{fingerprintId}": {
+      "schema": { "$ref": "#/entities/OrderFingerprint" },
+      "description": "Zero-PII duplicate order fingerprint hashes keyed by SHA-256."
+    },
+    "/order_audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/OrderAuditLog" },
+      "description": "Immutable append-only audit log entries linked to orders readable by Admin."
     }
   }
 }

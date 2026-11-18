@@ -285,12 +285,11 @@ export const FAQ_ITEMS = [
   },
 ];
 
-export const BANGLADESH_DISTRICTS = [
+export const ALL_64_BANGLADESH_DISTRICTS = [
   'Dhaka',
   'Chattogram',
   'Gazipur',
   'Narayanganj',
-  'Savar',
   'Sylhet',
   'Rajshahi',
   'Khulna',
@@ -311,7 +310,130 @@ export const BANGLADESH_DISTRICTS = [
   'Feni',
   'Kushtia',
   'Brahmanbaria',
-];
+  'Bagerhat',
+  'Bandarban',
+  'Barguna',
+  'Bhola',
+  'Chandpur',
+  'Chapainawabganj',
+  'Chuadanga',
+  'Gaibandha',
+  'Gopalganj',
+  'Habiganj',
+  'Jamalpur',
+  'Jhalokati',
+  'Jhenaidah',
+  'Joypurhat',
+  'Khagrachhari',
+  'Kishoreganj',
+  'Kurigram',
+  'Lakshmipur',
+  'Lalmonirhat',
+  'Madaripur',
+  'Magura',
+  'Manikganj',
+  'Meherpur',
+  'Moulvibazar',
+  'Munshiganj',
+  'Naogaon',
+  'Narail',
+  'Natore',
+  'Netrokona',
+  'Nilphamari',
+  'Panchagarh',
+  'Patuakhali',
+  'Pirojpur',
+  'Rajbari',
+  'Rangamati',
+  'Satkhira',
+  'Shariatpur',
+  'Sherpur',
+  'Sunamganj',
+  'Thakurgaon',
+] as const;
+
+export const BANGLADESH_DISTRICTS: string[] = [...ALL_64_BANGLADESH_DISTRICTS];
+
+const CLIENT_SUBURBAN_DISTRICTS = new Set([
+  'Gazipur',
+  'Narayanganj',
+  'Manikganj',
+  'Munshiganj',
+  'Narsingdi',
+]);
+
+const CLIENT_REMOTE_DISTRICTS = new Set([
+  'Bandarban',
+  'Rangamati',
+  'Khagrachhari',
+  'Cox’s Bazar',
+  'Bhola',
+]);
+
+const CLIENT_SUBURBAN_AREA_RX =
+  /(savar|সাভার|ashulia|আশুলিয়া|আশুলিয়া|keraniganj|কেরানীগঞ্জ|tongi|টঙ্গী|gazipur|গাজীপুর|narayanganj|নারায়ণগঞ্জ|নারায়ণগঞ্জ|dhamrai|ধামরাই|dohar|দোহার|nawabganj|নবাবগঞ্জ|fatullah|ফতুল্লা|demra|ডেমরা)/i;
+
+export function clientResolveZoneFromDistrictAndArea(
+  district: string,
+  area = '',
+  address = ''
+): 'dhaka' | 'suburban' | 'nationwide' | 'remote' {
+  const dist = String(district || '').trim();
+  const combined = `${area} ${address}`.trim();
+  if (dist === 'Dhaka') {
+    return CLIENT_SUBURBAN_AREA_RX.test(combined) ? 'suburban' : 'dhaka';
+  }
+  if (CLIENT_SUBURBAN_DISTRICTS.has(dist)) {
+    return 'suburban';
+  }
+  if (CLIENT_REMOTE_DISTRICTS.has(dist)) {
+    return 'remote';
+  }
+  return 'nationwide';
+}
+
+export function clientAssessAddressCompleteness(
+  address: string,
+  area = '',
+  district = ''
+): { complete: boolean; reason?: 'too_short' | 'placeholder_only' | 'missing_detail' } {
+  const clean = String(address || '').trim();
+  if (clean.length < 6) return { complete: false, reason: 'too_short' };
+  const lower = clean.toLowerCase();
+  const areaLower = area.trim().toLowerCase();
+  const distLower = district.trim().toLowerCase();
+  const singleGeneric = new Set([
+    'dhaka',
+    'mirpur',
+    'uttara',
+    'dhanmondi',
+    'gulshan',
+    'banani',
+    'savar',
+    'chattogram',
+    'chittagong',
+    'sylhet',
+    'rajshahi',
+    'khulna',
+    'test',
+    'na',
+    'n/a',
+    areaLower,
+    distLower,
+  ]);
+  if (singleGeneric.has(lower)) {
+    return { complete: false, reason: 'placeholder_only' };
+  }
+  const hasDetailKeyword =
+    /(\d|house|h#|road|rd|r#|flat|floor|apt|sector|block|lane|avenue|holding|village|gram|bazar|para|বাড়ি|বাড়ি|রোড|সড়ক|সড়ক|ফ্ল্যাট|সেক্টর|ব্লক|গ্রাম|বাজার|হোল্ডিং)/i.test(
+      clean
+    );
+  const tokens = clean.split(/[\s,/#-]+/).filter((t) => t.length >= 2);
+  if (!hasDetailKeyword && tokens.length < 2) {
+    return { complete: false, reason: 'missing_detail' };
+  }
+  return { complete: true };
+}
 
 export function formatBdt(amount: number): string {
   return `৳ ${Math.round(amount).toLocaleString('en-US')}`;

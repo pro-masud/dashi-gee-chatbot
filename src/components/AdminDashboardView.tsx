@@ -15,6 +15,8 @@ import {
   BatchRecord,
   CouponRecord,
   DEFAULT_ACTIVE_BATCH,
+  DEFAULT_STORE_SETTINGS,
+  OrderAuditLogRecord,
   OrderRecord,
   OrderStatus,
   PaymentStatus,
@@ -73,8 +75,11 @@ export function AdminDashboardView({
   } | null>(null);
 
   const [orderSearch, setOrderSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | OrderStatus>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | OrderStatus | 'manual_review'>('all');
   const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
+  const [auditLogs, setAuditLogs] = useState<OrderAuditLogRecord[]>([]);
+  const [loadingAuditLogs, setLoadingAuditLogs] = useState(false);
+  const [reviewActionLoading, setReviewActionLoading] = useState(false);
 
   // Editable Store Config Form
   const [draftSettings, setDraftSettings] = useState<StoreSettingsDoc>(settings);
@@ -88,6 +93,11 @@ export function AdminDashboardView({
     discountPct: 10,
     minSubtotalBdt: 1000,
     active: true,
+    expiresAt: '',
+    maxUses: 0,
+    usedCount: 0,
+    stackableWithAdvance: false,
+    descriptionEn: '',
   });
 
   useEffect(() => {
@@ -194,6 +204,96 @@ export function AdminDashboardView({
     }
   };
 
+  const loadOrderAuditLogs = async (orderNumber: string) => {
+    if (!user) return;
+    setLoadingAuditLogs(true);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch(
+        `/api/orders/manage?action=audit_logs&orderNumber=${encodeURIComponent(orderNumber)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+          },
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setAuditLogs(Array.isArray(data.logs) ? data.logs : []);
+      } else {
+        setAuditLogs([]);
+      }
+    } catch {
+      setAuditLogs([]);
+    } finally {
+      setLoadingAuditLogs(false);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedOrder && user) {
+      loadOrderAuditLogs(selectedOrder.orderNumber);
+    } else {
+      setAuditLogs([]);
+    }
+  }, [selectedOrder?.orderNumber]);
+
+  const handleAdminRiskDecision = async (
+    order: OrderRecord,
+    action: 'admin_review_approve' | 'admin_review_reject'
+  ) => {
+    if (!user || reviewActionLoading) return;
+    setReviewActionLoading(true);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/orders/manage', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action,
+          orderNumber: order.orderNumber,
+          phone: order.phone,
+          reason:
+            action === 'admin_review_approve'
+              ? 'Admin approved manual risk review.'
+              : 'Admin rejected flagged order during manual review.',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        const nextStatus: OrderStatus =
+          action === 'admin_review_approve'
+            ? order.status === 'pending'
+              ? 'confirmed'
+              : order.status
+            : 'cancelled';
+        const nextReviewStatus =
+          action === 'admin_review_approve' ? 'approved' : 'rejected';
+        setOrders((prev) =>
+          prev.map((o) =>
+            o.orderNumber === order.orderNumber
+              ? { ...o, status: nextStatus, reviewStatus: nextReviewStatus }
+              : o
+          )
+        );
+        if (selectedOrder?.orderNumber === order.orderNumber) {
+          setSelectedOrder({
+            ...order,
+            status: nextStatus,
+            reviewStatus: nextReviewStatus,
+          });
+        }
+        await loadOrderAuditLogs(order.orderNumber);
+      }
+    } finally {
+      setReviewActionLoading(false);
+    }
+  };
+
   const handleSaveBatch = async (e: FormEvent) => {
     e.preventDefault();
     await saveBatchRecord(batchDraft);
@@ -209,7 +309,11 @@ export function AdminDashboardView({
 
   const filteredOrders = useMemo(() => {
     return orders.filter((o) => {
-      if (statusFilter !== 'all' && o.status !== statusFilter) return false;
+      if (statusFilter === 'manual_review') {
+        if (o.reviewStatus !== 'manual_review') return false;
+      } else if (statusFilter !== 'all' && o.status !== statusFilter) {
+        return false;
+      }
       if (orderSearch.trim()) {
         const q = orderSearch.trim().toLowerCase();
         return (
@@ -229,7 +333,8 @@ export function AdminDashboardView({
     const pending = orders.filter((o) => o.status === 'pending').length;
     const confirmed = orders.filter((o) => o.status === 'confirmed').length;
     const delivered = orders.filter((o) => o.status === 'delivered').length;
-    return { total: orders.length, pending, confirmed, delivered, totalSales };
+    const manualReview = orders.filter((o) => o.reviewStatus === 'manual_review').length;
+    return { total: orders.length, pending, confirmed, delivered, manualReview, totalSales };
   }, [orders]);
 
   if (!authReady) {
@@ -472,10 +577,15 @@ export function AdminDashboardView({
             />
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as 'all' | OrderStatus)}
+              onChange={(e) =>
+                setStatusFilter(e.target.value as 'all' | OrderStatus | 'manual_review')
+              }
               className="min-h-[42px] w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base sm:w-auto sm:text-sm"
             >
               <option value="all">All Statuses</option>
+              <option value="manual_review">
+                Manual Risk Review ({metrics.manualReview})
+              </option>
               <option value="pending">Pending</option>
               <option value="confirmed">Confirmed</option>
               <option value="processing">Processing</option>
@@ -497,10 +607,22 @@ export function AdminDashboardView({
                       : 'border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] hover:bg-[#FAF7F2]'
                   }`}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-sm font-semibold">
-                      {order.orderNumber}
-                    </span>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-sm font-semibold">
+                        {order.orderNumber}
+                      </span>
+                      {order.reviewStatus === 'manual_review' && (
+                        <span className="rounded bg-amber-100 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-amber-900">
+                          Review · Risk {order.riskScore ?? 0}
+                        </span>
+                      )}
+                      {order.duplicateWarning && (
+                        <span className="rounded bg-orange-100 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-orange-900">
+                          Dup Check
+                        </span>
+                      )}
+                    </div>
                     <span className="font-mono text-sm font-semibold tabular-nums text-[#8A5A17]">
                       {formatBdt(order.totalBdt)}
                     </span>
@@ -638,6 +760,103 @@ export function AdminDashboardView({
                       <option value="failed">Failed</option>
                     </select>
                   </div>
+
+                  {/* Risk Signals & Manual Review Queue Controls */}
+                  <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] p-3 text-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-[#1E1710]">
+                        Risk &amp; Review ({selectedOrder.reviewStatus || 'auto_approved'})
+                      </span>
+                      <span className="font-mono text-[#8A5A17]">
+                        Score: {selectedOrder.riskScore ?? 0}/100
+                      </span>
+                    </div>
+                    {selectedOrder.riskSignals && selectedOrder.riskSignals.length > 0 && (
+                      <p className="font-mono text-[11px] text-[#635647]">
+                        Signals: {selectedOrder.riskSignals.join(', ')}
+                      </p>
+                    )}
+                    {selectedOrder.duplicateWarning && (
+                      <p className="text-[11px] text-amber-900">
+                        {selectedOrder.duplicateWarning}
+                      </p>
+                    )}
+                    {selectedOrder.paymentMethod === 'cod' && (
+                      <p className="text-[11px] text-[#635647]">
+                        COD OTP Provider:{' '}
+                        <span className="font-mono font-medium">
+                          {selectedOrder.codVerificationStatus === 'not_configured'
+                            ? 'Not configured (manual phone confirm)'
+                            : selectedOrder.codVerificationStatus || 'Not required'}
+                        </span>
+                      </p>
+                    )}
+                    {selectedOrder.reviewStatus === 'manual_review' && (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={reviewActionLoading}
+                          onClick={() =>
+                            handleAdminRiskDecision(selectedOrder, 'admin_review_approve')
+                          }
+                          className="rounded-lg bg-[#1E1710] px-3 py-1.5 text-[11px] font-medium text-[#FAF7F2] disabled:opacity-50"
+                        >
+                          Approve Review &amp; Confirm
+                        </button>
+                        <button
+                          type="button"
+                          disabled={reviewActionLoading}
+                          onClick={() =>
+                            handleAdminRiskDecision(selectedOrder, 'admin_review_reject')
+                          }
+                          className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-[11px] font-medium text-red-800 disabled:opacity-50"
+                        >
+                          Reject &amp; Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Order Audit Logs */}
+                  <div className="rounded-xl border border-[rgba(30,23,16,0.10)] bg-[#FAF7F2] p-3 text-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-[#1E1710]">
+                        Audit History ({auditLogs.length})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => loadOrderAuditLogs(selectedOrder.orderNumber)}
+                        className="text-[11px] font-medium text-[#8A5A17] hover:underline"
+                      >
+                        {loadingAuditLogs ? 'Loading...' : 'Refresh'}
+                      </button>
+                    </div>
+                    {auditLogs.length === 0 ? (
+                      <p className="text-[11px] text-[#635647]">
+                        No audit events recorded yet.
+                      </p>
+                    ) : (
+                      <ul className="space-y-1.5 max-h-44 overflow-y-auto">
+                        {auditLogs.map((log) => (
+                          <li
+                            key={log.id}
+                            className="rounded border border-[rgba(30,23,16,0.08)] bg-white px-2.5 py-1.5 text-[11px]"
+                          >
+                            <div className="flex justify-between font-mono text-[10px] text-[#8A5A17]">
+                              <span>
+                                {log.action} · {log.actorType}
+                              </span>
+                              <span>
+                                {log.previousStatus ? `${log.previousStatus}→` : ''}
+                                {log.nextStatus}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 text-[#1E1710]">{log.summary}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -701,7 +920,7 @@ export function AdminDashboardView({
             </h2>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs text-[#635647]">Inside Dhaka (৳)</label>
+                <label className="block text-xs text-[#635647]">Dhaka City (৳)</label>
                 <input
                   type="number"
                   min={0}
@@ -716,7 +935,26 @@ export function AdminDashboardView({
                 />
               </div>
               <div>
-                <label className="block text-xs text-[#635647]">Outside Dhaka (৳)</label>
+                <label className="block text-xs text-[#635647]">Dhaka Suburban (৳)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={
+                    draftSettings.dhakaSuburbanFee ??
+                    DEFAULT_STORE_SETTINGS.dhakaSuburbanFee ??
+                    90
+                  }
+                  onChange={(e) =>
+                    setDraftSettings({
+                      ...draftSettings,
+                      dhakaSuburbanFee: Number(e.target.value),
+                    })
+                  }
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[#635647]">Nationwide (৳)</label>
                 <input
                   type="number"
                   min={0}
@@ -725,6 +963,108 @@ export function AdminDashboardView({
                     setDraftSettings({
                       ...draftSettings,
                       outsideDhakaFee: Number(e.target.value),
+                    })
+                  }
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[#635647]">Remote Districts (৳)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={
+                    draftSettings.remoteDistrictFee ??
+                    DEFAULT_STORE_SETTINGS.remoteDistrictFee ??
+                    170
+                  }
+                  onChange={(e) =>
+                    setDraftSettings({
+                      ...draftSettings,
+                      remoteDistrictFee: Number(e.target.value),
+                    })
+                  }
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-[#635647]">Suburban ETA</label>
+                <input
+                  type="text"
+                  value={
+                    draftSettings.estimatedSuburbanDays ??
+                    DEFAULT_STORE_SETTINGS.estimatedSuburbanDays ??
+                    '2-3 days'
+                  }
+                  onChange={(e) =>
+                    setDraftSettings({
+                      ...draftSettings,
+                      estimatedSuburbanDays: e.target.value,
+                    })
+                  }
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 text-base sm:text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[#635647]">Remote ETA</label>
+                <input
+                  type="text"
+                  value={
+                    draftSettings.estimatedRemoteDays ??
+                    DEFAULT_STORE_SETTINGS.estimatedRemoteDays ??
+                    '4-6 days'
+                  }
+                  onChange={(e) =>
+                    setDraftSettings({
+                      ...draftSettings,
+                      estimatedRemoteDays: e.target.value,
+                    })
+                  }
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 text-base sm:text-xs"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-[#635647]">
+                  Cutoff Hour (BST 0-23)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={
+                    draftSettings.dispatchCutoffHourBst ??
+                    DEFAULT_STORE_SETTINGS.dispatchCutoffHourBst ??
+                    14
+                  }
+                  onChange={(e) =>
+                    setDraftSettings({
+                      ...draftSettings,
+                      dispatchCutoffHourBst: Number(e.target.value),
+                    })
+                  }
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[#635647]">
+                  High-Value COD Flag (৳)
+                </label>
+                <input
+                  type="number"
+                  min={500}
+                  value={
+                    draftSettings.codHighValueThresholdBdt ??
+                    DEFAULT_STORE_SETTINGS.codHighValueThresholdBdt ??
+                    5000
+                  }
+                  onChange={(e) =>
+                    setDraftSettings({
+                      ...draftSettings,
+                      codHighValueThresholdBdt: Number(e.target.value),
                     })
                   }
                   className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
@@ -788,6 +1128,21 @@ export function AdminDashboardView({
                 className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
               />
             </div>
+            <label className="flex items-center gap-2 text-xs text-[#635647]">
+              <input
+                type="checkbox"
+                checked={Boolean(draftSettings.codConfirmEnabled)}
+                onChange={(e) =>
+                  setDraftSettings({
+                    ...draftSettings,
+                    codConfirmEnabled: e.target.checked,
+                  })
+                }
+              />
+              <span>
+                Enable COD Phone Confirm Policy (SMS Provider: Not configured)
+              </span>
+            </label>
           </div>
 
           <div className="space-y-4">
@@ -1015,6 +1370,45 @@ export function AdminDashboardView({
                   className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-3 py-2 font-mono text-base sm:text-xs"
                 />
               </div>
+              <div>
+                <label className="text-[#635647]">Expires At (ISO, optional)</label>
+                <input
+                  type="text"
+                  value={couponDraft.expiresAt || ''}
+                  onChange={(e) =>
+                    setCouponDraft({ ...couponDraft, expiresAt: e.target.value })
+                  }
+                  placeholder="2027-12-31T23:59:59Z"
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-3 py-2 font-mono text-base sm:text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-[#635647]">Max Uses (0 = unlimited)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={couponDraft.maxUses ?? 0}
+                  onChange={(e) =>
+                    setCouponDraft({ ...couponDraft, maxUses: Number(e.target.value) })
+                  }
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-3 py-2 font-mono text-base sm:text-xs"
+                />
+              </div>
+              <div className="flex items-end pb-1">
+                <label className="flex items-center gap-2 text-xs text-[#635647]">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(couponDraft.stackableWithAdvance)}
+                    onChange={(e) =>
+                      setCouponDraft({
+                        ...couponDraft,
+                        stackableWithAdvance: e.target.checked,
+                      })
+                    }
+                  />
+                  <span>Stack with Advance MFS %</span>
+                </label>
+              </div>
             </div>
             <button
               type="submit"
@@ -1027,11 +1421,13 @@ export function AdminDashboardView({
               {coupons.map((c) => (
                 <div
                   key={c.code}
-                  className="flex items-center justify-between rounded-lg bg-[#FAF7F2] px-3 py-2 text-xs"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[#FAF7F2] px-3 py-2 text-xs"
                 >
                   <span className="font-mono font-semibold">{c.code}</span>
                   <span>
                     {c.discountPct}% off · Min {formatBdt(c.minSubtotalBdt)}
+                    {c.maxUses ? ` · ${c.usedCount || 0}/${c.maxUses} used` : ''}
+                    {c.expiresAt ? ` · Exp ${c.expiresAt.slice(0, 10)}` : ''}
                   </span>
                 </div>
               ))}

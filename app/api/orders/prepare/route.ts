@@ -1,10 +1,22 @@
 import { NextResponse } from 'next/server';
+import type { PaymentMethod, WeightKey } from '../../../../src/lib/storeTypes';
 import {
-  DEFAULT_WEIGHT_PRICES,
-  phoneRateWindow,
-  recentSubmissions,
-} from '../../../../src/lib/serverState';
-import { normalizeWeight } from '../../../../src/lib/gemini/tools';
+  checkRecentOrderFingerprint,
+  fetchServerCouponByCode,
+  fetchServerStoreSettings,
+} from '../../../../src/lib/chatbot/firestoreRest';
+import {
+  assessAddressCompleteness,
+  assessOrderRiskSignals,
+  buildDuplicateFingerprintHash,
+  computeOrderPricingInPoisha,
+  getDispatchWindowInfo,
+  isValidBangladeshPhone,
+  normalizeBangladeshPhone,
+  resolveConfiguredDistrictAndZone,
+} from '../../../../src/lib/chatbot/orderToken';
+import { phoneRateWindow } from '../../../../src/lib/serverState';
+import { normalizeWeight } from '../../../../src/lib/chatbot/domain-guard';
 
 export async function POST(request: Request) {
   if (request.headers.get('x-requested-with') !== 'DeshiGeeStorefront') {
@@ -16,15 +28,16 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const customerName = String(body.customerName || '').trim();
-  const phone = String(body.phone || '').replace(/[\s-]/g, '');
-  const district = String(body.district || '').trim();
+  const phone = normalizeBangladeshPhone(String(body.phone || ''));
+  const districtInput = String(body.district || '').trim();
   const area = String(body.area || '').trim();
   const address = String(body.address || '').trim();
-  const deliveryZone = body.deliveryZone === 'dhaka' ? 'dhaka' : 'nationwide';
-  const paymentMethod = String(body.paymentMethod || '');
+  const zoneHint = String(body.deliveryZone || '').trim();
+  const paymentMethod = String(body.paymentMethod || '') as PaymentMethod;
   const txnId = String(body.txnId || '').trim();
+  const couponCode = String(body.couponCode || '').trim().toUpperCase();
 
-  const fallbackWeight = normalizeWeight(body.weight) || '';
+  const fallbackWeight = normalizeWeight(String(body.weight || '')) as WeightKey | null;
   const fallbackQty = Number(body.qty || 0);
   const hasSplitQtys =
     body.qty250g !== undefined ||
@@ -54,18 +67,39 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  if (!/^01[3-9]\d{8}$/.test(phone)) {
+  if (!isValidBangladeshPhone(phone)) {
     return NextResponse.json(
       { error: 'Invalid Bangladesh mobile number (01XXXXXXXXX).' },
       { status: 400 }
     );
   }
-  if (district.length < 2 || area.length < 2 || address.length < 5) {
+
+  const zoneResolved = resolveConfiguredDistrictAndZone(
+    districtInput,
+    zoneHint,
+    `${area} ${address}`
+  );
+  if (!zoneResolved.valid || area.length < 2) {
     return NextResponse.json(
-      { error: 'Complete district, area, and delivery address are required.' },
+      {
+        error:
+          'Please select a valid Bangladesh district and enter your delivery area.',
+      },
       { status: 400 }
     );
   }
+
+  const addressCheck = assessAddressCompleteness(address, area, zoneResolved.canonicalDistrict);
+  if (!addressCheck.complete) {
+    return NextResponse.json(
+      {
+        error: addressCheck.suggestionEn || 'Please enter a complete delivery address.',
+        code: addressCheck.reason || 'incomplete_address',
+      },
+      { status: 400 }
+    );
+  }
+
   if (
     !Number.isInteger(qty250g) ||
     qty250g < 0 ||
@@ -108,99 +142,103 @@ export async function POST(request: Request) {
     );
   }
 
-  const dedupKey = `${phone}:${qty250g}-${qty500g}-${qty1kg}:${paymentMethod}`;
-  const lastSub = recentSubmissions.get(dedupKey);
-  if (lastSub && now - lastSub < 45_000) {
+  // Fetch authoritative live settings, coupon, and duplicate fingerprint check from server
+  const [settings, coupon] = await Promise.all([
+    fetchServerStoreSettings(),
+    couponCode ? fetchServerCouponByCode(couponCode) : Promise.resolve(null),
+  ]);
+
+  const pricing = computeOrderPricingInPoisha({
+    settings,
+    qty250g,
+    qty500g,
+    qty1kg,
+    deliveryZone: zoneResolved.deliveryZone,
+    paymentMethod,
+    coupon,
+    maxTotalQty: 50,
+  });
+
+  if (!pricing.stockSufficient) {
     return NextResponse.json(
       {
-        error:
-          'Duplicate order detected within 45 seconds. Check your recent confirmation.',
+        error: `Insufficient stock for ${pricing.insufficientWeights.join(', ')}. Please adjust jar quantity.`,
+        outOfStock: true,
+        insufficientWeights: pricing.insufficientWeights,
       },
       { status: 409 }
     );
   }
 
+  if (couponCode && pricing.couponEvaluation && !pricing.couponEvaluation.valid) {
+    return NextResponse.json(
+      {
+        error: pricing.couponEvaluation.messageEn,
+        couponReason: pricing.couponEvaluation.reason,
+      },
+      { status: 400 }
+    );
+  }
+
+  const fingerprintHash = buildDuplicateFingerprintHash({
+    phone,
+    district: zoneResolved.canonicalDistrict,
+    address,
+    qty250g: pricing.qty250g,
+    qty500g: pricing.qty500g,
+    qty1kg: pricing.qty1kg,
+  });
+  const duplicateCheck = await checkRecentOrderFingerprint(fingerprintHash);
+
+  const recentHourHits = windowHits.length;
   windowHits.push(now);
   phoneRateWindow.set(phone, windowHits);
-  recentSubmissions.set(dedupKey, now);
 
-  const settings = body.storePrices || {};
-  const price250g =
-    Number(settings['250g']) > 0
-      ? Number(settings['250g'])
-      : DEFAULT_WEIGHT_PRICES['250g'];
-  const price500g =
-    Number(settings['500g']) > 0
-      ? Number(settings['500g'])
-      : DEFAULT_WEIGHT_PRICES['500g'];
-  const price1kg =
-    Number(settings['1kg']) > 0
-      ? Number(settings['1kg'])
-      : DEFAULT_WEIGHT_PRICES['1kg'];
+  const risk = assessOrderRiskSignals({
+    phone,
+    addressComplete: addressCheck.complete,
+    duplicateRecentCount: duplicateCheck.duplicateFound ? 1 : 0,
+    recentOrdersLastHour: recentHourHits,
+    paymentMethod,
+    totalBdt: pricing.totalBdt,
+    codHighValueThresholdBdt: settings.codHighValueThresholdBdt,
+  });
 
-  const primaryWeight = qty500g > 0 ? '500g' : qty1kg > 0 ? '1kg' : '250g';
-  const unitPriceBdt =
-    primaryWeight === '250g'
-      ? price250g
-      : primaryWeight === '500g'
-        ? price500g
-        : price1kg;
-
-  const summaryParts: string[] = [];
-  if (qty250g > 0) summaryParts.push(`250g × ${qty250g}`);
-  if (qty500g > 0) summaryParts.push(`500g × ${qty500g}`);
-  if (qty1kg > 0) summaryParts.push(`1kg × ${qty1kg}`);
-  const itemsSummary = summaryParts.join(', ').slice(0, 80);
-
-  const insideDhakaFee =
-    Number(settings.insideDhakaFee) >= 0 ? Number(settings.insideDhakaFee) : 80;
-  const outsideDhakaFee =
-    Number(settings.outsideDhakaFee) >= 0
-      ? Number(settings.outsideDhakaFee)
-      : 130;
-  const freeThreshold =
-    Number(settings.freeDeliveryThreshold) >= 0
-      ? Number(settings.freeDeliveryThreshold)
-      : 2500;
-  const advanceDiscountPct =
-    paymentMethod !== 'cod' && Number(settings.advanceDiscountPct) > 0
-      ? Math.min(25, Number(settings.advanceDiscountPct))
-      : 0;
-  const couponDiscountPct =
-    Number(body.couponDiscountPct) > 0
-      ? Math.min(40, Number(body.couponDiscountPct))
-      : 0;
-
-  const subtotalBdt =
-    qty250g * price250g + qty500g * price500g + qty1kg * price1kg;
-  const deliveryFeeBdt =
-    subtotalBdt >= freeThreshold
-      ? 0
-      : deliveryZone === 'dhaka'
-        ? insideDhakaFee
-        : outsideDhakaFee;
-
-  const combinedPct = Math.min(50, advanceDiscountPct + couponDiscountPct);
-  const discountBdt = Math.round((subtotalBdt * combinedPct) / 100);
-  const totalBdt = Math.max(1, subtotalBdt + deliveryFeeBdt - discountBdt);
-
-  const orderNumber = `DG-${Math.floor(1001 + Math.random() * 8990)}`;
+  const dispatchWindow = getDispatchWindowInfo(settings);
+  const orderNumber = `DG-${Math.floor(10000 + Math.random() * 89999)}`;
   const paymentStatus =
     paymentMethod === 'cod' ? 'cod_due' : 'pending_verification';
 
+  const duplicateWarning = duplicateCheck.duplicateFound
+    ? `Similar recent order (${duplicateCheck.recentOrderNumber}) detected within 2 hours. Team will double-check before shipping.`
+    : '';
+
   return NextResponse.json({
     orderNumber,
-    weight: primaryWeight,
-    qty: totalQty,
-    qty250g,
-    qty500g,
-    qty1kg,
-    itemsSummary,
-    unitPriceBdt,
-    subtotalBdt,
-    deliveryFeeBdt,
-    discountBdt,
-    totalBdt,
+    district: zoneResolved.canonicalDistrict,
+    deliveryZone: zoneResolved.deliveryZone,
+    weight: pricing.primaryWeight,
+    qty: pricing.totalQty,
+    qty250g: pricing.qty250g,
+    qty500g: pricing.qty500g,
+    qty1kg: pricing.qty1kg,
+    itemsSummary: pricing.itemsSummary,
+    variantBreakdown: pricing.variantBreakdown,
+    unitPriceBdt: pricing.unitPriceBdt,
+    subtotalBdt: pricing.subtotalBdt,
+    deliveryFeeBdt: pricing.deliveryFeeBdt,
+    discountBdt: pricing.discountBdt,
+    totalBdt: pricing.totalBdt,
+    estimatedDelivery: pricing.estimatedDelivery,
+    dispatchCutoffNote: dispatchWindow.noticeEn,
     paymentStatus,
+    duplicateWarning,
+    riskScore: risk.riskScore,
+    riskSignals: risk.riskSignals,
+    reviewStatus: risk.reviewStatus,
+    codVerificationStatus:
+      paymentMethod === 'cod' && settings.codConfirmEnabled
+        ? 'not_configured'
+        : 'not_required',
   });
 }

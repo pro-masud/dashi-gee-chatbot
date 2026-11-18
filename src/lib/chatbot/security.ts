@@ -56,6 +56,8 @@ export function checkAndTrackChatRateLimit(
 
 export function sanitizeUserText(input: string, maxLen = 900): string {
   return String(input || '')
+    .normalize('NFC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -64,13 +66,18 @@ export function sanitizeUserText(input: string, maxLen = 900): string {
 
 const BANGLISH_HINTS = [
   'dam koto',
+  'daam koto',
   'koto taka',
   'koto tk',
+  'koto tka',
   'kivabe',
   'kibhabe',
+  'kmne',
+  'kemne',
   'kothay',
   'kothai',
   'ache naki',
+  'ase naki',
   'hobe naki',
   'order korbo',
   'nibo',
@@ -106,14 +113,27 @@ const BANGLISH_HINTS = [
   'assalamu',
   'salam',
   'dhonnobad',
+  'pabnar',
+  'boyaam',
+  'boyam',
+  'kototuku',
+  'konta',
 ];
+
+export interface LanguageResolutionResult {
+  detectedInputLang: ChatbotLang;
+  replyLang: 'bn' | 'en';
+  explicitSwitchRequested: 'bn' | 'en' | null;
+  scriptPreference: 'bn_script' | 'banglish_roman' | 'en';
+}
 
 export function detectLanguageAndSignals(
   message: string,
   behavior: LanguageBehavior,
-  uiLang: 'en' | 'bn' = 'en'
-): { detectedInputLang: ChatbotLang; replyLang: 'bn' | 'en' } {
-  const clean = message.trim();
+  uiLang: 'en' | 'bn' = 'en',
+  sessionLockedLang?: 'bn' | 'en' | ''
+): LanguageResolutionResult {
+  const clean = message.trim().normalize('NFC');
   const hasBengaliScript = /[\u0980-\u09FF]/.test(clean);
   const lower = clean.toLowerCase();
 
@@ -121,45 +141,136 @@ export function detectLanguageAndSignals(
   if (hasBengaliScript) {
     detectedInputLang = 'bn';
   } else {
-    const banglishScore = BANGLISH_HINTS.reduce(
-      (sum, hint) => (lower.includes(hint) ? sum + 1 : sum),
-      0
-    );
-    const shortWordsBanglish = /\b(koto|dam|kivabe|kothay|taka|lagbe|ache|nibo|chai|hobe|korbo|apni|tumi|ami|ki)\b/i.test(
-      lower
-    );
+    const banglishScore = BANGLISH_HINTS.reduce((sum, hint) => {
+      const rx = new RegExp(`\\b${hint.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      return rx.test(lower) ? sum + 1 : sum;
+    }, 0);
+    const shortWordsBanglish =
+      /\b(koto|dam|daam|kivabe|kibhabe|kmne|kemne|kothay|kothai|taka|tka|lagbe|ache|ase|nibo|chai|hobe|korbo|apni|tumi|ami|ki|naki|pawa|jabe|pathaben|kinbo|konta|pabnar)\b/i.test(
+        lower
+      );
     if (banglishScore >= 1 || shortWordsBanglish) {
       detectedInputLang = 'banglish';
     }
   }
 
-  // Explicit user override phrasing
+  // Explicit user switch commands (persist across session via lockedLang)
   if (
-    /\b(in english|english please|speak english|reply in english|english e bolo)\b/i.test(lower)
+    /\b(in english|english please|speak english|reply in english|english e bolo|speak in english|switch to english)\b/i.test(
+      lower
+    )
   ) {
-    return { detectedInputLang, replyLang: 'en' };
+    return {
+      detectedInputLang,
+      replyLang: 'en',
+      explicitSwitchRequested: 'en',
+      scriptPreference: 'en',
+    };
   }
   if (
-    /(\b(bangla|bengali)\b|বাংলায়|বাংলাতে|banglay|bangla te)/i.test(lower)
+    /(\b(bangla|bengali)\s*(please|te|e|bolo|bolen)?\b|বাংলায়|বাংলাতে|বাংলায়\s*বলুন|banglay|bangla te|switch to bangla)/i.test(
+      lower
+    )
   ) {
-    return { detectedInputLang, replyLang: 'bn' };
+    return {
+      detectedInputLang,
+      replyLang: 'bn',
+      explicitSwitchRequested: 'bn',
+      scriptPreference: 'bn_script',
+    };
   }
 
-  if (behavior === 'prefer_bn') {
-    return { detectedInputLang, replyLang: detectedInputLang === 'en' && uiLang === 'en' ? 'bn' : 'bn' };
+  // Respect explicit session lock if customer switched mid-conversation
+  if (sessionLockedLang === 'en' || sessionLockedLang === 'bn') {
+    return {
+      detectedInputLang,
+      replyLang: sessionLockedLang,
+      explicitSwitchRequested: null,
+      scriptPreference: sessionLockedLang === 'bn' ? 'bn_script' : 'en',
+    };
   }
+
+  // Policy: prefer_bn / always_bn -> polite Bangla script by default
+  if (behavior === 'prefer_bn' || behavior === 'always_bn') {
+    return {
+      detectedInputLang,
+      replyLang: 'bn',
+      explicitSwitchRequested: null,
+      scriptPreference: 'bn_script',
+    };
+  }
+
+  // Policy: prefer_en
   if (behavior === 'prefer_en') {
-    return { detectedInputLang, replyLang: detectedInputLang === 'bn' ? 'bn' : 'en' };
+    const replyLang = detectedInputLang === 'bn' ? 'bn' : 'en';
+    return {
+      detectedInputLang,
+      replyLang,
+      explicitSwitchRequested: null,
+      scriptPreference: replyLang === 'bn' ? 'bn_script' : 'en',
+    };
   }
 
-  // Auto mode: Bangla or Banglish -> polite Bangla; English -> follow message (or uiLang if just greeting)
+  // Policy: customer_choice -> honor UI toggle / explicit language choice, unless customer clearly wrote Bengali script
+  if (behavior === 'customer_choice') {
+    const replyLang = detectedInputLang === 'bn' ? 'bn' : uiLang;
+    return {
+      detectedInputLang,
+      replyLang,
+      explicitSwitchRequested: null,
+      scriptPreference: replyLang === 'bn' ? 'bn_script' : 'en',
+    };
+  }
+
+  // Policy: mirror -> match customer script (Banglish input keeps polite Bangla default but flags Banglish mirror preference)
+  if (behavior === 'mirror') {
+    if (detectedInputLang === 'bn') {
+      return {
+        detectedInputLang,
+        replyLang: 'bn',
+        explicitSwitchRequested: null,
+        scriptPreference: 'bn_script',
+      };
+    }
+    if (detectedInputLang === 'banglish') {
+      return {
+        detectedInputLang,
+        replyLang: 'bn',
+        explicitSwitchRequested: null,
+        scriptPreference: 'banglish_roman',
+      };
+    }
+    return {
+      detectedInputLang,
+      replyLang: 'en',
+      explicitSwitchRequested: null,
+      scriptPreference: 'en',
+    };
+  }
+
+  // Default 'auto': Bangla or Banglish -> polite Bangla script; English -> English (or uiLang for pure greetings)
   if (detectedInputLang === 'bn' || detectedInputLang === 'banglish') {
-    return { detectedInputLang, replyLang: 'bn' };
+    return {
+      detectedInputLang,
+      replyLang: 'bn',
+      explicitSwitchRequested: null,
+      scriptPreference: 'bn_script',
+    };
   }
   if (/^(hi|hello|hey|assalamu alaikum|salam)\b/i.test(lower) && uiLang === 'bn') {
-    return { detectedInputLang, replyLang: 'bn' };
+    return {
+      detectedInputLang,
+      replyLang: 'bn',
+      explicitSwitchRequested: null,
+      scriptPreference: 'bn_script',
+    };
   }
-  return { detectedInputLang, replyLang: 'en' };
+  return {
+    detectedInputLang,
+    replyLang: 'en',
+    explicitSwitchRequested: null,
+    scriptPreference: 'en',
+  };
 }
 
 const INJECTION_PATTERNS = [
@@ -177,7 +288,7 @@ export function detectPromptInjection(text: string): boolean {
 
 const SECRET_PATTERNS = [
   /\b(pin|otp|cvv|cvc|password|passcode|atm\s*pin|bkash\s*pin|nagad\s*pin)\b/i,
-  /(পিন|ওটিপি|পাসওয়ার্ড|গোপন\s*নম্বর)/,
+  /(পিন|ওটিপি|পাসওয়ার্ড|পাসওয়ার্ড|গোপন\s*নম্বর)/,
   /\b\d{13,19}\b/, // Credit/debit card number range (BD mobile numbers are 11 digits)
 ];
 
@@ -234,7 +345,7 @@ export function getBusinessHoursStatus(cfg: ChatbotConfigDoc): {
   }
 }
 
-export function chunkKnowledgeText(content: string, maxChars = 900): string[] {
+export function chunkKnowledgeText(content: string, maxChars = 1200): string[] {
   const clean = content.replace(/\r\n/g, '\n').trim();
   if (!clean) return [];
   const paragraphs = clean.split(/\n{2,}/);
@@ -263,77 +374,184 @@ export function chunkKnowledgeText(content: string, maxChars = 900): string[] {
 }
 
 const BILINGUAL_SYNONYMS: [RegExp, string[]][] = [
-  [/(size|sizes|weight|weights|variant|variants|সাইজ|ওজন|পরিমাণ|গ্রাম|কেজি|kg|gm)/i, ['size', 'sizes', 'weight', 'variant', '250g', '500g', '1kg', 'সাইজ', 'ওজন', 'দাম', 'বয়াম', 'জার']],
-  [/(dam|price|cost|koto|দাম|মূল্য|কত)/i, ['price', 'cost', 'taka', 'দাম', '250g', '500g', '1kg']],
-  [/(delivery|shipping|dhaka|courier|ডেলিভারি|ঢাকা|পাঠান)/i, ['delivery', 'shipping', 'dhaka', 'ডেলিভারি']],
-  [/(order|buy|purchase|nibo|অর্ডার|কিনব|নিব)/i, ['order', 'checkout', 'cod', 'অর্ডার']],
+  [
+    /(size|sizes|weight|weights|variant|variants|সাইজ|ওজন|পরিমাণ|গ্রাম|কেজি|kg|gm|boyaam|boyam)/i,
+    ['size', 'sizes', 'weight', 'variant', '250g', '500g', '1kg', 'সাইজ', 'ওজন', 'দাম', 'বয়াম', 'জার'],
+  ],
+  [/(dam|daam|price|cost|koto|tka|tk|দাম|মূল্য|কত)/i, ['price', 'cost', 'taka', 'দাম', '250g', '500g', '1kg']],
+  [
+    /(delivery|shipping|dhaka|courier|pathaben|ডেলিভারি|ঢাকা|পাঠান|কুরিয়ার|কুরিয়ার)/i,
+    ['delivery', 'shipping', 'dhaka', 'ডেলিভারি', 'চার্জ'],
+  ],
+  [
+    /(order|buy|purchase|nibo|lagbe|অর্ডার|কিনব|নিব|কিনবো|নিবো)/i,
+    ['order', 'checkout', 'cod', 'অর্ডার'],
+  ],
   [/(track|status|ট্র্যাক|অবস্থা)/i, ['track', 'status', 'ট্র্যাক']],
-  [/(store|storage|shelf|expiry|ভালো|সংরক্ষণ|মেয়াদ)/i, ['storage', 'shelf', 'expire', 'সংরক্ষণ', 'মেয়াদ']],
-  [/(pure|ingredients|bilona|danadar|খাঁটি|উপাদান|বিলোনা|দানা)/i, ['pure', 'bilona', 'milkfat', 'ingredients', 'খাঁটি']],
+  [
+    /(store|storage|shelf|expiry|ভালো|সংরক্ষণ|মেয়াদ|মেয়াদ|fridge|freeze)/i,
+    ['storage', 'shelf', 'expire', 'সংরক্ষণ', 'মেয়াদ', 'refrigeration'],
+  ],
+  [
+    /(pure|purity|khanti|ingredients|bilona|danadar|makkhan|butter|doi|dahi|খাঁটি|আসল|উপাদান|বিলোনা|দানা|মাখন|দই)/i,
+    ['bilona', 'milkfat', 'ingredients', 'makkhan', 'মাখন', 'দই', 'বিলোনা', 'danadar', 'crystals'],
+  ],
   [/(bkash|nagad|payment|cod|পেমেন্ট|বিকাশ|নগদ)/i, ['bkash', 'nagad', 'payment', 'cod', 'বিকাশ', 'নগদ']],
-  [/(return|refund|replace|broken|ভাঙা|রিটার্ন|রিফান্ড)/i, ['return', 'refund', 'replace', 'রিটার্ন']],
-  [/(address|location|map|kothay|ঠিকানা|লোকেশন|কোথায়)/i, ['address', 'location', 'map', 'phone', 'ঠিকানা']],
+  [
+    /(return|refund|replace|broken|damaged|leak|রিটার্ন|রিফান্ড|ভাঙা|নষ্ট)/i,
+    ['return', 'refund', 'replace', 'রিটার্ন', 'রিপ্লেস'],
+  ],
+  [/(batch|qr|ব্যাচ|পাবনা|pabna|pabnar)/i, ['batch', 'pabna', 'ব্যাচ', 'পাবনা']],
+  [
+    /(address|location|map|kothay|kothai|ঠিকানা|লোকেশন|কোথায়|কোথায়)/i,
+    ['address', 'location', 'map', 'phone', 'ঠিকানা'],
+  ],
+  [
+    /(recommend|suggest|compare|family|trial|gift|কোনটা|ভালো হবে|সাজেস্ট)/i,
+    ['250g', '500g', '1kg', 'family', 'starter', 'trial'],
+  ],
 ];
 
-function expandQueryTokens(query: string): string[] {
-  const base = query
+export function normalizeBanglaAndBanglishToken(token: string): string {
+  let clean = token.normalize('NFC').toLowerCase().trim();
+  clean = clean.replace(/য়/g, 'য়').replace(/ড়/g, 'ড়').replace(/ঢ়/g, 'ঢ়');
+  const suffixes = [
+    'য়েরটা',
+    'িয়েরটা',
+    'গুলোর',
+    'গুলা',
+    'য়ের',
+    'িয়ের',
+    'দের',
+    'টার',
+    'টির',
+    'টায়',
+    'তে',
+    'য়ে',
+    'য়ে',
+    'কে',
+    'টা',
+    'টি',
+    'র',
+  ];
+  for (const sfx of suffixes) {
+    if (clean.length > sfx.length + 1 && clean.endsWith(sfx)) {
+      clean = clean.slice(0, -sfx.length);
+      break;
+    }
+  }
+  return clean;
+}
+
+export function expandQueryTokens(
+  query: string,
+  extraSynonyms?: Record<string, string[]>
+): string[] {
+  const normalizedQuery = query.normalize('NFC');
+  const rawTokens = normalizedQuery
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .split(/\s+/)
     .filter((w) => w.length >= 2);
-  const expanded = new Set(base);
+  const expanded = new Set<string>();
+  for (const raw of rawTokens) {
+    expanded.add(raw.replace(/য়/g, 'য়'));
+    const stem = normalizeBanglaAndBanglishToken(raw);
+    if (stem.length >= 2) {
+      expanded.add(stem);
+    }
+    if (extraSynonyms) {
+      for (const [key, list] of Object.entries(extraSynonyms)) {
+        const normKey = key.normalize('NFC').toLowerCase();
+        if (
+          raw === normKey ||
+          stem === normKey ||
+          (Array.isArray(list) && list.some((s) => s.toLowerCase() === raw))
+        ) {
+          expanded.add(normKey);
+          for (const syn of list || []) {
+            expanded.add(syn.normalize('NFC').replace(/য়/g, 'য়').toLowerCase());
+          }
+        }
+      }
+    }
+  }
   for (const [rx, extras] of BILINGUAL_SYNONYMS) {
-    if (rx.test(query)) {
-      for (const e of extras) expanded.add(e);
+    if (rx.test(normalizedQuery)) {
+      for (const e of extras) expanded.add(e.normalize('NFC').replace(/য়/g, 'য়'));
     }
   }
   return Array.from(expanded);
 }
+
+const MIN_KNOWLEDGE_RELEVANCE_SCORE = 3;
 
 export function retrieveRelevantKnowledge(
   query: string,
   faqs: ChatbotFaqDoc[],
   kbDocs: ChatbotKbDocRecord[],
   replyLang: 'bn' | 'en',
-  limit = 6
+  limit = 6,
+  extraSynonyms?: Record<string, string[]>
 ): { faqs: ChatbotFaqDoc[]; kbSnippets: { title: string; category: string; snippet: string }[] } {
-  const tokens = expandQueryTokens(query);
+  const tokens = expandQueryTokens(query, extraSynonyms);
+  if (tokens.length === 0) {
+    return { faqs: [], kbSnippets: [] };
+  }
 
   const scoredFaqs = faqs
     .map((faq) => {
-      const haystack = `${faq.question} ${faq.answer} ${faq.category}`.toLowerCase();
-      let score = faq.lang === 'both' || faq.lang === replyLang ? 1 : 0;
+      const haystack = `${faq.question} ${faq.answer} ${faq.category}`
+        .normalize('NFC')
+        .replace(/য়/g, 'য়')
+        .toLowerCase();
+      let keywordScore = 0;
       for (const tok of tokens) {
-        if (haystack.includes(tok)) score += 3;
+        if (haystack.includes(tok)) keywordScore += 3;
       }
-      return { faq, score };
+      const langTiebreaker =
+        keywordScore >= MIN_KNOWLEDGE_RELEVANCE_SCORE &&
+        (faq.lang === 'both' || faq.lang === replyLang)
+          ? 1
+          : 0;
+      return { faq, keywordScore, totalScore: keywordScore + langTiebreaker };
     })
-    .sort((a, b) => b.score - a.score)
+    .filter((x) => x.keywordScore >= MIN_KNOWLEDGE_RELEVANCE_SCORE)
+    .sort((a, b) => b.totalScore - a.totalScore)
     .slice(0, limit)
     .map((x) => x.faq);
 
-  const snippetCandidates: { title: string; category: string; snippet: string; score: number }[] = [];
+  const snippetCandidates: {
+    title: string;
+    category: string;
+    snippet: string;
+    keywordScore: number;
+  }[] = [];
   for (const doc of kbDocs) {
+    if (doc.accessScope === 'internal') continue;
     const chunks = chunkKnowledgeText(doc.content, 750);
     for (const chunk of chunks) {
-      const haystack = `${doc.title} ${doc.category} ${chunk}`.toLowerCase();
-      let score = 0;
+      const haystack = `${doc.title} ${doc.category} ${chunk}`
+        .normalize('NFC')
+        .replace(/য়/g, 'য়')
+        .toLowerCase();
+      let keywordScore = 0;
       for (const tok of tokens) {
-        if (haystack.includes(tok)) score += 3;
+        if (haystack.includes(tok)) keywordScore += 3;
       }
-      if (score > 0 || chunks.length === 1) {
+      if (keywordScore >= MIN_KNOWLEDGE_RELEVANCE_SCORE) {
         snippetCandidates.push({
           title: doc.title,
           category: doc.category,
           snippet: chunk,
-          score,
+          keywordScore,
         });
       }
     }
   }
 
   const kbSnippets = snippetCandidates
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => b.keywordScore - a.keywordScore)
     .slice(0, limit)
     .map(({ title, category, snippet }) => ({ title, category, snippet }));
 

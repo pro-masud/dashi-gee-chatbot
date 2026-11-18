@@ -1,5 +1,7 @@
 export type WeightKey = '250g' | '500g' | '1kg';
 
+export type DeliveryZone = 'dhaka' | 'suburban' | 'nationwide' | 'remote';
+
 export type OrderStatus =
   | 'pending'
   | 'confirmed'
@@ -16,6 +18,8 @@ export type PaymentStatus =
   | 'verified'
   | 'failed';
 
+export type OrderRiskReviewStatus = 'none' | 'manual_review' | 'approved' | 'rejected';
+
 export interface StoreSettingsDoc {
   productNameEn: string;
   productNameBn: string;
@@ -30,9 +34,19 @@ export interface StoreSettingsDoc {
   stock1kg: number;
   insideDhakaFee: number;
   outsideDhakaFee: number;
+  dhakaSuburbanFee?: number;
+  remoteDistrictFee?: number;
   freeDeliveryThreshold: number;
   estimatedDhakaDays: string;
+  estimatedSuburbanDays?: string;
   estimatedOutsideDays: string;
+  estimatedRemoteDays?: string;
+  dispatchCutoffHourBst?: number;
+  cutoffNoticeEn?: string;
+  cutoffNoticeBn?: string;
+  codConfirmEnabled?: boolean;
+  codHighValueThresholdBdt?: number;
+  lastOrderNumber?: string;
   bkashNumber: string;
   nagadNumber: string;
   advanceDiscountPct: number;
@@ -58,10 +72,19 @@ export const DEFAULT_STORE_SETTINGS: StoreSettingsDoc = {
   stock500g: 36,
   stock1kg: 20,
   insideDhakaFee: 80,
+  dhakaSuburbanFee: 100,
   outsideDhakaFee: 130,
+  remoteDistrictFee: 160,
   freeDeliveryThreshold: 2500,
   estimatedDhakaDays: '24–48 Hours (Inside Dhaka)',
+  estimatedSuburbanDays: '2–3 Business Days (Dhaka Suburbs)',
   estimatedOutsideDays: '2–4 Business Days (Nationwide)',
+  estimatedRemoteDays: '3–5 Business Days (Remote / Hill & Coastal)',
+  dispatchCutoffHourBst: 14,
+  cutoffNoticeEn: 'Orders confirmed before 2:00 PM BST dispatch same day.',
+  cutoffNoticeBn: 'দুপুর ২টার (BST) আগে কনফার্ম হওয়া অর্ডার একই দিনে ডিসপ্যাচ হয়।',
+  codConfirmEnabled: false,
+  codHighValueThresholdBdt: 5000,
   bkashNumber: 'Configure in Admin',
   nagadNumber: 'Configure in Admin',
   advanceDiscountPct: 0,
@@ -82,7 +105,7 @@ export interface OrderRecord {
   area: string;
   address: string;
   note: string;
-  deliveryZone: 'dhaka' | 'nationwide';
+  deliveryZone: DeliveryZone;
   weight: WeightKey;
   qty: number;
   qty250g: number;
@@ -102,6 +125,11 @@ export interface OrderRecord {
   status: OrderStatus;
   estimatedDelivery: string;
   webhookStatus: string;
+  riskScore?: number;
+  riskSignals?: string[];
+  reviewStatus?: OrderRiskReviewStatus;
+  duplicateWarning?: string;
+  codVerificationStatus?: 'not_required' | 'not_configured' | 'pending' | 'verified';
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -110,13 +138,44 @@ export interface TrackingRecord {
   orderNumber: string;
   weight: WeightKey;
   qty: number;
+  qty250g?: number;
+  qty500g?: number;
+  qty1kg?: number;
   itemsSummary: string;
+  subtotalBdt?: number;
+  deliveryFeeBdt?: number;
+  discountBdt?: number;
+  couponCode?: string;
+  deliveryZone?: DeliveryZone;
+  district?: string;
   totalBdt: number;
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
   status: OrderStatus;
+  reviewStatus?: OrderRiskReviewStatus;
   estimatedDelivery: string;
   updatedAt?: unknown;
+}
+
+export interface OrderAuditLogRecord {
+  id: string;
+  orderNumber: string;
+  action:
+    | 'created'
+    | 'address_updated'
+    | 'cancelled'
+    | 'review_approved'
+    | 'review_rejected'
+    | 'status_updated'
+    | 'cod_verification';
+  actorType: 'customer' | 'admin' | 'system';
+  summary: string;
+  previousStatus?: string;
+  nextStatus?: string;
+  previousTotalBdt?: number;
+  nextTotalBdt?: number;
+  metadata?: Record<string, unknown>;
+  createdAt?: unknown;
 }
 
 export interface BatchRecord {
@@ -162,6 +221,11 @@ export interface CouponRecord {
   discountPct: number;
   minSubtotalBdt: number;
   active: boolean;
+  expiresAt?: string;
+  maxUses?: number;
+  usedCount?: number;
+  stackableWithAdvance?: boolean;
+  descriptionEn?: string;
 }
 
 export interface SubscriberRecord {

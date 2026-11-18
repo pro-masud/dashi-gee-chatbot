@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Bot,
   Check,
+  Download,
   FileText,
   History,
   Loader2,
@@ -14,6 +15,8 @@ import {
   Send,
   ShieldAlert,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   Upload,
 } from 'lucide-react';
@@ -22,6 +25,9 @@ import {
   DEFAULT_CHATBOT_CONFIG,
   PROTECTED_CORE_RULES_SUMMARY,
   type ChatActionItem,
+  type ChatDiagnosticsMeta,
+  type ChatbotExecutionPath,
+  type ChatbotFeedbackDoc,
   type ChatMessageItem,
   type ChatbotConfigDoc,
   type ChatbotFaqDoc,
@@ -29,13 +35,22 @@ import {
   type ChatbotLogRecord,
   type ChatbotSupportRequestRecord,
   type ChatbotVersionRecord,
+  type ClaimAuditEntry,
+  type KnowledgeSourceRef,
   type OrderSummaryCard,
+  type ProductCardItem,
+  type RuntimeHealthReport,
+  type TrackingCardData,
 } from '../lib/chatbot/types';
+import { detectStoreFactConflicts } from '../lib/chatbot/storeFacts';
+import { CURATED_PRODUCT_KNOWLEDGE_PACK } from '../lib/chatbot/hybridRag';
+import { ALLOWED_ADMIN_GEMINI_MODELS } from '../lib/chatbot/schema';
 import {
   deleteAdminChatbotFaq,
   deleteAdminChatbotKbDoc,
   deleteChatbotLogEntry,
   fetchAdminChatbotFaqs,
+  fetchAdminChatbotFeedback,
   fetchAdminChatbotKbDocs,
   fetchAdminChatbotLogs,
   fetchAdminSupportRequests,
@@ -43,6 +58,7 @@ import {
   fetchDraftChatbotConfig,
   markChatbotLogResolved,
   publishChatbotChanges,
+  resolveChatbotFeedback,
   saveAdminChatbotFaq,
   saveAdminChatbotKbDoc,
   saveDraftChatbotConfig,
@@ -89,6 +105,9 @@ export function AdminChatbotPanel({
   const [serverStatus, setServerStatus] = useState<{
     geminiConfigured: boolean;
     model: string;
+    fallbackModel?: string;
+    activePath?: ChatbotExecutionPath;
+    health?: RuntimeHealthReport;
     bstDate: string;
   } | null>(null);
   const [notificationStatus, setNotificationStatus] = useState<{
@@ -103,12 +122,18 @@ export function AdminChatbotPanel({
   } | null>(null);
 
   const [draftConfig, setDraftConfig] = useState<ChatbotConfigDoc>(DEFAULT_CHATBOT_CONFIG);
+  const [savedClaimsFingerprint, setSavedClaimsFingerprint] = useState('');
   const [versions, setVersions] = useState<ChatbotVersionRecord[]>([]);
   const [faqs, setFaqs] = useState<ChatbotFaqDoc[]>([]);
   const [kbDocs, setKbDocs] = useState<ChatbotKbDocRecord[]>([]);
   const [logs, setLogs] = useState<ChatbotLogRecord[]>([]);
   const [supportRequests, setSupportRequests] = useState<ChatbotSupportRequestRecord[]>([]);
+  const [feedbackList, setFeedbackList] = useState<ChatbotFeedbackDoc[]>([]);
   const [showPromptPreview, setShowPromptPreview] = useState(false);
+
+  // Synonym dictionary editor
+  const [newSynKey, setNewSynKey] = useState('');
+  const [newSynTerms, setNewSynTerms] = useState('');
 
   // FAQ Form
   const [faqSearch, setFaqSearch] = useState('');
@@ -133,6 +158,12 @@ export function AdminChatbotPanel({
     chunkCount: 1,
     status: 'published',
     syncStatus: 'Ready to save',
+    version: 1,
+    owner: 'Admin',
+    language: 'both',
+    accessScope: 'public',
+    effectiveDate: '',
+    reviewDate: '',
   });
   const [uploadingDoc, setUploadingDoc] = useState(false);
 
@@ -143,35 +174,58 @@ export function AdminChatbotPanel({
   // Logs filter
   const [logFilter, setLogFilter] = useState('');
 
-  // Playground state
+  // Playground & benchmark state
   const [playMode, setPlayMode] = useState<'draft' | 'published'>('draft');
   const [playMessages, setPlayMessages] = useState<ChatMessageItem[]>([]);
   const [playInput, setPlayInput] = useState('');
   const [playBusy, setPlayBusy] = useState(false);
+  const [benchmarkRunning, setBenchmarkRunning] = useState(false);
+  const [benchmarkResults, setBenchmarkResults] = useState<
+    {
+      label: string;
+      passed: boolean;
+      intent: string;
+      model: string;
+      guardStatus: string;
+      latencyMs: number;
+    }[]
+  >([]);
 
-  const loadChatbotAdminData = useCallback(async () => {
+  const loadChatbotAdminData = useCallback(async (forceHealthRefresh = false) => {
     setLoading(true);
     try {
       const token = await auth.currentUser?.getIdToken().catch(() => '');
-      const [cfg, faqList, kbList, logList, verList, supList] = await Promise.all([
+      const [cfg, faqList, kbList, logList, verList, supList, fbList] = await Promise.all([
         fetchDraftChatbotConfig(),
         fetchAdminChatbotFaqs(),
         fetchAdminChatbotKbDocs(),
         fetchAdminChatbotLogs(),
         fetchChatbotVersions(),
         fetchAdminSupportRequests(),
+        fetchAdminChatbotFeedback(),
       ]);
       setDraftConfig(cfg);
+      setSavedClaimsFingerprint(
+        JSON.stringify({
+          approvedClaims: cfg.approvedClaims,
+          blockedClaims: cfg.blockedClaims || '',
+          approvedClaimsMeta: cfg.approvedClaimsMeta || [],
+        })
+      );
       setFaqs(faqList);
       setKbDocs(kbList);
       setLogs(logList);
       setVersions(verList);
       setSupportRequests(supList);
+      setFeedbackList(fbList);
 
+      const adminHealthUrl = forceHealthRefresh
+        ? '/api/chatbot/admin?refresh=1'
+        : '/api/chatbot/admin';
       const [notifRes, adminRes] = await Promise.all([
         fetch('/api/notifications/status').catch(() => null),
         token
-          ? fetch('/api/chatbot/admin', {
+          ? fetch(adminHealthUrl, {
               headers: { Authorization: `Bearer ${token}` },
             }).catch(() => null)
           : Promise.resolve(null),
@@ -195,13 +249,46 @@ export function AdminChatbotPanel({
     loadChatbotAdminData();
   }, [loadChatbotAdminData]);
 
+  const withClaimAuditIfChanged = (
+    cfg: ChatbotConfigDoc,
+    actionLabel: string
+  ): ChatbotConfigDoc => {
+    const currentFp = JSON.stringify({
+      approvedClaims: cfg.approvedClaims,
+      blockedClaims: cfg.blockedClaims || '',
+      approvedClaimsMeta: cfg.approvedClaimsMeta || [],
+    });
+    if (savedClaimsFingerprint && currentFp === savedClaimsFingerprint) {
+      return cfg;
+    }
+    const actor = auth.currentUser?.email || 'admin@deshigee.com';
+    const entry: ClaimAuditEntry = {
+      timestamp: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      actor,
+      action: actionLabel,
+      summary: `Approved (${(cfg.approvedClaimsMeta || []).length} structured) · Blocked: ${(cfg.blockedClaims || '').slice(0, 80)}`,
+    };
+    return {
+      ...cfg,
+      claimAuditHistory: [entry, ...(cfg.claimAuditHistory || [])].slice(0, 25),
+    };
+  };
+
   const handleSaveDraft = async (e?: FormEvent) => {
     e?.preventDefault();
     setSaving(true);
     setStatusMsg('');
     try {
-      await saveDraftChatbotConfig(draftConfig);
-      setDraftConfig((prev) => ({ ...prev, lastSyncStatus: 'Draft saved (unpublished)' }));
+      const nextCfg = withClaimAuditIfChanged(draftConfig, 'save_draft');
+      await saveDraftChatbotConfig(nextCfg);
+      setDraftConfig({ ...nextCfg, lastSyncStatus: 'Draft saved (unpublished)' });
+      setSavedClaimsFingerprint(
+        JSON.stringify({
+          approvedClaims: nextCfg.approvedClaims,
+          blockedClaims: nextCfg.blockedClaims || '',
+          approvedClaimsMeta: nextCfg.approvedClaimsMeta || [],
+        })
+      );
       setStatusMsg('Draft saved. Use "Publish Live Changes" to push updates to customers.');
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : 'Failed to save draft.');
@@ -215,13 +302,21 @@ export function AdminChatbotPanel({
     setStatusMsg('');
     try {
       const adminEmail = auth.currentUser?.email || 'admin@deshigee.com';
-      const nextVer = await publishChatbotChanges(draftConfig, adminEmail, summaryText);
+      const nextCfg = withClaimAuditIfChanged(draftConfig, 'publish_live');
+      const nextVer = await publishChatbotChanges(nextCfg, adminEmail, summaryText);
       const updated = {
-        ...draftConfig,
+        ...nextCfg,
         version: nextVer,
         lastSyncStatus: `Published v${nextVer}`,
       };
       setDraftConfig(updated);
+      setSavedClaimsFingerprint(
+        JSON.stringify({
+          approvedClaims: updated.approvedClaims,
+          blockedClaims: updated.blockedClaims || '',
+          approvedClaimsMeta: updated.approvedClaimsMeta || [],
+        })
+      );
       onPublishedConfig(updated);
       setVersions(await fetchChatbotVersions());
       setStatusMsg(`Published v${nextVer} live to the storefront chatbot.`);
@@ -286,6 +381,7 @@ export function AdminChatbotPanel({
         sourceType: data.sourceType,
         content: data.content,
         chunkCount: data.chunkCount,
+        contentHash: data.contentHash || prev.contentHash,
         syncStatus: `Parsed ${data.charCount} chars (${data.chunkCount} chunks) — click Save to store`,
       }));
     } catch (err) {
@@ -301,7 +397,7 @@ export function AdminChatbotPanel({
     if (!kbDraft.title.trim() || kbDraft.content.trim().length < 10) return;
     setSaving(true);
     try {
-      const chunks = Math.max(1, Math.ceil(kbDraft.content.trim().length / 900));
+      const chunks = Math.max(1, Math.ceil(kbDraft.content.trim().length / 1300));
       await saveAdminChatbotKbDoc({
         ...kbDraft,
         chunkCount: chunks,
@@ -320,9 +416,15 @@ export function AdminChatbotPanel({
         chunkCount: 1,
         status: 'published',
         syncStatus: 'Ready to save',
+        version: 1,
+        owner: 'Admin',
+        language: 'both',
+        accessScope: 'public',
+        effectiveDate: '',
+        reviewDate: '',
       });
       setKbDocs(await fetchAdminChatbotKbDocs());
-      setStatusMsg('Knowledge document saved & indexed for RAG.');
+      setStatusMsg('Knowledge document saved & indexed into knowledge_chunks.');
     } catch (err) {
       setStatusMsg(err instanceof Error ? err.message : 'Failed saving document.');
     } finally {
@@ -330,9 +432,33 @@ export function AdminChatbotPanel({
     }
   };
 
+  const handleSeedCuratedKbPack = async () => {
+    setSaving(true);
+    setStatusMsg('');
+    try {
+      const existingQuestions = new Set(faqs.map((f) => f.question.trim().toLowerCase()));
+      let added = 0;
+      for (const item of CURATED_PRODUCT_KNOWLEDGE_PACK) {
+        if (existingQuestions.has(item.question.trim().toLowerCase())) continue;
+        await saveAdminChatbotFaq({ ...item, id: '' });
+        added += 1;
+      }
+      setFaqs(await fetchAdminChatbotFaqs());
+      setStatusMsg(
+        added > 0
+          ? `Seeded ${added} verified product knowledge FAQs.`
+          : 'All curated product knowledge FAQs are already seeded.'
+      );
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Failed to seed curated knowledge pack.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handlePlaygroundSend = async (promptText: string) => {
     const clean = promptText.trim();
-    if (!clean || playBusy) return;
+    if (!clean || playBusy || benchmarkRunning) return;
 
     const userMsg: ChatMessageItem = {
       id: `pg_u_${Date.now()}`,
@@ -380,6 +506,12 @@ export function AdminChatbotPanel({
       let text = '';
       let actions: ChatActionItem[] = [];
       let orderSummary: OrderSummaryCard | undefined;
+      let productCards: ProductCardItem[] | undefined;
+      let trackingCard: TrackingCardData | undefined;
+      let suggestedReplies: string[] | undefined;
+      let sources: KnowledgeSourceRef[] | undefined;
+      let diagnostics: ChatDiagnosticsMeta | undefined;
+      let logId: string | undefined;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -399,6 +531,16 @@ export function AdminChatbotPanel({
             } else if (ev.type === 'meta') {
               actions = ev.actions || [];
               orderSummary = ev.orderSummary || undefined;
+              productCards =
+                ev.productCards && ev.productCards.length > 0 ? ev.productCards : undefined;
+              trackingCard = ev.trackingCard || undefined;
+              suggestedReplies =
+                ev.suggestedReplies && ev.suggestedReplies.length > 0
+                  ? ev.suggestedReplies
+                  : undefined;
+              sources = ev.sources && ev.sources.length > 0 ? ev.sources : undefined;
+              diagnostics = ev.diagnostics || undefined;
+              logId = ev.logId || undefined;
             }
           } catch {
             // ignore partial chunk
@@ -408,7 +550,20 @@ export function AdminChatbotPanel({
 
       setPlayMessages((prev) =>
         prev.map((m) =>
-          m.id === botId ? { ...m, text: text || '(empty response)', actions, orderSummary } : m
+          m.id === botId
+            ? {
+                ...m,
+                text: text || '(empty response)',
+                actions,
+                orderSummary,
+                productCards,
+                trackingCard,
+                suggestedReplies,
+                sources,
+                diagnostics,
+                logId,
+              }
+            : m
         )
       );
     } catch (err) {
@@ -428,11 +583,167 @@ export function AdminChatbotPanel({
     }
   };
 
+  const handleRunBenchmark = async () => {
+    if (benchmarkRunning || playBusy) return;
+    setBenchmarkRunning(true);
+    setBenchmarkResults([]);
+    const results: {
+      label: string;
+      passed: boolean;
+      intent: string;
+      model: string;
+      guardStatus: string;
+      latencyMs: number;
+    }[] = [];
+
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      for (const testCase of ONE_CLICK_TESTS) {
+        const t0 = Date.now();
+        let intent = 'unknown';
+        let model = 'fallback';
+        let guardStatus = 'unknown';
+        let assembled = '';
+        let ok = false;
+        try {
+          const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-requested-with': 'DeshiGeeStorefront',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({
+              mode: 'draft',
+              isTestPlayground: true,
+              stream: false,
+              sessionId: `bench_${Date.now()}`,
+              uiLang: 'en',
+              messages: [{ role: 'user', text: testCase.prompt }],
+            }),
+          });
+          if (res.ok && res.body) {
+            const raw = await res.text();
+            for (const line of raw.split('\n')) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+              const ev = JSON.parse(trimmed);
+              if (ev.type === 'delta' && ev.text) assembled += ev.text;
+              if (ev.type === 'meta') {
+                intent = ev.diagnostics?.intent || ev.intent || intent;
+                model = ev.diagnostics?.model || ev.model || model;
+                guardStatus = ev.diagnostics?.guardStatus || (ev.isError ? 'error' : 'ok');
+              }
+            }
+            ok = assembled.trim().length > 12;
+          }
+        } catch {
+          ok = false;
+        }
+        results.push({
+          label: testCase.label,
+          passed: ok,
+          intent,
+          model,
+          guardStatus,
+          latencyMs: Date.now() - t0,
+        });
+        setBenchmarkResults([...results]);
+      }
+    } finally {
+      setBenchmarkRunning(false);
+    }
+  };
+
+  const handleExportRegressionJson = () => {
+    const items = [
+      ...logs
+        .filter((l) => l.isUnanswered && !l.resolved)
+        .map((l) => ({
+          question: l.userMessage,
+          expectedCategory: l.intent || 'unanswered',
+          lang: l.lang,
+          source: 'unanswered_log',
+        })),
+      ...feedbackList
+        .filter((f) => f.rating === 'down' && !f.resolved)
+        .map((f) => ({
+          question: f.userMessage,
+          expectedCategory: f.reason || f.intent || 'negative_feedback',
+          lang: f.lang,
+          source: 'customer_feedback',
+        })),
+    ];
+    const blob = new Blob([JSON.stringify(items, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `deshi-gee-regression-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const analytics = useMemo(() => {
     const liveLogs = logs.filter((l) => !l.isTestPlayground);
     const totalChats = liveLogs.length;
+    const aiAnsweredCount = liveLogs.filter(
+      (l) => (l.path || 'fallback') === 'gemini' && !l.isError && !l.isUnanswered
+    ).length;
+    const fallbackCount = liveLogs.filter(
+      (l) => (l.path || 'fallback') === 'fallback' && !l.isError
+    ).length;
+    const errorOrGuardCount = liveLogs.filter(
+      (l) =>
+        Boolean(l.isError) ||
+        Boolean(l.guardCategory) ||
+        (Boolean(l.errorCode) &&
+          (l.errorCode.startsWith('response_guard_') ||
+            l.errorCode.includes('gemini_') ||
+            l.errorCode.includes('empty_reply') ||
+            l.errorCode.includes('max_tokens')))
+    ).length;
+    const containedCount = liveLogs.filter(
+      (l) => !l.handoverRequested && !l.isUnanswered && !l.isError
+    ).length;
+    const containmentRate =
+      totalChats > 0 ? Math.round((containedCount / totalChats) * 100) : 0;
+
+    const ragLogs = liveLogs.filter((l) => typeof l.ragMs === 'number');
+    const modelLogs = liveLogs.filter((l) => typeof l.modelMs === 'number');
+    const toolLogs = liveLogs.filter((l) => typeof l.toolMs === 'number');
+    const avgRagMs =
+      ragLogs.length > 0
+        ? Math.round(ragLogs.reduce((s, l) => s + (l.ragMs || 0), 0) / ragLogs.length)
+        : 0;
+    const avgModelMs =
+      modelLogs.length > 0
+        ? Math.round(modelLogs.reduce((s, l) => s + (l.modelMs || 0), 0) / modelLogs.length)
+        : 0;
+    const avgToolMs =
+      toolLogs.length > 0
+        ? Math.round(toolLogs.reduce((s, l) => s + (l.toolMs || 0), 0) / toolLogs.length)
+        : 0;
+
     const unansweredCount = logs.filter((l) => l.isUnanswered && !l.resolved).length;
     const handoverCount = supportRequests.filter((s) => s.status === 'open').length;
+
+    const csatTotal = feedbackList.length;
+    const csatPositiveCount = feedbackList.filter((f) => f.rating === 'up').length;
+    const csatPositiveRate =
+      csatTotal > 0 ? Math.round((csatPositiveCount / csatTotal) * 100) : 0;
+    const downFeedbackCount = feedbackList.filter(
+      (f) => f.rating === 'down' && !f.resolved
+    ).length;
+
+    const guardBreakdown: Record<string, number> = {};
+    for (const l of liveLogs) {
+      if (l.guardCategory) {
+        guardBreakdown[l.guardCategory] = (guardBreakdown[l.guardCategory] || 0) + 1;
+      }
+    }
+
     const totalTokens = logs.reduce(
       (s, l) => s + (l.promptTokens || 0) + (l.outputTokens || 0),
       0
@@ -442,15 +753,46 @@ export function AdminChatbotPanel({
       logs.length > 0
         ? Math.round(logs.reduce((s, l) => s + (l.latencyMs || 0), 0) / logs.length)
         : 0;
+    const sortedLatencies = logs.map((l) => l.latencyMs || 0).sort((a, b) => a - b);
+    const p95Latency =
+      sortedLatencies.length > 0
+        ? sortedLatencies[
+            Math.min(sortedLatencies.length - 1, Math.ceil(0.95 * sortedLatencies.length) - 1)
+          ]
+        : 0;
+    const aiAnsweredRate =
+      totalChats > 0 ? Math.round((aiAnsweredCount / totalChats) * 100) : 0;
+    const fallbackRate =
+      totalChats > 0 ? Math.round((fallbackCount / totalChats) * 100) : 0;
+
     return {
       totalChats,
+      aiAnsweredCount,
+      aiAnsweredRate,
+      fallbackCount,
+      fallbackRate,
+      errorOrGuardCount,
+      containmentRate,
+      avgRagMs,
+      avgModelMs,
+      avgToolMs,
+      csatTotal,
+      csatPositiveRate,
+      downFeedbackCount,
+      guardBreakdown,
       unansweredCount,
       handoverCount,
       totalTokens,
       totalCost,
       avgLatency,
+      p95Latency,
     };
-  }, [logs, supportRequests]);
+  }, [logs, supportRequests, feedbackList]);
+
+  const storeFactConflicts = useMemo(
+    () => detectStoreFactConflicts({ settings, config: draftConfig }),
+    [settings, draftConfig]
+  );
 
   const filteredFaqs = useMemo(() => {
     const q = faqSearch.trim().toLowerCase();
@@ -505,13 +847,21 @@ export function AdminChatbotPanel({
           </div>
           <p className="text-xs text-[#635647]">
             Server Gemini Engine:{' '}
-            {serverStatus?.geminiConfigured ? (
+            {serverStatus?.health && !serverStatus.health.supportedModelConfigured ? (
+              <span className="font-semibold text-red-700">
+                Unsupported / Invalid Model Configuration ({serverStatus.health.errorCode})
+              </span>
+            ) : serverStatus?.activePath === 'gemini' ? (
               <span className="font-medium text-emerald-800">
-                Connected ({serverStatus.model})
+                Active Path: Gemini ({serverStatus.model})
               </span>
             ) : (
               <span className="font-medium text-amber-800">
-                GEMINI_API_KEY env var pending (live DB fallback active)
+                Active Path: Live DB Fallback Engine (
+                {serverStatus?.geminiConfigured
+                  ? `Primary/Fallback unreachable`
+                  : 'GEMINI_API_KEY not configured'}
+                )
               </span>
             )}
           </p>
@@ -537,7 +887,7 @@ export function AdminChatbotPanel({
           </button>
           <button
             type="button"
-            onClick={() => loadChatbotAdminData()}
+            onClick={() => loadChatbotAdminData(true)}
             aria-label="Refresh chatbot telemetry"
             className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[rgba(30,23,16,0.16)] text-[#635647] hover:bg-[#F2ECE1]"
           >
@@ -545,6 +895,85 @@ export function AdminChatbotPanel({
           </button>
         </div>
       </div>
+
+      {/* Diagnostic Warning Banner (Gemini / Fallback / Supported Model / Secret / Firestore) */}
+      {serverStatus &&
+        (!serverStatus.geminiConfigured ||
+          serverStatus.activePath === 'fallback' ||
+          (serverStatus.health && serverStatus.health.status !== 'healthy')) && (
+          <div
+            role="alert"
+            className={`rounded-2xl border p-4 text-xs ${
+              serverStatus.health && !serverStatus.health.supportedModelConfigured
+                ? 'border-red-300 bg-red-50 text-red-950'
+                : 'border-amber-300 bg-amber-50 text-amber-950'
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <AlertTriangle
+                className={`mt-0.5 h-4 w-4 shrink-0 ${
+                  serverStatus.health && !serverStatus.health.supportedModelConfigured
+                    ? 'text-red-700'
+                    : 'text-amber-700'
+                }`}
+              />
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold">
+                    {serverStatus.health && !serverStatus.health.supportedModelConfigured
+                      ? 'Diagnostic Failure: No Supported Gemini Model Configured'
+                      : !serverStatus.geminiConfigured || serverStatus.activePath === 'fallback'
+                        ? 'Fallback Engine Active (Gemini Not Active)'
+                        : 'Runtime Configuration Warnings Detected'}
+                  </p>
+                  <span className="rounded bg-white/80 px-2 py-0.5 font-mono text-[11px] font-semibold">
+                    path={serverStatus.activePath || 'fallback'}
+                    {serverStatus.health?.errorCode ? ` · ${serverStatus.health.errorCode}` : ''}
+                  </span>
+                </div>
+
+                {serverStatus.health && (
+                  <div className="grid grid-cols-2 gap-2 rounded-xl border border-black/10 bg-white/70 p-2.5 font-mono text-[11px] sm:grid-cols-5">
+                    <div>
+                      <span className="block text-[10px] text-[#635647]">GEMINI_API_KEY</span>
+                      <strong>{serverStatus.health.checks.geminiApiKeyConfigured}</strong>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] text-[#635647]">Primary Model</span>
+                      <strong>
+                        {serverStatus.health.checks.primaryModel.name || 'unset'} (
+                        {serverStatus.health.checks.primaryModel.reachable})
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] text-[#635647]">Fallback Model</span>
+                      <strong>
+                        {serverStatus.health.checks.fallbackModel.name || 'unset'} (
+                        {serverStatus.health.checks.fallbackModel.reachable})
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] text-[#635647]">ORDER_TOKEN_SECRET</span>
+                      <strong>{serverStatus.health.checks.tokenSecretConfigured}</strong>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] text-[#635647]">Firestore</span>
+                      <strong>{serverStatus.health.checks.firestoreReachable}</strong>
+                    </div>
+                  </div>
+                )}
+
+                {serverStatus.health?.warnings && serverStatus.health.warnings.length > 0 && (
+                  <ul className="list-disc space-y-0.5 pl-4 text-[11px]">
+                    {serverStatus.health.warnings.map((w, idx) => (
+                      <li key={idx}>{w}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
       {statusMsg && (
         <div className="rounded-xl border border-[rgba(180,123,43,0.35)] bg-[#F2ECE1] px-4 py-2.5 text-xs font-medium text-[#1E1710]">
@@ -587,38 +1016,95 @@ export function AdminChatbotPanel({
       {/* 1. OVERVIEW & ANALYTICS */}
       {subTab === 'overview' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-6">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
             <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4">
-              <p className="text-[11px] text-[#635647]">Live Conversations</p>
-              <p className="font-mono mt-1.5 text-xl font-semibold">{analytics.totalChats}</p>
+              <p className="text-[11px] text-[#635647]">Live Chats</p>
+              <p className="font-mono mt-1.5 text-xl font-semibold tabular-nums">{analytics.totalChats}</p>
             </div>
             <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4">
-              <p className="text-[11px] text-[#635647]">Unanswered Queue</p>
-              <p className="font-mono mt-1.5 text-xl font-semibold text-[#8A5A17]">
-                {analytics.unansweredCount}
+              <p className="text-[11px] text-[#635647]">AI Answered</p>
+              <p className="font-mono mt-1.5 text-xl font-semibold tabular-nums text-emerald-800">
+                {analytics.aiAnsweredCount}{' '}
+                <span className="text-xs font-normal text-[#635647]">({analytics.aiAnsweredRate}%)</span>
               </p>
             </div>
             <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4">
-              <p className="text-[11px] text-[#635647]">Open Handovers</p>
-              <p className="font-mono mt-1.5 text-xl font-semibold">{analytics.handoverCount}</p>
+              <p className="text-[11px] text-[#635647]">Containment Rate</p>
+              <p className="font-mono mt-1.5 text-xl font-semibold tabular-nums text-[#8A5A17]">
+                {analytics.containmentRate}%
+              </p>
             </div>
             <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4">
-              <p className="text-[11px] text-[#635647]">Avg Latency</p>
-              <p className="font-mono mt-1.5 text-xl font-semibold">{analytics.avgLatency}ms</p>
+              <p className="text-[11px] text-[#635647]">CSAT ({analytics.csatTotal} ratings)</p>
+              <p className="font-mono mt-1.5 text-xl font-semibold tabular-nums text-emerald-800">
+                {analytics.csatPositiveRate}%
+              </p>
+            </div>
+            <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4">
+              <p className="text-[11px] text-[#635647]">Fallback Replies</p>
+              <p className="font-mono mt-1.5 text-xl font-semibold tabular-nums text-amber-800">
+                {analytics.fallbackCount}{' '}
+                <span className="text-xs font-normal text-[#635647]">({analytics.fallbackRate}%)</span>
+              </p>
+            </div>
+            <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4">
+              <p className="text-[11px] text-[#635647]">Errors / Guard Blocks</p>
+              <p className="font-mono mt-1.5 text-xl font-semibold tabular-nums text-red-800">
+                {analytics.errorOrGuardCount}
+              </p>
+            </div>
+            <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4">
+              <p className="text-[11px] text-[#635647]">Unanswered / Thumbs Down</p>
+              <p className="font-mono mt-1.5 text-xl font-semibold tabular-nums text-[#8A5A17]">
+                {analytics.unansweredCount} / {analytics.downFeedbackCount}
+              </p>
+            </div>
+            <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4">
+              <p className="text-[11px] text-[#635647]">Avg / p95 Latency</p>
+              <p className="font-mono mt-1.5 text-lg font-semibold tabular-nums">
+                {analytics.avgLatency}ms / {analytics.p95Latency}ms
+              </p>
+            </div>
+            <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4">
+              <p className="text-[11px] text-[#635647]">Avg RAG / Model / Tool</p>
+              <p className="font-mono mt-1.5 text-sm font-semibold tabular-nums">
+                {analytics.avgRagMs} / {analytics.avgModelMs} / {analytics.avgToolMs} ms
+              </p>
             </div>
             <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4">
               <p className="text-[11px] text-[#635647]">Total Tokens</p>
-              <p className="font-mono mt-1.5 text-xl font-semibold">
+              <p className="font-mono mt-1.5 text-lg font-semibold tabular-nums">
                 {analytics.totalTokens.toLocaleString()}
               </p>
             </div>
             <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#F2ECE1] p-4">
               <p className="text-[11px] text-[#635647]">Est. Gemini Cost</p>
-              <p className="font-mono mt-1.5 text-xl font-semibold text-[#8A5A17]">
+              <p className="font-mono mt-1.5 text-lg font-semibold tabular-nums text-[#8A5A17]">
                 ${analytics.totalCost.toFixed(4)}
               </p>
             </div>
+            <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4">
+              <p className="text-[11px] text-[#635647]">Guard Breakdown</p>
+              <p className="font-mono mt-1.5 text-[11px] font-medium text-[#1E1710]">
+                {Object.keys(analytics.guardBreakdown).length > 0
+                  ? Object.entries(analytics.guardBreakdown)
+                      .map(([k, v]) => `${k}:${v}`)
+                      .join(' · ')
+                  : 'Zero blocks'}
+              </p>
+            </div>
           </div>
+
+          {storeFactConflicts.length > 0 && (
+            <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-950">
+              <p className="font-semibold">Store Facts Consistency Check (Auto-Resolved to Store Settings):</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px]">
+                {storeFactConflicts.map((c, idx) => (
+                  <li key={idx}>{c}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <div className="space-y-4 rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-5">
@@ -777,16 +1263,142 @@ export function AdminChatbotPanel({
                   className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-3 py-2 text-base sm:text-xs"
                 />
               </div>
-              <div>
-                <label className="block text-xs text-[#635647]">Approved Claims (Strict Whitelist)</label>
-                <textarea
-                  rows={2}
-                  value={draftConfig.approvedClaims}
-                  onChange={(e) =>
-                    setDraftConfig({ ...draftConfig, approvedClaims: e.target.value })
-                  }
-                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-3 py-2 text-base sm:text-xs"
-                />
+              <div className="space-y-3 rounded-xl border border-[rgba(180,123,43,0.3)] bg-[#FAF7F2] p-3.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#1E1710]">
+                      Approved &amp; Blocked Claims Governance (T0.7 Source of Truth)
+                    </label>
+                    <p className="mt-0.5 text-[11px] text-[#635647]">
+                      Both Gemini and Live Fallback enforce this whitelist. Only list claims backed by real evidence.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-2 rounded-lg border border-amber-300/70 bg-amber-50/70 p-2.5 text-[11px] text-amber-950 sm:grid-cols-2">
+                  <div>
+                    <strong className="text-emerald-900">Permitted Examples:</strong>
+                    <p>Single-origin Pabna milk, wooden bilona churning, zero preservatives, batch-traceable jars</p>
+                  </div>
+                  <div>
+                    <strong className="text-red-900">Forbidden Without Proof:</strong>
+                    <p>organic, A2, BSTI certified, lab-verified, 100% pure, cures/treats/heals disease</p>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-[#635647]">Approved Claims Summary (Whitelist)</label>
+                  <textarea
+                    rows={2}
+                    value={draftConfig.approvedClaims}
+                    onChange={(e) =>
+                      setDraftConfig({ ...draftConfig, approvedClaims: e.target.value })
+                    }
+                    className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] bg-white px-3 py-2 text-base sm:text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#635647]">Explicitly Blocked Claims (Semicolon-separated)</label>
+                  <textarea
+                    rows={2}
+                    value={draftConfig.blockedClaims || ''}
+                    onChange={(e) =>
+                      setDraftConfig({ ...draftConfig, blockedClaims: e.target.value })
+                    }
+                    placeholder="lab-verified; A2; organic; BSTI certified; 100% pure; cures disease"
+                    className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] bg-white px-3 py-2 text-base sm:text-xs"
+                  />
+                </div>
+
+                {/* Structured Approved Claims with Evidence & Expiry */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-[#1E1710]">
+                      Verified Claim Records ({(draftConfig.approvedClaimsMeta || []).length})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          approvedClaimsMeta: [
+                            ...(draftConfig.approvedClaimsMeta || []),
+                            { claim: '', evidenceNote: '', expiresAt: '' },
+                          ],
+                        })
+                      }
+                      className="rounded border border-[rgba(30,23,16,0.2)] bg-white px-2.5 py-1 text-[11px] font-medium hover:bg-[#F2ECE1]"
+                    >
+                      + Add Claim Record
+                    </button>
+                  </div>
+                  {(draftConfig.approvedClaimsMeta || []).map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="grid grid-cols-1 gap-2 rounded-lg border border-[rgba(30,23,16,0.12)] bg-white p-2.5 sm:grid-cols-12"
+                    >
+                      <input
+                        type="text"
+                        placeholder="Approved claim"
+                        value={item.claim}
+                        onChange={(e) => {
+                          const next = [...(draftConfig.approvedClaimsMeta || [])];
+                          next[idx] = { ...item, claim: e.target.value };
+                          setDraftConfig({ ...draftConfig, approvedClaimsMeta: next });
+                        }}
+                        className="rounded border border-[rgba(30,23,16,0.16)] px-2 py-1 text-xs sm:col-span-4"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Evidence / supporting doc note"
+                        value={item.evidenceNote || ''}
+                        onChange={(e) => {
+                          const next = [...(draftConfig.approvedClaimsMeta || [])];
+                          next[idx] = { ...item, evidenceNote: e.target.value };
+                          setDraftConfig({ ...draftConfig, approvedClaimsMeta: next });
+                        }}
+                        className="rounded border border-[rgba(30,23,16,0.16)] px-2 py-1 text-xs sm:col-span-5"
+                      />
+                      <div className="flex items-center gap-1 sm:col-span-3">
+                        <input
+                          type="date"
+                          aria-label="Claim expiry date"
+                          value={item.expiresAt || ''}
+                          onChange={(e) => {
+                            const next = [...(draftConfig.approvedClaimsMeta || [])];
+                            next[idx] = { ...item, expiresAt: e.target.value };
+                            setDraftConfig({ ...draftConfig, approvedClaimsMeta: next });
+                          }}
+                          className="w-full rounded border border-[rgba(30,23,16,0.16)] px-2 py-1 font-mono text-[11px]"
+                        />
+                        <button
+                          type="button"
+                          aria-label="Remove claim record"
+                          onClick={() => {
+                            const next = (draftConfig.approvedClaimsMeta || []).filter(
+                              (_, i) => i !== idx
+                            );
+                            setDraftConfig({ ...draftConfig, approvedClaimsMeta: next });
+                          }}
+                          className="p-1 text-red-700 hover:bg-red-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {(draftConfig.claimAuditHistory || []).length > 0 && (
+                  <div className="rounded-lg border border-[rgba(30,23,16,0.1)] bg-white p-2.5 text-[11px]">
+                    <p className="font-semibold text-[#635647]">Recent Claim Policy Audit Trail</p>
+                    <ul className="mt-1 space-y-0.5 font-mono text-[10px] text-[#635647]">
+                      {(draftConfig.claimAuditHistory || []).slice(0, 5).map((entry, idx) => (
+                        <li key={idx}>
+                          {entry.timestamp} · {entry.actor} · {entry.action} · {entry.summary}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-xs text-[#635647]">Active Promotions Note</label>
@@ -1102,9 +1714,118 @@ export function AdminChatbotPanel({
                   className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-3 py-2 text-base sm:text-xs"
                 >
                   <option value="auto">Auto (Banglish → বাংলা, EN → EN)</option>
+                  <option value="always_bn">Always বাংলা (Polite আপনি)</option>
+                  <option value="mirror">Mirror Customer Choice</option>
+                  <option value="customer_choice">Respect UI Toggle / Explicit Request</option>
                   <option value="prefer_bn">Prefer বাংলা</option>
                   <option value="prefer_en">Prefer English</option>
                 </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs text-[#635647]">Primary Gemini Model</label>
+                <select
+                  value={draftConfig.primaryModel || 'gemini-4-hydrogen'}
+                  onChange={(e) =>
+                    setDraftConfig({ ...draftConfig, primaryModel: e.target.value })
+                  }
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-3 py-2 font-mono text-base sm:text-xs"
+                >
+                  {ALLOWED_ADMIN_GEMINI_MODELS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-[#635647]">Fallback Gemini Model</label>
+                <select
+                  value={draftConfig.fallbackModel || 'gemini-3.1-flash-lite'}
+                  onChange={(e) =>
+                    setDraftConfig({ ...draftConfig, fallbackModel: e.target.value })
+                  }
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-3 py-2 font-mono text-base sm:text-xs"
+                >
+                  {ALLOWED_ADMIN_GEMINI_MODELS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Bangla & Banglish Synonym Dictionary Editor */}
+            <div className="space-y-2 rounded-xl border border-[rgba(180,123,43,0.28)] bg-[#FAF7F2] p-3.5 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-[#1E1710]">
+                  Bangla &amp; Banglish RAG Synonym Dictionary (
+                  {Object.keys(draftConfig.synonyms || {}).length})
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {Object.entries(draftConfig.synonyms || {}).map(([key, terms]) => (
+                  <div
+                    key={key}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(30,23,16,0.1)] bg-white px-2.5 py-1.5"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <span className="font-mono font-semibold text-[#8A5A17]">{key}:</span>{' '}
+                      <span className="text-[11px] text-[#635647]">{terms.join(', ')}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = { ...(draftConfig.synonyms || {}) };
+                        delete next[key];
+                        setDraftConfig({ ...draftConfig, synonyms: next });
+                      }}
+                      aria-label={`Remove synonym group ${key}`}
+                      className="p-1 text-red-700 hover:bg-red-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-12">
+                <input
+                  type="text"
+                  value={newSynKey}
+                  onChange={(e) => setNewSynKey(e.target.value)}
+                  placeholder="Root token (e.g. dam)"
+                  className="rounded border border-[rgba(30,23,16,0.16)] bg-white px-2.5 py-1.5 font-mono text-xs sm:col-span-4"
+                />
+                <input
+                  type="text"
+                  value={newSynTerms}
+                  onChange={(e) => setNewSynTerms(e.target.value)}
+                  placeholder="Comma terms: price, cost, দাম"
+                  className="rounded border border-[rgba(30,23,16,0.16)] bg-white px-2.5 py-1.5 text-xs sm:col-span-6"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const k = newSynKey.trim().toLowerCase();
+                    const list = newSynTerms
+                      .split(',')
+                      .map((t) => t.trim())
+                      .filter(Boolean);
+                    if (!k || list.length === 0) return;
+                    setDraftConfig({
+                      ...draftConfig,
+                      synonyms: { ...(draftConfig.synonyms || {}), [k]: list },
+                    });
+                    setNewSynKey('');
+                    setNewSynTerms('');
+                  }}
+                  className="rounded bg-[#1E1710] px-3 py-1.5 text-[11px] font-medium text-[#FAF7F2] sm:col-span-2"
+                >
+                  Add
+                </button>
               </div>
             </div>
 
@@ -1454,16 +2175,17 @@ export function AdminChatbotPanel({
               />
             </div>
 
+            <div>
+              <label className="block text-xs text-[#635647]">Category</label>
+              <input
+                type="text"
+                value={kbDraft.category}
+                onChange={(e) => setKbDraft({ ...kbDraft, category: e.target.value })}
+                className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-3 py-2 text-base sm:text-xs"
+              />
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-[#635647]">Category</label>
-                <input
-                  type="text"
-                  value={kbDraft.category}
-                  onChange={(e) => setKbDraft({ ...kbDraft, category: e.target.value })}
-                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-3 py-2 text-base sm:text-xs"
-                />
-              </div>
               <div>
                 <label className="block text-xs text-[#635647]">Visibility Status</label>
                 <select
@@ -1479,6 +2201,85 @@ export function AdminChatbotPanel({
                   <option value="published">Published (Live RAG)</option>
                   <option value="draft">Draft (Playground Only)</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-xs text-[#635647]">Access Scope</label>
+                <select
+                  value={kbDraft.accessScope || 'public'}
+                  onChange={(e) =>
+                    setKbDraft({
+                      ...kbDraft,
+                      accessScope: e.target.value as 'public' | 'internal',
+                    })
+                  }
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-3 py-2 text-base sm:text-xs"
+                >
+                  <option value="public">Public (Customer RAG)</option>
+                  <option value="internal">Internal Only (Excluded from Customer Chat)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block text-xs text-[#635647]">Language</label>
+                <select
+                  value={kbDraft.language || 'both'}
+                  onChange={(e) =>
+                    setKbDraft({
+                      ...kbDraft,
+                      language: e.target.value as 'bn' | 'en' | 'both',
+                    })
+                  }
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-2.5 py-2 text-xs"
+                >
+                  <option value="both">Both</option>
+                  <option value="bn">বাংলা</option>
+                  <option value="en">EN</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-[#635647]">Version</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={kbDraft.version || 1}
+                  onChange={(e) =>
+                    setKbDraft({ ...kbDraft, version: Number(e.target.value) || 1 })
+                  }
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-2 font-mono text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[#635647]">Owner</label>
+                <input
+                  type="text"
+                  value={kbDraft.owner || ''}
+                  onChange={(e) => setKbDraft({ ...kbDraft, owner: e.target.value })}
+                  placeholder="Admin"
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-2 text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-[#635647]">Effective Date</label>
+                <input
+                  type="date"
+                  value={kbDraft.effectiveDate || ''}
+                  onChange={(e) => setKbDraft({ ...kbDraft, effectiveDate: e.target.value })}
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[#635647]">Next Review Date</label>
+                <input
+                  type="date"
+                  value={kbDraft.reviewDate || ''}
+                  onChange={(e) => setKbDraft({ ...kbDraft, reviewDate: e.target.value })}
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-xs"
+                />
               </div>
             </div>
 
@@ -1496,16 +2297,35 @@ export function AdminChatbotPanel({
               <p className="mt-1 text-[10px] text-[#635647]">{kbDraft.syncStatus}</p>
             </div>
 
-            <button
-              type="submit"
-              disabled={saving}
-              className="min-h-[40px] rounded-lg bg-[#B47B2B] px-5 py-2 text-xs font-medium text-[#FFFDF9]"
-            >
-              {kbDraft.id ? 'Update Knowledge Doc' : 'Save & Index Document'}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="submit"
+                disabled={saving}
+                className="min-h-[40px] rounded-lg bg-[#B47B2B] px-5 py-2 text-xs font-medium text-[#FFFDF9]"
+              >
+                {kbDraft.id ? 'Update Knowledge Doc' : 'Save & Index Document'}
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={handleSeedCuratedKbPack}
+                className="min-h-[40px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-4 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+              >
+                Seed Verified KB Pack
+              </button>
+            </div>
           </form>
 
           <div className="space-y-3 lg:col-span-7">
+            <div className="rounded-xl border border-amber-300/70 bg-amber-50/70 p-3.5 text-xs text-amber-950">
+              <p className="font-semibold">Owner Knowledge Gap Checklist (Phase 1 Audit)</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px]">
+                <li>BSTI certification license number &amp; formal lab-report PDF upload pending owner verification.</li>
+                <li>Holiday courier cutoffs (Eid / festival dispatch windows) to be added via KB Doc or Promotions note.</li>
+                <li>Physical Dhaka pickup hours &amp; verified Google Maps URL in Brand &amp; Business Info.</li>
+              </ul>
+            </div>
+
             {kbDocs.map((docItem) => (
               <div
                 key={docItem.id}
@@ -1518,7 +2338,8 @@ export function AdminChatbotPanel({
                       <p className="truncate font-semibold text-[#1E1710]">{docItem.title}</p>
                     </div>
                     <p className="mt-1 font-mono text-[10px] text-[#8A5A17]">
-                      {docItem.fileName} · {docItem.chunkCount} chunks ·{' '}
+                      {docItem.fileName} · {docItem.chunkCount} chunks · v{docItem.version || 1} ·{' '}
+                      {(docItem.accessScope || 'public').toUpperCase()} ·{' '}
                       {docItem.status.toUpperCase()} · {docItem.syncStatus}
                     </p>
                     <p className="mt-2 line-clamp-3 text-[#635647]">{docItem.content}</p>
@@ -1553,139 +2374,220 @@ export function AdminChatbotPanel({
         </div>
       )}
 
-      {/* 6. UNANSWERED QUESTIONS & HUMAN HANDOVER REQUESTS */}
+      {/* 6. UNANSWERED QUESTIONS, FEEDBACK QUEUE & HUMAN HANDOVER REQUESTS */}
       {subTab === 'unanswered' && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-          <div className="space-y-3 lg:col-span-6">
-            <h3 className="flex items-center gap-2 font-display text-base font-semibold">
-              <AlertTriangle className="h-4 w-4 text-[#B47B2B]" />
-              <span>Unanswered Questions ({unansweredQueue.length})</span>
-            </h3>
-            {unansweredQueue.map((logItem) => (
-              <div
-                key={logItem.id}
-                className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4 text-xs"
-              >
-                <p className="font-semibold text-[#1E1710]">{logItem.userMessage}</p>
-                <p className="mt-1 text-[#635647]">Reply: {logItem.assistantReply}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setConvertingLog(logItem);
-                      setConvertAnswer('');
-                    }}
-                    className="rounded-lg bg-[#1E1710] px-3 py-1.5 text-[11px] font-medium text-[#FAF7F2]"
-                  >
-                    Write Answer &amp; Save as FAQ
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await markChatbotLogResolved(logItem.id, true);
-                      setLogs((prev) =>
-                        prev.map((l) => (l.id === logItem.id ? { ...l, resolved: true } : l))
-                      );
-                    }}
-                    className="rounded-lg border border-[rgba(30,23,16,0.2)] px-3 py-1.5 text-[11px]"
-                  >
-                    Mark Resolved
-                  </button>
-                </div>
-
-                {convertingLog?.id === logItem.id && (
-                  <div className="mt-3 space-y-2 rounded-xl bg-[#FAF7F2] p-3">
-                    <textarea
-                      rows={3}
-                      value={convertAnswer}
-                      onChange={(e) => setConvertAnswer(e.target.value)}
-                      placeholder="Write verified answer to publish as FAQ..."
-                      className="w-full rounded border border-[rgba(30,23,16,0.18)] px-3 py-2 text-base sm:text-xs"
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          if (!convertAnswer.trim()) return;
-                          await saveAdminChatbotFaq({
-                            id: '',
-                            question: logItem.userMessage,
-                            answer: convertAnswer.trim(),
-                            lang: logItem.lang === 'bn' ? 'bn' : 'both',
-                            category: 'Customer Q&A',
-                            active: true,
-                            published: true,
-                          });
-                          await markChatbotLogResolved(logItem.id, true);
-                          setLogs((prev) =>
-                            prev.map((l) =>
-                              l.id === logItem.id ? { ...l, resolved: true } : l
-                            )
-                          );
-                          setFaqs(await fetchAdminChatbotFaqs());
-                          setConvertingLog(null);
-                          setStatusMsg('Saved verified FAQ & marked question resolved.');
-                        }}
-                        className="rounded bg-[#B47B2B] px-3 py-1.5 text-[11px] font-medium text-[#FFFDF9]"
-                      >
-                        Publish FAQ &amp; Resolve
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConvertingLog(null)}
-                        className="px-2 text-[11px] text-[#635647]"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-            {unansweredQueue.length === 0 && (
-              <p className="text-xs text-[#635647]">No pending unanswered questions.</p>
-            )}
+        <div className="space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4 text-xs">
+            <span className="text-[#635647]">
+              Review unanswered turns and customer thumbs-down feedback to expand verified FAQs or export regression test cases.
+            </span>
+            <button
+              type="button"
+              onClick={handleExportRegressionJson}
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-3.5 py-1.5 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>Export Regression JSON</span>
+            </button>
           </div>
 
-          <div className="space-y-3 lg:col-span-6">
-            <h3 className="flex items-center gap-2 font-display text-base font-semibold">
-              <MessageSquare className="h-4 w-4 text-[#B47B2B]" />
-              <span>Human Support Requests ({supportRequests.length})</span>
-            </h3>
-            {supportRequests.map((req) => (
-              <div
-                key={req.id}
-                className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4 text-xs"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="font-semibold text-[#1E1710]">{req.customerName}</p>
-                    <a href={`tel:${req.phone}`} className="font-mono text-[#8A5A17] hover:underline">
-                      {req.phone}
-                    </a>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+            <div className="space-y-4 lg:col-span-6">
+              <h3 className="flex items-center gap-2 font-display text-base font-semibold">
+                <AlertTriangle className="h-4 w-4 text-[#B47B2B]" />
+                <span>Unanswered Questions ({unansweredQueue.length})</span>
+              </h3>
+              {unansweredQueue.map((logItem) => (
+                <div
+                  key={logItem.id}
+                  className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4 text-xs"
+                >
+                  <p className="font-semibold text-[#1E1710]">{logItem.userMessage}</p>
+                  <p className="mt-1 text-[#635647]">Reply: {logItem.assistantReply}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConvertingLog(logItem);
+                        setConvertAnswer('');
+                      }}
+                      className="rounded-lg bg-[#1E1710] px-3 py-1.5 text-[11px] font-medium text-[#FAF7F2]"
+                    >
+                      Write Answer &amp; Save as FAQ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await markChatbotLogResolved(logItem.id, true);
+                        setLogs((prev) =>
+                          prev.map((l) => (l.id === logItem.id ? { ...l, resolved: true } : l))
+                        );
+                      }}
+                      className="rounded-lg border border-[rgba(30,23,16,0.2)] px-3 py-1.5 text-[11px]"
+                    >
+                      Mark Resolved
+                    </button>
                   </div>
-                  <select
-                    value={req.status}
-                    onChange={async (e) => {
-                      const nextStatus = e.target.value as ChatbotSupportRequestRecord['status'];
-                      await updateSupportRequestStatus(req.id, nextStatus);
-                      setSupportRequests((prev) =>
-                        prev.map((r) => (r.id === req.id ? { ...r, status: nextStatus } : r))
-                      );
-                    }}
-                    className="rounded border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-2.5 py-1 text-base sm:text-xs"
-                  >
-                    <option value="open">Open</option>
-                    <option value="contacted">Contacted</option>
-                    <option value="resolved">Resolved</option>
-                  </select>
+
+                  {convertingLog?.id === logItem.id && (
+                    <div className="mt-3 space-y-2 rounded-xl bg-[#FAF7F2] p-3">
+                      <textarea
+                        rows={3}
+                        value={convertAnswer}
+                        onChange={(e) => setConvertAnswer(e.target.value)}
+                        placeholder="Write verified answer to publish as FAQ..."
+                        className="w-full rounded border border-[rgba(30,23,16,0.18)] px-3 py-2 text-base sm:text-xs"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!convertAnswer.trim()) return;
+                            await saveAdminChatbotFaq({
+                              id: '',
+                              question: logItem.userMessage,
+                              answer: convertAnswer.trim(),
+                              lang: logItem.lang === 'bn' ? 'bn' : 'both',
+                              category: 'Customer Q&A',
+                              active: true,
+                              published: true,
+                            });
+                            await markChatbotLogResolved(logItem.id, true);
+                            setLogs((prev) =>
+                              prev.map((l) =>
+                                l.id === logItem.id ? { ...l, resolved: true } : l
+                              )
+                            );
+                            setFaqs(await fetchAdminChatbotFaqs());
+                            setConvertingLog(null);
+                            setStatusMsg('Saved verified FAQ & marked question resolved.');
+                          }}
+                          className="rounded bg-[#B47B2B] px-3 py-1.5 text-[11px] font-medium text-[#FFFDF9]"
+                        >
+                          Publish FAQ &amp; Resolve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConvertingLog(null)}
+                          className="px-2 text-[11px] text-[#635647]"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <p className="mt-2 text-[#635647]">{req.issueSummary}</p>
+              ))}
+              {unansweredQueue.length === 0 && (
+                <p className="text-xs text-[#635647]">No pending unanswered questions.</p>
+              )}
+
+              {/* Customer Negative Feedback Queue */}
+              <div className="pt-2 space-y-3">
+                <h3 className="flex items-center gap-2 font-display text-base font-semibold">
+                  <ThumbsDown className="h-4 w-4 text-red-700" />
+                  <span>
+                    Customer Negative Feedback ({feedbackList.filter((f) => f.rating === 'down' && !f.resolved).length})
+                  </span>
+                </h3>
+                {feedbackList
+                  .filter((f) => f.rating === 'down' && !f.resolved)
+                  .map((fb) => (
+                    <div
+                      key={fb.id}
+                      className="rounded-xl border border-red-200 bg-[#FFFDF9] p-4 text-xs"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[10.5px] text-red-800">
+                        <span>reason={fb.reason || 'other'} · intent={fb.intent}</span>
+                        <span>{fb.lang.toUpperCase()}</span>
+                      </div>
+                      <p className="mt-1.5 font-semibold text-[#1E1710]">{fb.userMessage}</p>
+                      <p className="mt-1 text-[#635647]">Assistant: {fb.assistantReply}</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSubTab('faqs');
+                            setFaqDraft({
+                              id: '',
+                              question: fb.userMessage,
+                              answer: '',
+                              lang: fb.lang === 'bn' ? 'bn' : 'both',
+                              category: 'Feedback Improvement',
+                              active: true,
+                              published: true,
+                            });
+                          }}
+                          className="rounded-lg bg-[#1E1710] px-3 py-1.5 text-[11px] font-medium text-[#FAF7F2]"
+                        >
+                          Convert to FAQ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await resolveChatbotFeedback(fb.id, true);
+                            setFeedbackList((prev) =>
+                              prev.map((item) =>
+                                item.id === fb.id ? { ...item, resolved: true } : item
+                              )
+                            );
+                          }}
+                          className="rounded-lg border border-[rgba(30,23,16,0.2)] px-3 py-1.5 text-[11px]"
+                        >
+                          Mark Resolved
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                {feedbackList.filter((f) => f.rating === 'down' && !f.resolved).length === 0 && (
+                  <p className="text-xs text-[#635647]">
+                    No unresolved negative customer feedback ({feedbackList.filter((f) => f.rating === 'up').length}{' '}
+                    <ThumbsUp className="inline h-3 w-3 text-emerald-700" /> positive ratings recorded).
+                  </p>
+                )}
               </div>
-            ))}
-            {supportRequests.length === 0 && (
-              <p className="text-xs text-[#635647]">No customer handover requests submitted yet.</p>
-            )}
+            </div>
+
+            <div className="space-y-3 lg:col-span-6">
+              <h3 className="flex items-center gap-2 font-display text-base font-semibold">
+                <MessageSquare className="h-4 w-4 text-[#B47B2B]" />
+                <span>Human Support Requests ({supportRequests.length})</span>
+              </h3>
+              {supportRequests.map((req) => (
+                <div
+                  key={req.id}
+                  className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4 text-xs"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-semibold text-[#1E1710]">{req.customerName}</p>
+                      <a href={`tel:${req.phone}`} className="font-mono text-[#8A5A17] hover:underline">
+                        {req.phone}
+                      </a>
+                    </div>
+                    <select
+                      value={req.status}
+                      onChange={async (e) => {
+                        const nextStatus = e.target.value as ChatbotSupportRequestRecord['status'];
+                        await updateSupportRequestStatus(req.id, nextStatus);
+                        setSupportRequests((prev) =>
+                          prev.map((r) => (r.id === req.id ? { ...r, status: nextStatus } : r))
+                        );
+                      }}
+                      className="rounded border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-2.5 py-1 text-base sm:text-xs"
+                    >
+                      <option value="open">Open</option>
+                      <option value="contacted">Contacted</option>
+                      <option value="resolved">Resolved</option>
+                    </select>
+                  </div>
+                  <p className="mt-2 text-[#635647]">{req.issueSummary}</p>
+                </div>
+              ))}
+              {supportRequests.length === 0 && (
+                <p className="text-xs text-[#635647]">No customer handover requests submitted yet.</p>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1714,10 +2616,47 @@ export function AdminChatbotPanel({
                 className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4 text-xs"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#635647]">
-                  <span className="font-mono">
-                    {l.sessionId} · {l.lang.toUpperCase()} · {l.intent}
-                    {l.isTestPlayground ? ' · PLAYGROUND' : ''}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5 font-mono">
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                        l.path === 'gemini'
+                          ? 'bg-emerald-100 text-emerald-900'
+                          : 'bg-amber-100 text-amber-900'
+                      }`}
+                    >
+                      path={l.path || 'fallback'}
+                    </span>
+                    {l.model && <span className="text-[#8A5A17]">[{l.model}]</span>}
+                    {l.finishReason && (
+                      <span className="rounded bg-[#F2ECE1] px-1.5 py-0.5 text-[10px] text-[#1E1710]">
+                        finish={l.finishReason}
+                      </span>
+                    )}
+                    {l.guardCategory && (
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">
+                        guard={l.guardCategory}
+                      </span>
+                    )}
+                    {typeof l.retryCount === 'number' && l.retryCount > 0 && (
+                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-900">
+                        retries={l.retryCount}
+                      </span>
+                    )}
+                    {l.factsVersion && (
+                      <span className="text-[10px] text-[#635647]">
+                        facts={l.factsVersion}
+                      </span>
+                    )}
+                    {l.errorCode && (
+                      <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] text-red-900">
+                        {l.errorCode}
+                      </span>
+                    )}
+                    <span>
+                      {l.sessionId} · {l.lang.toUpperCase()} · {l.intent}
+                      {l.isTestPlayground ? ' · PLAYGROUND' : ''}
+                    </span>
+                  </div>
                   <div className="flex items-center gap-3">
                     <span className="font-mono">
                       {l.latencyMs}ms · {l.promptTokens + l.outputTokens} tok
@@ -1772,6 +2711,39 @@ export function AdminChatbotPanel({
             <p className="text-[11px] text-[#635647]">
               Playground test orders validate full flow cleanly without writing fake customer orders.
             </p>
+            <button
+              type="button"
+              disabled={benchmarkRunning || playBusy}
+              onClick={handleRunBenchmark}
+              className="inline-flex min-h-[40px] w-full items-center justify-center gap-1.5 rounded-lg bg-[#1E1710] px-3 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50"
+            >
+              {benchmarkRunning ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5 text-[#D89B2B]" />
+              )}
+              <span>
+                {benchmarkRunning
+                  ? `Running Benchmark (${benchmarkResults.length}/${ONE_CLICK_TESTS.length})...`
+                  : 'Run Phase 1 Benchmark (10 Prompts)'}
+              </span>
+            </button>
+
+            {benchmarkResults.length > 0 && (
+              <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] p-2.5 font-mono text-[10.5px]">
+                {benchmarkResults.map((r) => (
+                  <div key={r.label} className="flex items-center justify-between gap-2">
+                    <span className={r.passed ? 'text-emerald-800' : 'text-red-700'}>
+                      {r.passed ? 'PASS' : 'FAIL'} · {r.label}
+                    </span>
+                    <span className="text-[#635647]">
+                      {r.intent} · {r.latencyMs}ms
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-[#8A5A17]">
                 One-Click Verification Prompts
@@ -1781,7 +2753,7 @@ export function AdminChatbotPanel({
                   <button
                     key={t.label}
                     type="button"
-                    disabled={playBusy}
+                    disabled={playBusy || benchmarkRunning}
                     onClick={() => handlePlaygroundSend(t.prompt)}
                     className="rounded-lg border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] px-3 py-2 text-left text-xs font-medium text-[#1E1710] hover:border-[#B47B2B] hover:bg-[#F2ECE1]"
                   >
@@ -1792,7 +2764,7 @@ export function AdminChatbotPanel({
             </div>
           </div>
 
-          <div className="flex h-[540px] flex-col overflow-hidden rounded-2xl border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] lg:col-span-8">
+          <div className="flex h-[580px] flex-col overflow-hidden rounded-2xl border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] lg:col-span-8">
             <div className="flex items-center justify-between border-b border-[rgba(30,23,16,0.1)] bg-[#1E1710] px-4 py-3 text-xs text-[#FAF7F2]">
               <span className="flex items-center gap-2 font-medium">
                 <Check className="h-3.5 w-3.5 text-[#D89B2B]" />
@@ -1811,11 +2783,22 @@ export function AdminChatbotPanel({
               {playMessages.length === 0 && (
                 <p className="text-xs text-[#635647]">
                   Select any test prompt on the left or type a Bangla, Banglish, or English test
-                  question below.
+                  question below. Full diagnostics (model, intent, RAG score, latency, tokens)
+                  appear under each assistant reply.
                 </p>
               )}
-              {playMessages.map((msg) => (
-                <ChatMessageBubble key={msg.id} msg={msg} lang="en" />
+              {playMessages.map((msg, idx) => (
+                <ChatMessageBubble
+                  key={msg.id}
+                  msg={msg}
+                  lang="en"
+                  showDiagnostics={true}
+                  isLatestAssistant={idx === playMessages.length - 1 && msg.role === 'assistant'}
+                  onSelectProductVariant={(weight) =>
+                    handlePlaygroundSend(`I want to order ${weight} jar`)
+                  }
+                  onSuggestedReply={(q) => handlePlaygroundSend(q)}
+                />
               ))}
             </div>
 
@@ -1835,7 +2818,7 @@ export function AdminChatbotPanel({
               />
               <button
                 type="button"
-                disabled={playBusy || !playInput.trim()}
+                disabled={playBusy || benchmarkRunning || !playInput.trim()}
                 onClick={() => handlePlaygroundSend(playInput)}
                 className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#B47B2B] px-4 text-xs font-medium text-[#FFFDF9] disabled:opacity-50"
               >

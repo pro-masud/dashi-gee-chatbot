@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import {
   CouponRecord,
+  DEFAULT_STORE_SETTINGS,
+  DeliveryZone,
   OrderRecord,
   PaymentMethod,
   StoreSettingsDoc,
@@ -25,7 +27,14 @@ import {
   createOrderAtomically,
   fetchCouponByCode,
 } from '../lib/firebase';
-import { BANGLADESH_DISTRICTS, IMAGES, Lang, formatBdt } from '../data/deshiGeeData';
+import {
+  BANGLADESH_DISTRICTS,
+  IMAGES,
+  Lang,
+  clientAssessAddressCompleteness,
+  clientResolveZoneFromDistrictAndArea,
+  formatBdt,
+} from '../data/deshiGeeData';
 import { trackStoreEvent } from '../lib/analytics';
 import { ResilientImage } from './ResilientImage';
 
@@ -115,22 +124,48 @@ export function BagCheckoutDrawer({
     (sum, item) => sum + getPriceForWeight(item.weight) * item.qty,
     0
   );
-  const deliveryZone: 'dhaka' | 'nationwide' =
-    district === 'Dhaka' ? 'dhaka' : 'nationwide';
+  const deliveryZone: DeliveryZone = clientResolveZoneFromDistrictAndArea(
+    district,
+    area,
+    address
+  );
+  const suburbanFee = settings.dhakaSuburbanFee ?? DEFAULT_STORE_SETTINGS.dhakaSuburbanFee ?? 90;
+  const remoteFee = settings.remoteDistrictFee ?? DEFAULT_STORE_SETTINGS.remoteDistrictFee ?? 170;
   const qualifiesFree = subtotal >= settings.freeDeliveryThreshold;
   const deliveryFee =
     cart.length === 0 || qualifiesFree
       ? 0
       : deliveryZone === 'dhaka'
         ? settings.insideDhakaFee
-        : settings.outsideDhakaFee;
+        : deliveryZone === 'suburban'
+          ? suburbanFee
+          : deliveryZone === 'remote'
+            ? remoteFee
+            : settings.outsideDhakaFee;
+
+  const estimatedDeliveryWindow =
+    deliveryZone === 'dhaka'
+      ? settings.estimatedDhakaDays
+      : deliveryZone === 'suburban'
+        ? settings.estimatedSuburbanDays || DEFAULT_STORE_SETTINGS.estimatedSuburbanDays || '2-3 days'
+        : deliveryZone === 'remote'
+          ? settings.estimatedRemoteDays || DEFAULT_STORE_SETTINGS.estimatedRemoteDays || '4-6 days'
+          : settings.estimatedOutsideDays;
+
+  const addressCheck = address.trim()
+    ? clientAssessAddressCompleteness(address, area, district)
+    : { complete: true };
 
   const advanceDiscountPct =
     paymentMethod !== 'cod' && settings.advanceDiscountPct > 0
       ? settings.advanceDiscountPct
       : 0;
+  const couponAllowedWithPayment =
+    paymentMethod === 'cod' || appliedCoupon?.stackableWithAdvance !== false;
   const couponPct =
-    appliedCoupon && subtotal >= appliedCoupon.minSubtotalBdt
+    appliedCoupon &&
+    subtotal >= appliedCoupon.minSubtotalBdt &&
+    couponAllowedWithPayment
       ? appliedCoupon.discountPct
       : 0;
   const totalDiscount = Math.round(
@@ -150,10 +185,24 @@ export function BagCheckoutDrawer({
     setCouponFeedback('');
     try {
       const found = await fetchCouponByCode(code);
+      const isExpired = Boolean(
+        found?.expiresAt && Number.isFinite(Date.parse(found.expiresAt)) && Date.parse(found.expiresAt) < Date.now()
+      );
+      const limitReached = Boolean(
+        found?.maxUses && found.maxUses > 0 && (found.usedCount || 0) >= found.maxUses
+      );
       if (!found || !found.active) {
         setAppliedCoupon(null);
         setCouponFeedback(
-          bn ? 'কুপন কোডটি সঠিক নয় বা মেয়াদ শেষ।' : 'Coupon code is invalid or inactive.'
+          bn ? 'কুপন কোডটি সঠিক নয় বা নিষ্ক্রিয়।' : 'Coupon code is invalid or inactive.'
+        );
+      } else if (isExpired) {
+        setAppliedCoupon(null);
+        setCouponFeedback(bn ? 'এই কুপনের মেয়াদ শেষ হয়ে গেছে।' : 'This coupon has expired.');
+      } else if (limitReached) {
+        setAppliedCoupon(null);
+        setCouponFeedback(
+          bn ? 'এই কুপনের সর্বোচ্চ ব্যবহারসীমা পূর্ণ হয়েছে।' : 'This coupon has reached its usage limit.'
         );
       } else if (subtotal < found.minSubtotalBdt) {
         setAppliedCoupon(null);
@@ -161,6 +210,13 @@ export function BagCheckoutDrawer({
           bn
             ? `এই কুপনের জন্য ন্যূনতম ${formatBdt(found.minSubtotalBdt)} অর্ডার প্রয়োজন।`
             : `Minimum ${formatBdt(found.minSubtotalBdt)} subtotal required for this coupon.`
+        );
+      } else if (paymentMethod !== 'cod' && found.stackableWithAdvance === false) {
+        setAppliedCoupon(found);
+        setCouponFeedback(
+          bn
+            ? `কুপন গৃহীত, তবে ${found.discountPct}% কোডটি বিকাশ/নগদ অগ্রিম ডিসকাউন্টের সাথে একত্রে প্রযোজ্য নয়।`
+            : `Coupon saved, note ${found.discountPct}% cannot stack with advance MFS discount.`
         );
       } else {
         setAppliedCoupon(found);
@@ -241,9 +297,12 @@ export function BagCheckoutDrawer({
       setFormError(bn ? 'আপনার এলাকার নাম লিখুন।' : 'Please enter your area or thana.');
       return;
     }
-    if (address.trim().length < 5) {
+    const addrValid = clientAssessAddressCompleteness(address, area, district);
+    if (!addrValid.complete) {
       setFormError(
-        bn ? 'বিস্তারিত বাসা ও সড়কের ঠিকানা লিখুন।' : 'Please enter your complete delivery address.'
+        bn
+          ? 'কুরিয়ার ডেলিভারির জন্য অনুগ্রহ করে সম্পূর্ণ বাড়ি, সড়ক বা ফ্ল্যাট নম্বরসহ ঠিকানা লিখুন।'
+          : 'Please enter a full delivery street/house/road address so the courier can locate you.'
       );
       return;
     }
@@ -298,16 +357,7 @@ export function BagCheckoutDrawer({
           qty1kg,
           paymentMethod,
           txnId: paymentMethod === 'cod' ? '' : txnId.trim(),
-          couponDiscountPct: couponPct,
-          storePrices: {
-            '250g': settings.price250g,
-            '500g': settings.price500g,
-            '1kg': settings.price1kg,
-            insideDhakaFee: settings.insideDhakaFee,
-            outsideDhakaFee: settings.outsideDhakaFee,
-            freeDeliveryThreshold: settings.freeDeliveryThreshold,
-            advanceDiscountPct: settings.advanceDiscountPct,
-          },
+          couponCode: appliedCoupon?.code || '',
         }),
       });
 
@@ -321,20 +371,19 @@ export function BagCheckoutDrawer({
         return;
       }
 
-      const estDelivery =
-        deliveryZone === 'dhaka'
-          ? settings.estimatedDhakaDays
-          : settings.estimatedOutsideDays;
+      const resolvedDistrict = String(prepared.district || district);
+      const resolvedZone = (prepared.deliveryZone || deliveryZone) as DeliveryZone;
+      const estDelivery = String(prepared.estimatedDelivery || estimatedDeliveryWindow);
 
       const orderPayload: Omit<OrderRecord, 'createdAt' | 'updatedAt'> = {
         orderNumber: prepared.orderNumber,
         customerName: customerName.trim().slice(0, 100),
         phone: cleanPhone,
-        district,
+        district: resolvedDistrict,
         area: area.trim().slice(0, 100),
         address: address.trim().slice(0, 300),
         note: combinedNote.slice(0, 240),
-        deliveryZone,
+        deliveryZone: resolvedZone,
         weight: prepared.weight,
         qty: prepared.qty,
         qty250g: prepared.qty250g,
@@ -354,9 +403,18 @@ export function BagCheckoutDrawer({
         status: 'pending',
         estimatedDelivery: estDelivery,
         webhookStatus: 'pending',
+        ...(typeof prepared.riskScore === 'number' ? { riskScore: prepared.riskScore } : {}),
+        ...(Array.isArray(prepared.riskSignals) && prepared.riskSignals.length > 0
+          ? { riskSignals: prepared.riskSignals }
+          : {}),
+        ...(prepared.reviewStatus ? { reviewStatus: prepared.reviewStatus } : {}),
+        ...(prepared.duplicateWarning ? { duplicateWarning: prepared.duplicateWarning } : {}),
+        ...(prepared.codVerificationStatus
+          ? { codVerificationStatus: prepared.codVerificationStatus }
+          : {}),
       };
 
-      // Atomic Firestore persistence (orders + PII-safe order_tracking)
+      // Atomic Firestore persistence (orders + PII-safe order_tracking + audit log + stock decrement)
       await createOrderAtomically(orderPayload);
 
       // Fire non-blocking owner notification webhook (failure never erases saved order)
@@ -504,6 +562,11 @@ export function BagCheckoutDrawer({
                           ? 'আপনার TxnID যাচাইয়ের জন্য সংরক্ষণ করা হয়েছে। অ্যাডমিন যাচাইয়ের পর অর্ডার কনফার্ম হবে।'
                           : 'Your transaction ID has been recorded and remains pending verification until confirmed by our team.'}
                     </p>
+                    {lastConfirmedOrder.duplicateWarning && (
+                      <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
+                        {lastConfirmedOrder.duplicateWarning}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -779,9 +842,10 @@ export function BagCheckoutDrawer({
                   ))}
                 </select>
                 <p className="text-xs text-[#635647]">
-                  {deliveryZone === 'dhaka'
-                    ? settings.estimatedDhakaDays
-                    : settings.estimatedOutsideDays}
+                  {estimatedDeliveryWindow} ·{' '}
+                  {bn
+                    ? settings.cutoffNoticeBn || DEFAULT_STORE_SETTINGS.cutoffNoticeBn
+                    : settings.cutoffNoticeEn || DEFAULT_STORE_SETTINGS.cutoffNoticeEn}
                 </p>
               </div>
             </div>
@@ -880,6 +944,13 @@ export function BagCheckoutDrawer({
                   placeholder={bn ? 'বাড়ি, সড়ক, ফ্ল্যাট নম্বর' : 'House, Road, Floor / Flat'}
                   className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3.5 py-2.5 text-base text-[#1E1710] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
                 />
+                {!addressCheck.complete && (
+                  <p className="mt-1 text-[11px] text-[#8A5A17]">
+                    {bn
+                      ? 'দয়া করে বাড়ি, সড়ক বা ফ্ল্যাট নম্বরসহ বিস্তারিত ঠিকানা লিখুন।'
+                      : 'Add house, road, or floor details for accurate courier delivery.'}
+                  </p>
+                )}
               </div>
 
               <div>

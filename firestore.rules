@@ -51,8 +51,12 @@ service cloud.firestore {
           'productNameEn', 'productNameBn', 'taglineEn', 'taglineBn',
           'originLocation', 'price250g', 'price500g', 'price1kg',
           'stock250g', 'stock500g', 'stock1kg', 'insideDhakaFee',
-          'outsideDhakaFee', 'freeDeliveryThreshold', 'estimatedDhakaDays',
-          'estimatedOutsideDays', 'bkashNumber', 'nagadNumber',
+          'dhakaSuburbanFee', 'outsideDhakaFee', 'remoteDistrictFee',
+          'freeDeliveryThreshold', 'estimatedDhakaDays', 'estimatedSuburbanDays',
+          'estimatedOutsideDays', 'estimatedRemoteDays',
+          'dispatchCutoffHourBst', 'cutoffNoticeEn', 'cutoffNoticeBn',
+          'codConfirmEnabled', 'codHighValueThresholdBdt', 'lastOrderNumber',
+          'bkashNumber', 'nagadNumber',
           'advanceDiscountPct', 'whatsappNumber', 'supportPhone',
           'supportEmail', 'businessAddress', 'facebookUrl', 'instagramUrl',
           'activeBatchCode', 'updatedAt'
@@ -69,10 +73,20 @@ service cloud.firestore {
         && data.stock500g is number && data.stock500g >= 0
         && data.stock1kg is number && data.stock1kg >= 0
         && data.insideDhakaFee is number && data.insideDhakaFee >= 0
+        && (!('dhakaSuburbanFee' in data) || (data.dhakaSuburbanFee is number && data.dhakaSuburbanFee >= 0))
         && data.outsideDhakaFee is number && data.outsideDhakaFee >= 0
+        && (!('remoteDistrictFee' in data) || (data.remoteDistrictFee is number && data.remoteDistrictFee >= 0))
         && data.freeDeliveryThreshold is number && data.freeDeliveryThreshold >= 0
         && data.estimatedDhakaDays is string && data.estimatedDhakaDays.size() <= 80
+        && (!('estimatedSuburbanDays' in data) || (data.estimatedSuburbanDays is string && data.estimatedSuburbanDays.size() <= 80))
         && data.estimatedOutsideDays is string && data.estimatedOutsideDays.size() <= 80
+        && (!('estimatedRemoteDays' in data) || (data.estimatedRemoteDays is string && data.estimatedRemoteDays.size() <= 80))
+        && (!('dispatchCutoffHourBst' in data) || (data.dispatchCutoffHourBst is number && data.dispatchCutoffHourBst >= 0 && data.dispatchCutoffHourBst <= 23))
+        && (!('cutoffNoticeEn' in data) || (data.cutoffNoticeEn is string && data.cutoffNoticeEn.size() <= 240))
+        && (!('cutoffNoticeBn' in data) || (data.cutoffNoticeBn is string && data.cutoffNoticeBn.size() <= 300))
+        && (!('codConfirmEnabled' in data) || data.codConfirmEnabled is bool)
+        && (!('codHighValueThresholdBdt' in data) || (data.codHighValueThresholdBdt is number && data.codHighValueThresholdBdt >= 0))
+        && (!('lastOrderNumber' in data) || (data.lastOrderNumber is string && data.lastOrderNumber.size() <= 20))
         && data.bkashNumber is string && data.bkashNumber.size() <= 30
         && data.nagadNumber is string && data.nagadNumber.size() <= 30
         && data.advanceDiscountPct is number && data.advanceDiscountPct >= 0 && data.advanceDiscountPct <= 50
@@ -103,7 +117,8 @@ service cloud.firestore {
           'unitPriceBdt', 'subtotalBdt', 'deliveryFeeBdt', 'discountBdt',
           'totalBdt', 'couponCode', 'paymentMethod', 'paymentStatus',
           'txnId', 'paymentProofData', 'status', 'estimatedDelivery',
-          'webhookStatus', 'createdAt', 'updatedAt'
+          'webhookStatus', 'riskScore', 'riskSignals', 'reviewStatus',
+          'duplicateWarning', 'codVerificationStatus', 'createdAt', 'updatedAt'
         ])
         && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
         && data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 100
@@ -112,7 +127,7 @@ service cloud.firestore {
         && data.area is string && data.area.size() >= 2 && data.area.size() <= 100
         && data.address is string && data.address.size() >= 5 && data.address.size() <= 300
         && data.note is string && data.note.size() <= 240
-        && data.deliveryZone in ['dhaka', 'nationwide']
+        && data.deliveryZone in ['dhaka', 'suburban', 'nationwide', 'remote']
         && data.weight in ['250g', '500g', '1kg']
         && data.qty250g is number && data.qty250g >= 0 && data.qty250g <= 50
         && data.qty500g is number && data.qty500g >= 0 && data.qty500g <= 50
@@ -133,6 +148,11 @@ service cloud.firestore {
         && data.status in ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled']
         && data.estimatedDelivery is string && data.estimatedDelivery.size() <= 80
         && data.webhookStatus is string && data.webhookStatus.size() <= 80
+        && (!('riskScore' in data) || (data.riskScore is number && data.riskScore >= 0 && data.riskScore <= 100))
+        && (!('riskSignals' in data) || (data.riskSignals is list && data.riskSignals.size() <= 12 && (data.riskSignals.size() == 0 || data.riskSignals[0] is string)))
+        && (!('reviewStatus' in data) || data.reviewStatus in ['none', 'manual_review', 'approved', 'rejected'])
+        && (!('duplicateWarning' in data) || (data.duplicateWarning is string && data.duplicateWarning.size() <= 240))
+        && (!('codVerificationStatus' in data) || data.codVerificationStatus in ['not_required', 'not_configured', 'pending', 'verified'])
         && data.updatedAt == request.time;
     }
 
@@ -166,17 +186,29 @@ service cloud.firestore {
           'paymentStatus', 'status', 'estimatedDelivery', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'orderNumber', 'weight', 'qty', 'itemsSummary', 'totalBdt', 'paymentMethod',
-          'paymentStatus', 'status', 'estimatedDelivery', 'updatedAt'
+          'orderNumber', 'weight', 'qty', 'qty250g', 'qty500g', 'qty1kg',
+          'itemsSummary', 'subtotalBdt', 'deliveryFeeBdt', 'discountBdt',
+          'couponCode', 'deliveryZone', 'district', 'totalBdt', 'paymentMethod',
+          'paymentStatus', 'status', 'reviewStatus', 'estimatedDelivery', 'updatedAt'
         ])
         && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
         && data.weight in ['250g', '500g', '1kg']
         && data.qty is number && data.qty >= 1 && data.qty <= 50
+        && (!('qty250g' in data) || (data.qty250g is number && data.qty250g >= 0 && data.qty250g <= 50))
+        && (!('qty500g' in data) || (data.qty500g is number && data.qty500g >= 0 && data.qty500g <= 50))
+        && (!('qty1kg' in data) || (data.qty1kg is number && data.qty1kg >= 0 && data.qty1kg <= 50))
         && data.itemsSummary is string && data.itemsSummary.size() >= 3 && data.itemsSummary.size() <= 80
+        && (!('subtotalBdt' in data) || (data.subtotalBdt is number && data.subtotalBdt > 0))
+        && (!('deliveryFeeBdt' in data) || (data.deliveryFeeBdt is number && data.deliveryFeeBdt >= 0))
+        && (!('discountBdt' in data) || (data.discountBdt is number && data.discountBdt >= 0))
+        && (!('couponCode' in data) || (data.couponCode is string && data.couponCode.size() <= 32))
+        && (!('deliveryZone' in data) || data.deliveryZone in ['dhaka', 'suburban', 'nationwide', 'remote'])
+        && (!('district' in data) || (data.district is string && data.district.size() <= 80))
         && data.totalBdt is number && data.totalBdt > 0
         && data.paymentMethod in ['cod', 'bkash', 'nagad']
         && data.paymentStatus in ['cod_due', 'pending_verification', 'verified', 'failed']
         && data.status in ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled']
+        && (!('reviewStatus' in data) || data.reviewStatus in ['none', 'manual_review', 'approved', 'rejected'])
         && data.estimatedDelivery is string && data.estimatedDelivery.size() <= 80
         && data.updatedAt == request.time;
     }
@@ -226,11 +258,20 @@ service cloud.firestore {
 
     function isValidCoupon(data) {
       return data.keys().hasAll(['code', 'discountPct', 'minSubtotalBdt', 'active', 'updatedAt'])
-        && data.keys().hasOnly(['code', 'discountPct', 'minSubtotalBdt', 'active', 'updatedAt'])
+        && data.keys().hasOnly([
+          'code', 'discountPct', 'minSubtotalBdt', 'active',
+          'expiresAt', 'maxUses', 'usedCount', 'stackableWithAdvance', 'descriptionEn',
+          'updatedAt'
+        ])
         && data.code is string && data.code.size() >= 3 && data.code.size() <= 32
         && data.discountPct is number && data.discountPct > 0 && data.discountPct <= 50
         && data.minSubtotalBdt is number && data.minSubtotalBdt >= 0
         && data.active is bool
+        && (!('expiresAt' in data) || (data.expiresAt is string && data.expiresAt.size() <= 40))
+        && (!('maxUses' in data) || (data.maxUses is number && data.maxUses >= 0))
+        && (!('usedCount' in data) || (data.usedCount is number && data.usedCount >= 0))
+        && (!('stackableWithAdvance' in data) || data.stackableWithAdvance is bool)
+        && (!('descriptionEn' in data) || (data.descriptionEn is string && data.descriptionEn.size() <= 160))
         && data.updatedAt == request.time;
     }
 
@@ -263,11 +304,13 @@ service cloud.firestore {
           'botName', 'brandName', 'brandIntro', 'brandStory', 'brandMission',
           'founderInfo', 'productDescription', 'ingredients', 'taste', 'aroma',
           'texture', 'productionMethod', 'shelfLife', 'storageInstructions',
-          'approvedClaims', 'currentOffers', 'district', 'city', 'googleMapsUrl',
+          'approvedClaims', 'blockedClaims', 'approvedClaimsMeta', 'claimAuditHistory',
+          'currentOffers', 'district', 'city', 'googleMapsUrl',
           'directionsUrl', 'businessHours', 'openHourBst', 'closeHourBst',
           'closedDays', 'supportAvailabilityNote', 'deliveryPolicy', 'returnPolicy',
           'replacementPolicy', 'otherPaymentInfo', 'supportInstructions',
           'customInstructions', 'responseTone', 'responseLength', 'languageBehavior',
+          'synonyms', 'primaryModel', 'fallbackModel',
           'fallbackMessageBn', 'fallbackMessageEn', 'welcomeMessageBn',
           'welcomeMessageEn', 'quickQuestionsBn', 'quickQuestionsEn',
           'retentionDays', 'dailyRequestLimit', 'version', 'lastSyncStatus', 'updatedAt'
@@ -318,7 +361,7 @@ service cloud.firestore {
       return data.customInstructions is string && data.customInstructions.size() <= 4000
         && data.responseTone in ['warm', 'concise', 'formal']
         && data.responseLength in ['short', 'balanced', 'detailed']
-        && data.languageBehavior in ['auto', 'prefer_bn', 'prefer_en']
+        && data.languageBehavior in ['auto', 'prefer_bn', 'prefer_en', 'always_bn', 'mirror', 'customer_choice']
         && data.fallbackMessageBn is string && data.fallbackMessageBn.size() <= 400
         && data.fallbackMessageEn is string && data.fallbackMessageEn.size() <= 400
         && data.welcomeMessageBn is string && data.welcomeMessageBn.size() <= 500
@@ -334,11 +377,21 @@ service cloud.firestore {
         && data.updatedAt == request.time;
     }
 
+    function isValidChatbotConfigClaimsGovernance(data) {
+      return (!('blockedClaims' in data) || (data.blockedClaims is string && data.blockedClaims.size() <= 800))
+        && (!('approvedClaimsMeta' in data) || (data.approvedClaimsMeta is list && data.approvedClaimsMeta.size() <= 20 && (data.approvedClaimsMeta.size() == 0 || data.approvedClaimsMeta[0] is map)))
+        && (!('claimAuditHistory' in data) || (data.claimAuditHistory is list && data.claimAuditHistory.size() <= 30 && (data.claimAuditHistory.size() == 0 || data.claimAuditHistory[0] is map)))
+        && (!('synonyms' in data) || (data.synonyms is map && data.synonyms.size() <= 40))
+        && (!('primaryModel' in data) || (data.primaryModel is string && data.primaryModel.size() <= 60))
+        && (!('fallbackModel' in data) || (data.fallbackModel is string && data.fallbackModel.size() <= 60));
+    }
+
     function isValidChatbotConfig(data) {
       return isValidChatbotConfigKeys(data)
         && isValidChatbotConfigBrandFacts(data)
         && isValidChatbotConfigLocation(data)
-        && isValidChatbotConfigBehavior(data);
+        && isValidChatbotConfigBehavior(data)
+        && isValidChatbotConfigClaimsGovernance(data);
     }
 
     function isValidChatbotVersion(data) {
@@ -370,7 +423,9 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'title', 'category', 'sourceType', 'fileName', 'content',
-          'chunkCount', 'status', 'syncStatus', 'updatedAt'
+          'chunkCount', 'status', 'syncStatus',
+          'version', 'owner', 'language', 'effectiveDate', 'reviewDate', 'contentHash', 'accessScope',
+          'updatedAt'
         ])
         && data.title is string && data.title.size() >= 2 && data.title.size() <= 160
         && data.category is string && data.category.size() <= 60
@@ -380,6 +435,13 @@ service cloud.firestore {
         && data.chunkCount is number && data.chunkCount >= 1 && data.chunkCount <= 200
         && data.status in ['draft', 'published']
         && data.syncStatus is string && data.syncStatus.size() <= 120
+        && (!('version' in data) || (data.version is number && data.version >= 1 && data.version <= 1000))
+        && (!('owner' in data) || (data.owner is string && data.owner.size() <= 120))
+        && (!('language' in data) || data.language in ['bn', 'en', 'both'])
+        && (!('effectiveDate' in data) || (data.effectiveDate is string && data.effectiveDate.size() <= 32))
+        && (!('reviewDate' in data) || (data.reviewDate is string && data.reviewDate.size() <= 32))
+        && (!('contentHash' in data) || (data.contentHash is string && data.contentHash.size() <= 64))
+        && (!('accessScope' in data) || data.accessScope in ['public', 'internal'])
         && data.updatedAt == request.time;
     }
 
@@ -394,7 +456,10 @@ service cloud.firestore {
           'sessionId', 'lang', 'userMessage', 'assistantReply', 'intent',
           'isUnanswered', 'resolved', 'handoverRequested', 'latencyMs',
           'promptTokens', 'outputTokens', 'estimatedCostUsd', 'errorCode',
-          'isTestPlayground', 'createdAt'
+          'isTestPlayground', 'path', 'model', 'isError', 'finishReason',
+          'guardCategory', 'retryCount', 'toolCallCount', 'factsVersion',
+          'ragMs', 'modelMs', 'toolMs', 'ragSources', 'confidence',
+          'feedback', 'feedbackReason', 'createdAt'
         ])
         && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
         && data.lang in ['bn', 'en', 'banglish']
@@ -409,7 +474,22 @@ service cloud.firestore {
         && data.outputTokens is number && data.outputTokens >= 0
         && data.estimatedCostUsd is number && data.estimatedCostUsd >= 0
         && data.errorCode is string && data.errorCode.size() <= 80
-        && data.isTestPlayground is bool;
+        && data.isTestPlayground is bool
+        && (!('path' in data) || data.path in ['gemini', 'fallback'])
+        && (!('model' in data) || (data.model is string && data.model.size() <= 80))
+        && (!('isError' in data) || data.isError is bool)
+        && (!('finishReason' in data) || (data.finishReason is string && data.finishReason.size() <= 60))
+        && (!('guardCategory' in data) || (data.guardCategory is string && data.guardCategory.size() <= 60))
+        && (!('retryCount' in data) || (data.retryCount is number && data.retryCount >= 0 && data.retryCount <= 10))
+        && (!('toolCallCount' in data) || (data.toolCallCount is number && data.toolCallCount >= 0 && data.toolCallCount <= 30))
+        && (!('factsVersion' in data) || (data.factsVersion is string && data.factsVersion.size() <= 40))
+        && (!('ragMs' in data) || (data.ragMs is number && data.ragMs >= 0 && data.ragMs <= 60000))
+        && (!('modelMs' in data) || (data.modelMs is number && data.modelMs >= 0 && data.modelMs <= 120000))
+        && (!('toolMs' in data) || (data.toolMs is number && data.toolMs >= 0 && data.toolMs <= 60000))
+        && (!('ragSources' in data) || (data.ragSources is list && data.ragSources.size() <= 10 && (data.ragSources.size() == 0 || data.ragSources[0] is string)))
+        && (!('confidence' in data) || (data.confidence is number && data.confidence >= 0 && data.confidence <= 1))
+        && (!('feedback' in data) || data.feedback in ['', 'up', 'down'])
+        && (!('feedbackReason' in data) || (data.feedbackReason is string && data.feedbackReason.size() <= 60));
     }
 
     function isValidSupportRequest(data) {
@@ -452,10 +532,178 @@ service cloud.firestore {
         && data.updatedAt == request.time;
     }
 
+    function isValidChatbotCostLedger(data) {
+      return data.keys().hasAll(['dateKey', 'totalUsd', 'requestCount', 'promptTokens', 'outputTokens', 'capHit', 'updatedAt'])
+        && data.keys().hasOnly(['dateKey', 'totalUsd', 'requestCount', 'promptTokens', 'outputTokens', 'capHit', 'updatedAt'])
+        && data.dateKey is string && data.dateKey.matches('^20[0-9]{2}-[0-9]{2}-[0-9]{2}$')
+        && data.totalUsd is number && data.totalUsd >= 0 && data.totalUsd <= 10000
+        && data.requestCount is number && data.requestCount >= 1 && data.requestCount <= 1000000
+        && data.promptTokens is number && data.promptTokens >= 0
+        && data.outputTokens is number && data.outputTokens >= 0
+        && data.capHit is bool
+        && data.updatedAt == request.time;
+    }
+
+    function isValidKnowledgeChunk(data) {
+      return data.keys().hasAll([
+          'docId', 'title', 'category', 'chunkIndex', 'sectionHeading',
+          'text', 'tokenEstimate', 'contentHash', 'language', 'status',
+          'accessScope', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'docId', 'title', 'category', 'chunkIndex', 'sectionHeading',
+          'text', 'tokenEstimate', 'contentHash', 'language', 'status',
+          'accessScope', 'embedding', 'updatedAt'
+        ])
+        && data.docId is string && data.docId.size() >= 2 && data.docId.size() <= 128
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 160
+        && data.category is string && data.category.size() <= 60
+        && data.chunkIndex is number && data.chunkIndex >= 0 && data.chunkIndex <= 200
+        && data.sectionHeading is string && data.sectionHeading.size() <= 80
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 4000
+        && data.tokenEstimate is number && data.tokenEstimate >= 1 && data.tokenEstimate <= 8000
+        && data.contentHash is string && data.contentHash.size() <= 64
+        && data.language in ['bn', 'en', 'both']
+        && data.status in ['draft', 'published']
+        && data.accessScope in ['public', 'internal']
+        && (!('embedding' in data) || (data.embedding is list && data.embedding.size() <= 1536 && (data.embedding.size() == 0 || data.embedding[0] is number)))
+        && data.updatedAt == request.time;
+    }
+
+    function isValidChatSession(data) {
+      return data.keys().hasAll([
+          'sessionId', 'language', 'lockedLang', 'scriptPreference',
+          'consent', 'currentIntent', 'orderDraftId', 'turnCount', 'lastTurnAt'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'language', 'lockedLang', 'scriptPreference',
+          'consent', 'currentIntent', 'orderDraftId', 'turnCount', 'lastTurnAt'
+        ])
+        && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
+        && data.language in ['bn', 'en']
+        && data.lockedLang in ['', 'bn', 'en']
+        && data.scriptPreference in ['bn_script', 'banglish_roman', 'en']
+        && data.consent is bool
+        && data.currentIntent is string && data.currentIntent.size() <= 60
+        && data.orderDraftId is string && data.orderDraftId.size() <= 96
+        && data.turnCount is number && data.turnCount >= 0 && data.turnCount <= 1000
+        && data.lastTurnAt == request.time;
+    }
+
+    function isValidOrderDraft(data) {
+      return data.keys().hasAll([
+          'draftId', 'sessionId', 'weight', 'qty', 'customerName', 'phone',
+          'district', 'area', 'address', 'paymentMethod', 'txnId', 'couponCode',
+          'note', 'state', 'priceQuoteVersion', 'validationErrors', 'expiresAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'draftId', 'sessionId', 'weight', 'qty', 'qty250g', 'qty500g', 'qty1kg',
+          'customerName', 'phone', 'district', 'area', 'address', 'addressQualityNote',
+          'paymentMethod', 'txnId', 'couponCode',
+          'note', 'state', 'priceQuoteVersion', 'validationErrors', 'expiresAt', 'updatedAt'
+        ])
+        && data.draftId is string && data.draftId.size() >= 4 && data.draftId.size() <= 96
+        && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
+        && data.weight in ['', '250g', '500g', '1kg']
+        && data.qty is number && data.qty >= 0 && data.qty <= 50
+        && (!('qty250g' in data) || (data.qty250g is number && data.qty250g >= 0 && data.qty250g <= 50))
+        && (!('qty500g' in data) || (data.qty500g is number && data.qty500g >= 0 && data.qty500g <= 50))
+        && (!('qty1kg' in data) || (data.qty1kg is number && data.qty1kg >= 0 && data.qty1kg <= 50))
+        && data.customerName is string && data.customerName.size() <= 100
+        && data.phone is string && data.phone.size() <= 15
+        && data.district is string && data.district.size() <= 80
+        && data.area is string && data.area.size() <= 100
+        && data.address is string && data.address.size() <= 300
+        && (!('addressQualityNote' in data) || (data.addressQualityNote is string && data.addressQualityNote.size() <= 240))
+        && data.paymentMethod in ['', 'cod', 'bkash', 'nagad']
+        && data.txnId is string && data.txnId.size() <= 64
+        && data.couponCode is string && data.couponCode.size() <= 32
+        && data.note is string && data.note.size() <= 240
+        && data.state in ['collecting_details', 'quote_ready', 'awaiting_confirmation', 'confirmed', 'expired', 'cancelled']
+        && data.priceQuoteVersion is number && data.priceQuoteVersion >= 1 && data.priceQuoteVersion <= 1000
+        && data.validationErrors is list && data.validationErrors.size() <= 8
+        && (data.validationErrors.size() == 0 || data.validationErrors[0] is string)
+        && data.expiresAt is number && data.expiresAt >= 0
+        && data.updatedAt == request.time;
+    }
+
+    function isValidOrderFingerprint(data) {
+      return data.keys().hasAll(['orderNumber', 'createdAtMs', 'updatedAt'])
+        && data.keys().hasOnly(['orderNumber', 'createdAtMs', 'updatedAt'])
+        && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
+        && data.createdAtMs is number && data.createdAtMs > 0
+        && data.updatedAt == request.time;
+    }
+
+    function isValidOrderAuditLog(data) {
+      return data.keys().hasAll(['orderNumber', 'action', 'actorType', 'summary', 'createdAt'])
+        && data.keys().hasOnly([
+          'orderNumber', 'action', 'actorType', 'summary',
+          'previousStatus', 'nextStatus', 'previousTotalBdt', 'nextTotalBdt', 'metadata', 'createdAt'
+        ])
+        && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
+        && data.action in ['created', 'address_updated', 'cancelled', 'review_approved', 'review_rejected', 'status_updated', 'cod_verification']
+        && data.actorType in ['customer', 'admin', 'system']
+        && data.summary is string && data.summary.size() >= 3 && data.summary.size() <= 300
+        && (!('previousStatus' in data) || (data.previousStatus is string && data.previousStatus.size() <= 40))
+        && (!('nextStatus' in data) || (data.nextStatus is string && data.nextStatus.size() <= 40))
+        && (!('previousTotalBdt' in data) || data.previousTotalBdt is number)
+        && (!('nextTotalBdt' in data) || data.nextTotalBdt is number)
+        && (!('metadata' in data) || (data.metadata is map && data.metadata.size() <= 16))
+        && data.createdAt == request.time;
+    }
+
+    function isValidChatbotFeedback(data) {
+      return data.keys().hasAll([
+          'sessionId', 'logId', 'rating', 'reason', 'userMessage',
+          'assistantReply', 'lang', 'intent', 'resolved', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'logId', 'rating', 'reason', 'userMessage',
+          'assistantReply', 'lang', 'intent', 'resolved', 'createdAt'
+        ])
+        && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
+        && data.logId is string && data.logId.size() <= 128
+        && data.rating in ['up', 'down']
+        && data.reason in ['', 'wrong_price', 'unclear', 'missing_info', 'wrong_language', 'other']
+        && data.userMessage is string && data.userMessage.size() >= 1 && data.userMessage.size() <= 1000
+        && data.assistantReply is string && data.assistantReply.size() >= 1 && data.assistantReply.size() <= 2500
+        && data.lang in ['bn', 'en']
+        && data.intent is string && data.intent.size() <= 60
+        && data.resolved is bool
+        && data.createdAt == request.time;
+    }
+
     match /store_settings/{docId} {
       allow get: if isValidId(docId) && (docId == 'main' || isAdmin());
       allow list: if isAdmin();
-      allow create, update: if isValidId(docId) && isAdmin() && isValidStoreSettings(incoming());
+      allow create: if isValidId(docId) && isAdmin() && isValidStoreSettings(incoming());
+      allow update: if isValidId(docId) && isValidStoreSettings(incoming()) && (
+        isAdmin()
+        || (
+          docId == 'main'
+          && incoming().diff(existing()).affectedKeys().hasOnly(['stock250g', 'stock500g', 'stock1kg', 'lastOrderNumber', 'updatedAt'])
+          && incoming().lastOrderNumber is string
+          && incoming().lastOrderNumber.matches('^DG-[0-9]{4,8}$')
+          && existsAfter(/databases/$(database)/documents/orders/$(incoming().lastOrderNumber))
+          && (
+            (
+              !exists(/databases/$(database)/documents/orders/$(incoming().lastOrderNumber))
+              && incoming().stock250g == existing().stock250g - getAfter(/databases/$(database)/documents/orders/$(incoming().lastOrderNumber)).data.qty250g
+              && incoming().stock500g == existing().stock500g - getAfter(/databases/$(database)/documents/orders/$(incoming().lastOrderNumber)).data.qty500g
+              && incoming().stock1kg == existing().stock1kg - getAfter(/databases/$(database)/documents/orders/$(incoming().lastOrderNumber)).data.qty1kg
+            )
+            || (
+              exists(/databases/$(database)/documents/orders/$(incoming().lastOrderNumber))
+              && get(/databases/$(database)/documents/orders/$(incoming().lastOrderNumber)).data.status in ['pending', 'confirmed', 'processing']
+              && getAfter(/databases/$(database)/documents/orders/$(incoming().lastOrderNumber)).data.status == 'cancelled'
+              && incoming().stock250g == existing().stock250g + get(/databases/$(database)/documents/orders/$(incoming().lastOrderNumber)).data.qty250g
+              && incoming().stock500g == existing().stock500g + get(/databases/$(database)/documents/orders/$(incoming().lastOrderNumber)).data.qty500g
+              && incoming().stock1kg == existing().stock1kg + get(/databases/$(database)/documents/orders/$(incoming().lastOrderNumber)).data.qty1kg
+            )
+          )
+        )
+      );
       allow delete: if false;
     }
 
@@ -473,11 +721,31 @@ service cloud.firestore {
         && matchesCanonicalStorePricing(incoming())
         && existsAfter(/databases/$(database)/documents/order_tracking/$(orderId + '_' + incoming().phone));
       allow update: if isValidId(orderId)
-        && isAdmin()
         && isValidOrder(incoming())
         && incoming().createdAt == existing().createdAt
         && incoming().orderNumber == existing().orderNumber
-        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'webhookStatus', 'updatedAt']);
+        && (
+          (
+            isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'webhookStatus', 'reviewStatus', 'updatedAt'])
+          )
+          || (
+            existing().status in ['pending', 'confirmed']
+            && incoming().status == 'cancelled'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+            && existsAfter(/databases/$(database)/documents/order_tracking/$(orderId + '_' + existing().phone))
+            && getAfter(/databases/$(database)/documents/order_tracking/$(orderId + '_' + existing().phone)).data.status == 'cancelled'
+          )
+          || (
+            existing().status in ['pending', 'confirmed']
+            && incoming().status == existing().status
+            && incoming().subtotalBdt == existing().subtotalBdt
+            && incoming().discountBdt == existing().discountBdt
+            && matchesCanonicalStorePricing(incoming())
+            && incoming().diff(existing()).affectedKeys().hasOnly(['district', 'area', 'address', 'deliveryZone', 'deliveryFeeBdt', 'totalBdt', 'estimatedDelivery', 'updatedAt'])
+            && existsAfter(/databases/$(database)/documents/order_tracking/$(orderId + '_' + existing().phone))
+          )
+        );
       allow delete: if isValidId(orderId) && isAdmin();
     }
 
@@ -490,10 +758,19 @@ service cloud.firestore {
         && incoming().paymentStatus in ['cod_due', 'pending_verification']
         && existsAfter(/databases/$(database)/documents/orders/$(incoming().orderNumber));
       allow update: if isValidId(lookupId)
-        && isAdmin()
         && isValidOrderTracking(incoming())
         && incoming().orderNumber == existing().orderNumber
-        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'estimatedDelivery', 'updatedAt']);
+        && (
+          (
+            isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'estimatedDelivery', 'reviewStatus', 'updatedAt'])
+          )
+          || (
+            existing().status in ['pending', 'confirmed']
+            && incoming().diff(existing()).affectedKeys().hasOnly(['district', 'deliveryZone', 'deliveryFeeBdt', 'totalBdt', 'estimatedDelivery', 'status', 'updatedAt'])
+            && getAfter(/databases/$(database)/documents/orders/$(existing().orderNumber)).data.updatedAt == request.time
+          )
+        );
       allow delete: if isValidId(lookupId) && isAdmin();
     }
 
@@ -571,8 +848,8 @@ service cloud.firestore {
     }
 
     match /chatbot_kb_docs/{docId} {
-      allow get: if isValidId(docId) && (existing().status == 'published' || isAdmin());
-      allow list: if existing().status == 'published' || isAdmin();
+      allow get: if isValidId(docId) && ((existing().status == 'published' && (!('accessScope' in existing()) || existing().accessScope == 'public')) || isAdmin());
+      allow list: if (existing().status == 'published' && (!('accessScope' in existing()) || existing().accessScope == 'public')) || isAdmin();
       allow create, update: if isValidId(docId) && isAdmin() && isValidChatbotKbDoc(incoming());
       allow delete: if isValidId(docId) && isAdmin();
     }
@@ -587,7 +864,7 @@ service cloud.firestore {
         && isAdmin()
         && isValidChatbotLog(incoming())
         && incoming().createdAt == existing().createdAt
-        && incoming().diff(existing()).affectedKeys().hasOnly(['resolved']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['resolved', 'feedback', 'feedbackReason']);
       allow delete: if isValidId(logId) && isAdmin();
     }
 
@@ -632,6 +909,82 @@ service cloud.firestore {
         && isValidChatbotRateBucket(incoming())
         && (incoming().count == existing().count + 1 || incoming().count == 1);
       allow delete: if isValidId(bucketId) && isAdmin();
+    }
+
+    match /chatbot_cost_ledger/{dateKey} {
+      allow get: if isValidId(dateKey);
+      allow list: if isAdmin();
+      allow create: if isValidId(dateKey)
+        && isValidChatbotCostLedger(incoming())
+        && incoming().dateKey == dateKey
+        && incoming().requestCount == 1
+        && incoming().totalUsd <= 0.5;
+      allow update: if isValidId(dateKey)
+        && isValidChatbotCostLedger(incoming())
+        && incoming().dateKey == existing().dateKey
+        && incoming().requestCount == existing().requestCount + 1
+        && incoming().totalUsd >= existing().totalUsd
+        && (incoming().totalUsd - existing().totalUsd) <= 0.5;
+      allow delete: if isValidId(dateKey) && isAdmin();
+    }
+
+    match /knowledge_chunks/{chunkId} {
+      allow get: if isValidId(chunkId) && ((existing().status == 'published' && existing().accessScope == 'public') || isAdmin());
+      allow list: if (existing().status == 'published' && existing().accessScope == 'public') || isAdmin();
+      allow create, update: if isValidId(chunkId) && isAdmin() && isValidKnowledgeChunk(incoming());
+      allow delete: if isValidId(chunkId) && isAdmin();
+    }
+
+    match /chat_sessions/{sessionId} {
+      allow get: if isValidId(sessionId);
+      allow list: if isAdmin();
+      allow create, update: if isValidId(sessionId)
+        && isValidChatSession(incoming())
+        && incoming().sessionId == sessionId;
+      allow delete: if isValidId(sessionId) && isAdmin();
+    }
+
+    match /order_drafts/{draftId} {
+      allow get: if isValidId(draftId);
+      allow list: if isAdmin();
+      allow create, update: if isValidId(draftId)
+        && isValidOrderDraft(incoming())
+        && incoming().draftId == draftId;
+      allow delete: if isValidId(draftId) && isAdmin();
+    }
+
+    match /chatbot_feedback/{feedbackId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(feedbackId)
+        && isValidChatbotFeedback(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(feedbackId)
+        && isAdmin()
+        && isValidChatbotFeedback(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['resolved']);
+      allow delete: if isValidId(feedbackId) && isAdmin();
+    }
+
+    match /order_fingerprints/{fingerprintId} {
+      allow get: if isValidId(fingerprintId);
+      allow list: if isAdmin();
+      allow create, update: if isValidId(fingerprintId)
+        && isValidOrderFingerprint(incoming())
+        && existsAfter(/databases/$(database)/documents/orders/$(incoming().orderNumber));
+      allow delete: if isValidId(fingerprintId) && isAdmin();
+    }
+
+    match /order_audit_logs/{logId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(logId)
+        && isValidOrderAuditLog(incoming())
+        && (
+          isAdmin()
+          || existsAfter(/databases/$(database)/documents/orders/$(incoming().orderNumber))
+          || exists(/databases/$(database)/documents/orders/$(incoming().orderNumber))
+        );
+      allow update, delete: if false;
     }
   }
 }

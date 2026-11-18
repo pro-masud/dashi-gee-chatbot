@@ -1,7 +1,95 @@
 export type ResponseTone = 'warm' | 'concise' | 'formal';
 export type ResponseLength = 'short' | 'balanced' | 'detailed';
-export type LanguageBehavior = 'auto' | 'prefer_bn' | 'prefer_en';
+export type LanguageBehavior =
+  | 'auto'
+  | 'prefer_bn'
+  | 'prefer_en'
+  | 'always_bn'
+  | 'mirror'
+  | 'customer_choice';
 export type ChatbotLang = 'bn' | 'en' | 'banglish';
+
+export type TurnIntent =
+  | 'product_question'
+  | 'recommendation'
+  | 'pricing'
+  | 'stock'
+  | 'offers'
+  | 'delivery'
+  | 'payment'
+  | 'order'
+  | 'order_manage'
+  | 'tracking'
+  | 'policy'
+  | 'complaint'
+  | 'human_help'
+  | 'greeting'
+  | 'unknown';
+
+export interface ApprovedClaimMeta {
+  claim: string;
+  evidenceNote?: string;
+  expiresAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface ClaimAuditEntry {
+  timestamp: string;
+  actor: string;
+  action: string;
+  summary: string;
+}
+
+export interface KnowledgeSourceRef {
+  id: string;
+  title: string;
+  category: string;
+  sourceType: 'faq' | 'kb_doc' | 'store_facts';
+  score: number;
+  snippet?: string;
+}
+
+export interface ProductCardItem {
+  weight: '250g' | '500g' | '1kg';
+  labelEn: string;
+  labelBn: string;
+  priceBdt: number;
+  stockJars: number;
+  inStock: boolean;
+  recommended?: boolean;
+  reasonEn?: string;
+  reasonBn?: string;
+}
+
+export interface TrackingCardData {
+  orderNumber: string;
+  status: string;
+  paymentMethod: string;
+  paymentStatus: string;
+  itemsSummary: string;
+  totalBdt: number;
+  estimatedDelivery: string;
+}
+
+export interface ChatDiagnosticsMeta {
+  intent: string;
+  confidence: number;
+  model: string;
+  path: ChatbotExecutionPath;
+  toolsUsed: string[];
+  sources: KnowledgeSourceRef[];
+  guardStatus: string;
+  ragMs?: number;
+  modelMs?: number;
+  toolMs?: number;
+  totalMs?: number;
+  promptTokens?: number;
+  outputTokens?: number;
+  estimatedCostUsd?: number;
+  streamedRealTokens?: boolean;
+  factsVersion?: string;
+}
 
 export interface ChatbotConfigDoc {
   enabled: boolean;
@@ -23,6 +111,9 @@ export interface ChatbotConfigDoc {
   shelfLife: string;
   storageInstructions: string;
   approvedClaims: string;
+  blockedClaims?: string;
+  approvedClaimsMeta?: ApprovedClaimMeta[];
+  claimAuditHistory?: ClaimAuditEntry[];
   currentOffers: string;
   district: string;
   city: string;
@@ -42,6 +133,9 @@ export interface ChatbotConfigDoc {
   responseTone: ResponseTone;
   responseLength: ResponseLength;
   languageBehavior: LanguageBehavior;
+  synonyms?: Record<string, string[]>;
+  primaryModel?: string;
+  fallbackModel?: string;
   fallbackMessageBn: string;
   fallbackMessageEn: string;
   welcomeMessageBn: string;
@@ -74,10 +168,12 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfigDoc = {
     'Founded in partnership with Pabna dairy families using traditional earthen-pot fermentation and wooden bilona churning.',
   productDescription:
     'Single-origin Pabna grass-fed cow ghee churned by traditional wooden bilona from whole cultured curd and sealed warm in clear apothecary glass jars (250g, 500g, and 1kg weight variants).',
-  ingredients: 'Cultured cow milkfat from Pabna grass-fed cows. No vegetable oil, vanaspati, artificial colour, or preservatives.',
+  ingredients:
+    'Cultured cow milkfat from Pabna grass-fed cows. No vegetable oil, vanaspati, artificial colour, or preservatives.',
   taste: 'Rich, clean, deeply nutty traditional Bengali cow ghee flavour without greasiness.',
   aroma: 'Warm caramelized roasted-butter aroma characteristic of slow earthen clarification.',
-  texture: 'Naturally granular (danadar) golden crystals at cool room temperature (around 18°C–24°C) and clear liquid gold when warm (above 34°C).',
+  texture:
+    'Naturally granular (danadar) golden crystals at cool room temperature (around 18°C–24°C) and clear liquid gold when warm (above 34°C).',
   productionMethod:
     'Fresh dawn milk from Pabna cows is gently boiled, fermented overnight into whole curd inside earthen pots, hand-churned before sunrise using a wooden bilona to separate cultured makkhan, and slow-simmered over low flame before straining through clean muslin into glass jars.',
   shelfLife: '12 months from packaging date when kept tightly sealed.',
@@ -85,6 +181,23 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfigDoc = {
     'Store in a cool, dry place away from direct sunlight and kitchen stove heat. Always scoop using a clean, completely dry spoon. Refrigeration is unnecessary.',
   approvedClaims:
     'Single-origin Pabna milk sourcing; wooden bilona cultured curd churning; zero vegetable oils or preservatives; batch-traceable glass packaging.',
+  blockedClaims:
+    'lab-verified; A2; organic; BSTI certified; 100% pure; cures disease',
+  approvedClaimsMeta: [
+    {
+      claim: 'Single-origin Pabna milk sourcing',
+      evidenceNote: 'Daily milk collection records from Bera & Faridpur dairy partners in Pabna.',
+    },
+    {
+      claim: 'Wooden bilona cultured curd churning',
+      evidenceNote: 'Overnight clay-pot dahi fermentation & morning wooden bilona separation.',
+    },
+    {
+      claim: 'Zero vegetable oils or preservatives',
+      evidenceNote: 'Single-ingredient clarified cow milkfat only.',
+    },
+  ],
+  claimAuditHistory: [],
   currentOffers:
     'Free nationwide delivery on orders of ৳2,500 or above (or active advance MFS/coupon promotions configured in Store Settings).',
   district: 'Dhaka / Pabna',
@@ -112,6 +225,14 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfigDoc = {
   responseTone: 'warm',
   responseLength: 'short',
   languageBehavior: 'auto',
+  synonyms: {
+    dam: ['price', 'cost', 'taka', 'tk', 'rate', 'দাম', 'মূল্য', 'কত'],
+    khati: ['pure', 'authentic', 'original', 'খাঁটি', 'আসল', 'ভেজাল'],
+    boyaam: ['jar', 'bottle', 'container', 'বয়াম', 'বয়াম', 'জার'],
+    doi: ['curd', 'dahi', 'দই', 'মাখন', 'makkhan'],
+    pathano: ['delivery', 'shipping', 'courier', 'ডেলিভারি', 'কুরিয়ার'],
+    pabna: ['পাবনা', 'bera', 'faridpur', 'গ্রাস-ফেড', 'bilona', 'বিলোনা'],
+  },
   fallbackMessageBn:
     'দুঃখিত, এই তথ্যটা আমার কাছে নেই। সঠিক তথ্যের জন্য আমাদের কাস্টমার সাপোর্টের সঙ্গে যোগাযোগ করতে পারেন।',
   fallbackMessageEn:
@@ -122,19 +243,19 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfigDoc = {
     "Welcome to Deshi Gee! I'm your virtual assistant. I can help you with our ghee, pricing, available sizes, orders, delivery, and customer support.",
   quickQuestionsBn: [
     'আমাদের ঘির দাম কত?',
-    'কোন কোন সাইজ পাওয়া যায়?',
+    'কোন সাইজটা আমার জন্য ভালো হবে?',
     'ঘি কীভাবে সংরক্ষণ করব?',
     'ডেলিভারি চার্জ কত?',
     'কীভাবে অর্ডার করব?',
-    'আপনাদের ঠিকানা কোথায়?',
+    'অর্ডার ট্র্যাক করব কীভাবে?',
   ],
   quickQuestionsEn: [
     'What is the price of Deshi Gee?',
-    'Which jar sizes are available?',
+    'Which jar size fits my family?',
     'How should I store the ghee?',
     'What is the delivery charge?',
     'How can I place an order?',
-    'What is your address & contact?',
+    'How can I track my order?',
   ],
   retentionDays: 30,
   dailyRequestLimit: 2000,
@@ -163,8 +284,103 @@ export interface ChatbotKbDocRecord {
   chunkCount: number;
   status: 'draft' | 'published';
   syncStatus: string;
+  version?: number;
+  owner?: string;
+  language?: 'bn' | 'en' | 'both';
+  effectiveDate?: string;
+  reviewDate?: string;
+  contentHash?: string;
+  accessScope?: 'public' | 'internal';
   updatedAt?: unknown;
 }
+
+export interface KnowledgeChunkRecord {
+  id: string;
+  docId: string;
+  title: string;
+  category: string;
+  chunkIndex: number;
+  sectionHeading: string;
+  text: string;
+  tokenEstimate: number;
+  contentHash: string;
+  language: 'bn' | 'en' | 'both';
+  status: 'draft' | 'published';
+  accessScope: 'public' | 'internal';
+  embedding?: number[];
+  updatedAt?: unknown;
+}
+
+export type OrderDraftState =
+  | 'collecting_details'
+  | 'quote_ready'
+  | 'awaiting_confirmation'
+  | 'confirmed'
+  | 'expired'
+  | 'cancelled';
+
+export interface OrderDraftDoc {
+  draftId: string;
+  sessionId: string;
+  weight?: '250g' | '500g' | '1kg';
+  qty?: number;
+  qty250g?: number;
+  qty500g?: number;
+  qty1kg?: number;
+  customerName?: string;
+  phone?: string;
+  district?: string;
+  area?: string;
+  address?: string;
+  addressQualityNote?: string;
+  paymentMethod?: 'cod' | 'bkash' | 'nagad';
+  txnId?: string;
+  couponCode?: string;
+  note?: string;
+  state: OrderDraftState;
+  priceQuoteVersion: number;
+  validationErrors?: string[];
+  lastSummary?: OrderSummaryCard;
+  expiresAt: number;
+  updatedAt?: unknown;
+}
+
+export interface ChatSessionDoc {
+  sessionId: string;
+  language: 'bn' | 'en';
+  lockedLang?: 'bn' | 'en' | '';
+  scriptPreference?: 'bn_script' | 'banglish_roman' | 'en';
+  consent: boolean;
+  currentIntent: TurnIntent | string;
+  orderDraftId?: string;
+  turnCount: number;
+  lastTurnAt?: unknown;
+  startedAt?: unknown;
+}
+
+export type FeedbackReason =
+  | 'wrong_price'
+  | 'unclear'
+  | 'missing_info'
+  | 'wrong_language'
+  | 'other'
+  | '';
+
+export interface ChatbotFeedbackDoc {
+  id: string;
+  sessionId: string;
+  logId?: string;
+  rating: 'up' | 'down';
+  reason?: FeedbackReason;
+  userMessage: string;
+  assistantReply: string;
+  lang: 'bn' | 'en';
+  intent: string;
+  resolved: boolean;
+  createdAt?: unknown;
+}
+
+export type ChatbotExecutionPath = 'gemini' | 'fallback';
 
 export interface ChatbotLogRecord {
   id: string;
@@ -182,7 +398,76 @@ export interface ChatbotLogRecord {
   estimatedCostUsd: number;
   errorCode: string;
   isTestPlayground: boolean;
+  path?: ChatbotExecutionPath;
+  model?: string;
+  isError?: boolean;
+  finishReason?: string;
+  guardCategory?: string;
+  retryCount?: number;
+  toolCallCount?: number;
+  factsVersion?: string;
+  ragMs?: number;
+  modelMs?: number;
+  toolMs?: number;
+  ragSources?: string[];
+  confidence?: number;
+  feedback?: 'up' | 'down' | '';
+  feedbackReason?: string;
   createdAt?: unknown;
+}
+
+export interface ModelDiagnosticSummary {
+  name: string;
+  configured: boolean;
+  supported: boolean;
+  reachable: 'yes' | 'no';
+  reachableOk: boolean;
+  supportsTools: boolean;
+  thinkingConfig: {
+    supported: boolean;
+    status: 'ok' | 'warning' | 'unsupported';
+    detail: string;
+  };
+  outputLimits: {
+    configuredMaxOutputTokens: number;
+    valid: boolean;
+    detail: string;
+  };
+  sdkCompatible: boolean;
+  latencyMs: number;
+  errorCode: string;
+  detail: string;
+}
+
+export interface RuntimeHealthReport {
+  ok: boolean;
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  service: string;
+  runtime: string;
+  timestamp: string;
+  activePath: ChatbotExecutionPath;
+  supportedModelConfigured: boolean;
+  checks: {
+    geminiApiKeyConfigured: 'yes' | 'no';
+    geminiApiKeyOk: boolean;
+    primaryModel: ModelDiagnosticSummary;
+    fallbackModel: ModelDiagnosticSummary;
+    tokenSecretConfigured: 'yes' | 'no';
+    tokenSecretOk: boolean;
+    tokenSecretPresent: boolean;
+    firestoreReachable: 'yes' | 'no';
+    firestoreOk: boolean;
+    firestoreLatencyMs: number;
+    firestoreDetail: string;
+    sdk: {
+      package: string;
+      compatible: boolean;
+      functionDeclarationsCount: number;
+      detail: string;
+    };
+  };
+  errorCode: string;
+  warnings: string[];
 }
 
 export interface ChatbotVersionRecord {
@@ -206,7 +491,15 @@ export interface ChatbotSupportRequestRecord {
 }
 
 export interface ChatActionItem {
-  type: 'call' | 'whatsapp' | 'maps' | 'directions' | 'copy_phone' | 'track_order' | 'order_confirmed' | 'open_url';
+  type:
+    | 'call'
+    | 'whatsapp'
+    | 'maps'
+    | 'directions'
+    | 'copy_phone'
+    | 'track_order'
+    | 'order_confirmed'
+    | 'open_url';
   labelEn: string;
   labelBn: string;
   value: string;
@@ -220,10 +513,22 @@ export type OrderStatePhase =
   | 'order_created'
   | 'failed';
 
+export interface OrderVariantSummaryLine {
+  weight: '250g' | '500g' | '1kg';
+  qty: number;
+  unitPriceBdt: number;
+  lineSubtotalBdt: number;
+}
+
 export interface OrderSummaryCard {
   productName: string;
   weight: string;
   qty: number;
+  qty250g?: number;
+  qty500g?: number;
+  qty1kg?: number;
+  variantLines?: OrderVariantSummaryLine[];
+  itemsSummary?: string;
   unitPriceBdt: number;
   subtotalBdt: number;
   deliveryFeeBdt: number;
@@ -234,6 +539,7 @@ export interface OrderSummaryCard {
   district?: string;
   area?: string;
   deliveryArea?: string;
+  deliveryZone?: 'dhaka' | 'suburban' | 'nationwide' | 'remote';
   address?: string;
   note?: string;
   txnId?: string;
@@ -244,6 +550,13 @@ export interface OrderSummaryCard {
   expiresAt?: number;
   confirmed?: boolean;
   orderState?: OrderStatePhase;
+  priceQuoteVersion?: number;
+  estimatedDelivery?: string;
+  dispatchCutoffNote?: string;
+  duplicateWarning?: string;
+  addressWarning?: string;
+  riskReviewNotice?: string;
+  reviewStatus?: 'none' | 'manual_review' | 'approved' | 'rejected';
 }
 
 export interface ChatMessageItem {
@@ -253,6 +566,14 @@ export interface ChatMessageItem {
   timestamp: string;
   actions?: ChatActionItem[];
   orderSummary?: OrderSummaryCard;
+  productCards?: ProductCardItem[];
+  trackingCard?: TrackingCardData;
+  suggestedReplies?: string[];
+  sources?: KnowledgeSourceRef[];
+  diagnostics?: ChatDiagnosticsMeta;
+  feedback?: 'up' | 'down';
+  feedbackReason?: FeedbackReason;
+  logId?: string;
   isError?: boolean;
   retryPrompt?: string;
 }
