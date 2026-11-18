@@ -1,0 +1,473 @@
+{
+  "entities": {
+    "StoreSettings": {
+      "title": "StoreSettings",
+      "description": "Single-product catalog configuration, weight variants, BDT pricing, delivery fees, payment numbers, and store metadata.",
+      "type": "object",
+      "properties": {
+        "productNameEn": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "productNameBn": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "taglineEn": { "type": "string", "minLength": 5, "maxLength": 180 },
+        "taglineBn": { "type": "string", "minLength": 5, "maxLength": 240 },
+        "originLocation": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "price250g": { "type": "number" },
+        "price500g": { "type": "number" },
+        "price1kg": { "type": "number" },
+        "stock250g": { "type": "number" },
+        "stock500g": { "type": "number" },
+        "stock1kg": { "type": "number" },
+        "insideDhakaFee": { "type": "number" },
+        "outsideDhakaFee": { "type": "number" },
+        "freeDeliveryThreshold": { "type": "number" },
+        "estimatedDhakaDays": { "type": "string", "maxLength": 80 },
+        "estimatedOutsideDays": { "type": "string", "maxLength": 80 },
+        "bkashNumber": { "type": "string", "maxLength": 30 },
+        "nagadNumber": { "type": "string", "maxLength": 30 },
+        "advanceDiscountPct": { "type": "number" },
+        "whatsappNumber": { "type": "string", "maxLength": 30 },
+        "supportPhone": { "type": "string", "maxLength": 30 },
+        "supportEmail": { "type": "string", "maxLength": 120 },
+        "businessAddress": { "type": "string", "maxLength": 240 },
+        "facebookUrl": { "type": "string", "maxLength": 200 },
+        "instagramUrl": { "type": "string", "maxLength": 200 },
+        "activeBatchCode": { "type": "string", "maxLength": 40 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "productNameEn",
+        "price250g",
+        "price500g",
+        "price1kg",
+        "insideDhakaFee",
+        "outsideDhakaFee",
+        "freeDeliveryThreshold"
+      ]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer order record containing verified pricing, delivery address, payment details, and fulfillment status.",
+      "type": "object",
+      "properties": {
+        "orderNumber": { "type": "string", "pattern": "^DG-[0-9]{4,8}$", "maxLength": 16 },
+        "customerName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "phone": { "type": "string", "pattern": "^01[3-9][0-9]{8}$", "maxLength": 11 },
+        "district": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "area": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "address": { "type": "string", "minLength": 5, "maxLength": 300 },
+        "note": { "type": "string", "maxLength": 240 },
+        "deliveryZone": { "type": "string", "enum": ["dhaka", "nationwide"] },
+        "weight": { "type": "string", "enum": ["250g", "500g", "1kg"] },
+        "qty": { "type": "number" },
+        "qty250g": { "type": "number" },
+        "qty500g": { "type": "number" },
+        "qty1kg": { "type": "number" },
+        "itemsSummary": { "type": "string", "minLength": 3, "maxLength": 80 },
+        "unitPriceBdt": { "type": "number" },
+        "subtotalBdt": { "type": "number" },
+        "deliveryFeeBdt": { "type": "number" },
+        "discountBdt": { "type": "number" },
+        "totalBdt": { "type": "number" },
+        "couponCode": { "type": "string", "maxLength": 32 },
+        "paymentMethod": { "type": "string", "enum": ["cod", "bkash", "nagad"] },
+        "paymentStatus": { "type": "string", "enum": ["cod_due", "pending_verification", "verified", "failed"] },
+        "txnId": { "type": "string", "maxLength": 64 },
+        "paymentProofData": { "type": "string", "maxLength": 180000 },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "processing", "shipped", "delivered", "cancelled"] },
+        "estimatedDelivery": { "type": "string", "maxLength": 80 },
+        "webhookStatus": { "type": "string", "maxLength": 80 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "orderNumber",
+        "customerName",
+        "phone",
+        "district",
+        "area",
+        "address",
+        "deliveryZone",
+        "weight",
+        "qty",
+        "qty250g",
+        "qty500g",
+        "qty1kg",
+        "itemsSummary",
+        "unitPriceBdt",
+        "subtotalBdt",
+        "deliveryFeeBdt",
+        "discountBdt",
+        "totalBdt",
+        "paymentMethod",
+        "paymentStatus",
+        "status",
+        "createdAt"
+      ]
+    },
+    "OrderTracking": {
+      "title": "OrderTracking",
+      "description": "PII-isolated public status lookup keyed by OrderNumber_Phone for customer order tracking.",
+      "type": "object",
+      "properties": {
+        "orderNumber": { "type": "string", "pattern": "^DG-[0-9]{4,8}$", "maxLength": 16 },
+        "weight": { "type": "string", "enum": ["250g", "500g", "1kg"] },
+        "qty": { "type": "number" },
+        "itemsSummary": { "type": "string", "minLength": 3, "maxLength": 80 },
+        "totalBdt": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["cod", "bkash", "nagad"] },
+        "paymentStatus": { "type": "string", "enum": ["cod_due", "pending_verification", "verified", "failed"] },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "processing", "shipped", "delivered", "cancelled"] },
+        "estimatedDelivery": { "type": "string", "maxLength": 80 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "orderNumber",
+        "weight",
+        "qty",
+        "itemsSummary",
+        "totalBdt",
+        "paymentMethod",
+        "paymentStatus",
+        "status",
+        "updatedAt"
+      ]
+    },
+    "BatchRecord": {
+      "title": "BatchRecord",
+      "description": "Authentic batch provenance, milk origin, production/expiry dates, and lab report reference for QR verification.",
+      "type": "object",
+      "properties": {
+        "batchCode": { "type": "string", "minLength": 3, "maxLength": 40 },
+        "originDistrict": { "type": "string", "maxLength": 100 },
+        "milkSource": { "type": "string", "maxLength": 140 },
+        "productionDate": { "type": "string", "maxLength": 40 },
+        "expiryDate": { "type": "string", "maxLength": 40 },
+        "labReportStatus": { "type": "string", "maxLength": 120 },
+        "labReportUrl": { "type": "string", "maxLength": 300 },
+        "licenceDetails": { "type": "string", "maxLength": 160 },
+        "active": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["batchCode", "originDistrict", "productionDate", "expiryDate", "active"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Customer review moderated by Admin before appearing on the storefront.",
+      "type": "object",
+      "properties": {
+        "customerName": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "district": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "rating": { "type": "number" },
+        "comment": { "type": "string", "minLength": 6, "maxLength": 600 },
+        "orderNumber": { "type": "string", "maxLength": 20 },
+        "verifiedPurchase": { "type": "boolean" },
+        "helpfulCount": { "type": "number" },
+        "photoData": { "type": "string", "maxLength": 180000 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerName", "district", "rating", "comment", "verifiedPurchase", "helpfulCount", "status", "createdAt"]
+    },
+    "Coupon": {
+      "title": "Coupon",
+      "description": "Promotional coupon code managed by Admin.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "minLength": 3, "maxLength": 32 },
+        "discountPct": { "type": "number" },
+        "minSubtotalBdt": { "type": "number" },
+        "active": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "discountPct", "minSubtotalBdt", "active"]
+    },
+    "Subscriber": {
+      "title": "Subscriber",
+      "description": "Optional newsletter subscriber email record.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 160 },
+        "lang": { "type": "string", "enum": ["en", "bn"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "lang", "createdAt"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized admin UID allowlist document.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 160 },
+        "role": { "type": "string", "enum": ["admin"] }
+      },
+      "required": ["email", "role"]
+    },
+    "ChatbotConfig": {
+      "title": "ChatbotConfig",
+      "description": "Admin-managed AI customer support knowledge base settings, brand/product truths, business hours, custom instructions, and quick questions.",
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "maintenanceMode": { "type": "boolean" },
+        "maintenanceMessageEn": { "type": "string", "maxLength": 300 },
+        "maintenanceMessageBn": { "type": "string", "maxLength": 400 },
+        "botName": { "type": "string", "minLength": 2, "maxLength": 60 },
+        "brandName": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "brandIntro": { "type": "string", "maxLength": 800 },
+        "brandStory": { "type": "string", "maxLength": 2500 },
+        "brandMission": { "type": "string", "maxLength": 1000 },
+        "founderInfo": { "type": "string", "maxLength": 1000 },
+        "productDescription": { "type": "string", "maxLength": 1500 },
+        "ingredients": { "type": "string", "maxLength": 600 },
+        "taste": { "type": "string", "maxLength": 400 },
+        "aroma": { "type": "string", "maxLength": 400 },
+        "texture": { "type": "string", "maxLength": 400 },
+        "productionMethod": { "type": "string", "maxLength": 1200 },
+        "shelfLife": { "type": "string", "maxLength": 300 },
+        "storageInstructions": { "type": "string", "maxLength": 800 },
+        "approvedClaims": { "type": "string", "maxLength": 1200 },
+        "currentOffers": { "type": "string", "maxLength": 800 },
+        "district": { "type": "string", "maxLength": 80 },
+        "city": { "type": "string", "maxLength": 80 },
+        "googleMapsUrl": { "type": "string", "maxLength": 300 },
+        "directionsUrl": { "type": "string", "maxLength": 300 },
+        "businessHours": { "type": "string", "maxLength": 200 },
+        "openHourBst": { "type": "number" },
+        "closeHourBst": { "type": "number" },
+        "closedDays": { "type": "string", "maxLength": 80 },
+        "supportAvailabilityNote": { "type": "string", "maxLength": 300 },
+        "deliveryPolicy": { "type": "string", "maxLength": 1200 },
+        "returnPolicy": { "type": "string", "maxLength": 1200 },
+        "replacementPolicy": { "type": "string", "maxLength": 1200 },
+        "otherPaymentInfo": { "type": "string", "maxLength": 800 },
+        "supportInstructions": { "type": "string", "maxLength": 1200 },
+        "customInstructions": { "type": "string", "maxLength": 4000 },
+        "responseTone": { "type": "string", "enum": ["warm", "concise", "formal"] },
+        "responseLength": { "type": "string", "enum": ["short", "balanced", "detailed"] },
+        "languageBehavior": { "type": "string", "enum": ["auto", "prefer_bn", "prefer_en"] },
+        "fallbackMessageBn": { "type": "string", "maxLength": 400 },
+        "fallbackMessageEn": { "type": "string", "maxLength": 400 },
+        "welcomeMessageBn": { "type": "string", "maxLength": 500 },
+        "welcomeMessageEn": { "type": "string", "maxLength": 500 },
+        "quickQuestionsBn": { "type": "array" },
+        "quickQuestionsEn": { "type": "array" },
+        "retentionDays": { "type": "number" },
+        "dailyRequestLimit": { "type": "number" },
+        "version": { "type": "number" },
+        "lastSyncStatus": { "type": "string", "maxLength": 160 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "enabled",
+        "maintenanceMode",
+        "botName",
+        "brandName",
+        "responseTone",
+        "responseLength",
+        "languageBehavior",
+        "version",
+        "updatedAt"
+      ]
+    },
+    "ChatbotConfigVersion": {
+      "title": "ChatbotConfigVersion",
+      "description": "Published snapshot of ChatbotConfig for admin version rollback.",
+      "type": "object",
+      "properties": {
+        "version": { "type": "number" },
+        "publishedBy": { "type": "string", "maxLength": 160 },
+        "summary": { "type": "string", "maxLength": 200 },
+        "snapshot": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["version", "publishedBy", "summary", "snapshot", "createdAt"]
+    },
+    "ChatbotFaq": {
+      "title": "ChatbotFaq",
+      "description": "Admin-managed bilingual FAQ entry retrieved by the AI chatbot.",
+      "type": "object",
+      "properties": {
+        "question": { "type": "string", "minLength": 2, "maxLength": 300 },
+        "answer": { "type": "string", "minLength": 2, "maxLength": 2000 },
+        "lang": { "type": "string", "enum": ["bn", "en", "both"] },
+        "category": { "type": "string", "maxLength": 60 },
+        "active": { "type": "boolean" },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["question", "answer", "lang", "category", "active", "published", "updatedAt"]
+    },
+    "ChatbotKbDoc": {
+      "title": "ChatbotKbDoc",
+      "description": "Approved knowledge base entry or uploaded document text (TXT, CSV, PDF, DOCX) for RAG retrieval.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "category": { "type": "string", "maxLength": 60 },
+        "sourceType": { "type": "string", "enum": ["manual", "txt", "csv", "pdf", "docx"] },
+        "fileName": { "type": "string", "maxLength": 160 },
+        "content": { "type": "string", "minLength": 10, "maxLength": 60000 },
+        "chunkCount": { "type": "number" },
+        "status": { "type": "string", "enum": ["draft", "published"] },
+        "syncStatus": { "type": "string", "maxLength": 120 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "category", "sourceType", "fileName", "content", "chunkCount", "status", "syncStatus", "updatedAt"]
+    },
+    "ChatbotLog": {
+      "title": "ChatbotLog",
+      "description": "Sanitized append-only conversation turn log, unanswered question record, and Gemini token/cost analytics.",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "lang": { "type": "string", "enum": ["bn", "en", "banglish"] },
+        "userMessage": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "assistantReply": { "type": "string", "maxLength": 2500 },
+        "intent": { "type": "string", "maxLength": 60 },
+        "isUnanswered": { "type": "boolean" },
+        "resolved": { "type": "boolean" },
+        "handoverRequested": { "type": "boolean" },
+        "latencyMs": { "type": "number" },
+        "promptTokens": { "type": "number" },
+        "outputTokens": { "type": "number" },
+        "estimatedCostUsd": { "type": "number" },
+        "errorCode": { "type": "string", "maxLength": 80 },
+        "isTestPlayground": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "sessionId",
+        "lang",
+        "userMessage",
+        "assistantReply",
+        "intent",
+        "isUnanswered",
+        "resolved",
+        "handoverRequested",
+        "latencyMs",
+        "promptTokens",
+        "outputTokens",
+        "estimatedCostUsd",
+        "errorCode",
+        "isTestPlayground",
+        "createdAt"
+      ]
+    },
+    "ChatbotSupportRequest": {
+      "title": "ChatbotSupportRequest",
+      "description": "Customer-consented human customer support handover request.",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "customerName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "phone": { "type": "string", "pattern": "^01[3-9][0-9]{8}$", "maxLength": 11 },
+        "issueSummary": { "type": "string", "minLength": 4, "maxLength": 500 },
+        "status": { "type": "string", "enum": ["open", "contacted", "resolved"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sessionId", "customerName", "phone", "issueSummary", "status", "createdAt", "updatedAt"]
+    },
+    "ChatbotUsedToken": {
+      "title": "ChatbotUsedToken",
+      "description": "Single-use confirmation token consumption lock preventing order token replay and double-submit.",
+      "type": "object",
+      "properties": {
+        "orderNumber": { "type": "string", "pattern": "^DG-[0-9]{4,8}$" },
+        "sessionId": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderNumber", "sessionId", "createdAt"]
+    },
+    "ChatbotOrderIdempotency": {
+      "title": "ChatbotOrderIdempotency",
+      "description": "Hashed order idempotency key mapping repeated submissions to the original orderNumber without PII.",
+      "type": "object",
+      "properties": {
+        "orderNumber": { "type": "string", "pattern": "^DG-[0-9]{4,8}$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderNumber", "createdAt"]
+    },
+    "ChatbotRateBucket": {
+      "title": "ChatbotRateBucket",
+      "description": "Persistent hashed rate-limit bucket counter across serverless instances.",
+      "type": "object",
+      "properties": {
+        "count": { "type": "number" },
+        "windowStartMs": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["count", "windowStartMs", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/store_settings/{docId}": {
+      "schema": { "$ref": "#/entities/StoreSettings" },
+      "description": "Public storefront configuration ('main' doc) editable only by Admin."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Full customer orders containing PII, readable and updatable only by Admin."
+    },
+    "/order_tracking/{lookupId}": {
+      "schema": { "$ref": "#/entities/OrderTracking" },
+      "description": "Sanitized public order tracking status keyed by {orderNumber}_{phone}."
+    },
+    "/batches/{batchId}": {
+      "schema": { "$ref": "#/entities/BatchRecord" },
+      "description": "Batch verification records for QR code provenance lookup."
+    },
+    "/reviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/Review" },
+      "description": "Moderated customer reviews; public reads approved reviews only."
+    },
+    "/coupons/{code}": {
+      "schema": { "$ref": "#/entities/Coupon" },
+      "description": "Promotional discount codes managed by Admin."
+    },
+    "/subscribers/{subId}": {
+      "schema": { "$ref": "#/entities/Subscriber" },
+      "description": "Newsletter subscription emails."
+    },
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Admin role assignment documents."
+    },
+    "/chatbot_config/{docId}": {
+      "schema": { "$ref": "#/entities/ChatbotConfig" },
+      "description": "Published ('published') and admin draft ('draft') chatbot knowledge base configuration."
+    },
+    "/chatbot_config_versions/{versionId}": {
+      "schema": { "$ref": "#/entities/ChatbotConfigVersion" },
+      "description": "Version snapshots of published chatbot configurations for Admin restore."
+    },
+    "/chatbot_faqs/{faqId}": {
+      "schema": { "$ref": "#/entities/ChatbotFaq" },
+      "description": "Admin-managed FAQ entries; public reads only active & published FAQs."
+    },
+    "/chatbot_kb_docs/{docId}": {
+      "schema": { "$ref": "#/entities/ChatbotKbDoc" },
+      "description": "Knowledge base text entries and uploaded document extracts; public reads published docs only."
+    },
+    "/chatbot_logs/{logId}": {
+      "schema": { "$ref": "#/entities/ChatbotLog" },
+      "description": "Append-only conversation logs, unanswered questions, and Gemini API usage metrics readable only by Admin."
+    },
+    "/chatbot_support_requests/{reqId}": {
+      "schema": { "$ref": "#/entities/ChatbotSupportRequest" },
+      "description": "Consented human customer support handover requests readable and updatable only by Admin."
+    },
+    "/chatbot_used_tokens/{tokenId}": {
+      "schema": { "$ref": "#/entities/ChatbotUsedToken" },
+      "description": "Atomic single-use confirmation token locks tied to created orders."
+    },
+    "/chatbot_order_idempotency/{idemKey}": {
+      "schema": { "$ref": "#/entities/ChatbotOrderIdempotency" },
+      "description": "PII-free idempotency lock records keyed by hashed order attributes."
+    },
+    "/chatbot_rate_buckets/{bucketId}": {
+      "schema": { "$ref": "#/entities/ChatbotRateBucket" },
+      "description": "Hashed rate-limit counters shared across serverless instances."
+    }
+  }
+}

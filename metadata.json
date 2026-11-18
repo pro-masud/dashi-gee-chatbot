@@ -1,0 +1,8 @@
+{
+  "name": "Deshi Gee",
+  "description": "Artisanal online storefront for pure grass-fed Deshi Cow Ghee, Buffalo Ghee, and Heritage Gift Packs with scroll storytelling and BDT Cash on Delivery.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

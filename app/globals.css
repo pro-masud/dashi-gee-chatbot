@@ -1,0 +1,157 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: 'DM Sans';
+  src: url('/assets/fonts/DMSans-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'DM Sans';
+  src: url('/assets/fonts/DMSans-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'DM Sans';
+  src: url('/assets/fonts/DMSans-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'DM Mono';
+  src: url('/assets/fonts/DMMono-Regular.ttf') format('truetype');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  --font-serif: 'Fraunces', 'Noto Serif Bengali', Georgia, serif;
+  --font-sans: 'DM Sans', 'Hind Siliguri', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'DM Mono', monospace;
+}
+
+:root {
+  --bg: #faf7f2;
+  --surface: #f2ece1;
+  --surface-elevated: #eae1d2;
+  --ink: #1e1710;
+  --ink-muted: #635647;
+  --border: rgba(30, 23, 16, 0.12);
+  --border-strong: rgba(30, 23, 16, 0.24);
+  --amber: #b47b2b;
+  --amber-hover: #96621b;
+  --amber-text: #8a5a17;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+html {
+  font-family: var(--font-sans);
+  background-color: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  scroll-behavior: smooth;
+  overflow-x: clip;
+  -webkit-text-size-adjust: 100%;
+}
+
+html[data-lang='bn'] {
+  font-family: 'Hind Siliguri', 'DM Sans', sans-serif;
+  line-height: 1.68;
+}
+
+html[data-lang='bn'] .font-display {
+  font-family: 'Noto Serif Bengali', 'Fraunces', Georgia, serif;
+  line-height: 1.25;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--ink);
+  overflow-x: clip;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.font-display {
+  font-family: 'Fraunces', 'Noto Serif Bengali', Georgia, serif;
+  text-wrap: balance;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-perspective {
+  perspective: 1200px;
+}
+
+.jar-tilt-wrap {
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.craft-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  clip-path: inset(0 0 0 100%);
+  will-change: clip-path, transform;
+}
+
+.craft-frame.is-first {
+  clip-path: inset(0 0 0 0);
+}
+
+.drawer-panel {
+  transform: translateX(0);
+  transition: transform 320ms var(--ease-drawer);
+}
+
+.drawer-panel[hidden] {
+  transform: translateX(100%);
+}
+
+@starting-style {
+  .drawer-panel {
+    transform: translateX(100%);
+  }
+}
+
+@media print {
+  header,
+  footer,
+  .no-print {
+    display: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .jar-tilt-wrap {
+    transform: none !important;
+  }
+}
