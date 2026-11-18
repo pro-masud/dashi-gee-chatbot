@@ -40,15 +40,23 @@
 
 :root {
   --bg: #faf7f2;
+  --bg-sand: #f4efe6;
   --surface: #f2ece1;
   --surface-elevated: #eae1d2;
-  --ink: #1e1710;
-  --ink-muted: #635647;
-  --border: rgba(30, 23, 16, 0.12);
-  --border-strong: rgba(30, 23, 16, 0.24);
+  --surface-cream: #fbf8f4;
+  --ink: #1a120b;
+  --ink-soft: #2d2218;
+  --ink-muted: #6b5c4d;
+  --ink-subtle: #8a7867;
+  --border: rgba(30, 23, 16, 0.10);
+  --border-strong: rgba(30, 23, 16, 0.20);
+  --border-gold: rgba(180, 123, 43, 0.35);
   --amber: #b47b2b;
   --amber-hover: #96621b;
   --amber-text: #8a5a17;
+  --gold-primary: #c98a2c;
+  --gold-bright: #e5b25d;
+  --gold-dark: #8c5813;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
@@ -93,6 +101,41 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Luxury Editorial Accents */
+.gold-gradient-text {
+  background: linear-gradient(135deg, #7A4E10 0%, #B47B2B 50%, #D4AF37 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.gold-gradient-bg {
+  background: linear-gradient(135deg, #B47B2B 0%, #C98A2C 50%, #96621B 100%);
+}
+
+.gold-gradient-hover:hover {
+  background: linear-gradient(135deg, #96621B 0%, #B47B2B 100%);
+}
+
+.amber-glow {
+  box-shadow: 0 0 50px -10px rgba(180, 123, 43, 0.22);
+}
+
+.luxury-card {
+  background: #FFFDF9;
+  border: 1px solid rgba(30, 23, 16, 0.08);
+  box-shadow: 0 10px 30px -5px rgba(30, 23, 16, 0.04), 0 0 1px 1px rgba(30, 23, 16, 0.02);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.luxury-card:hover {
+  box-shadow: 0 20px 40px -10px rgba(30, 23, 16, 0.08), 0 0 0 1px rgba(180, 123, 43, 0.25);
+  border-color: rgba(180, 123, 43, 0.25);
+}
+
+.luxury-border {
+  border-color: rgba(30, 23, 16, 0.09);
+}
+
 .hero-perspective {
   perspective: 1200px;
 }
@@ -128,6 +171,25 @@ body {
   .drawer-panel {
     transform: translateX(100%);
   }
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #FAF7F2;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(30, 23, 16, 0.18);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(180, 123, 43, 0.45);
 }
 
 @media print {

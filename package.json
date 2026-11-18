@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "predev": "[ -d node_modules/.bin ] || bun install || npm install",
-    "dev": "sh -c 'exec next dev -p ${PORT:-3001} -H 0.0.0.0' --",
+    "dev": "sh -c 'exec next dev -p ${PORT:-3002} -H 0.0.0.0' --",
     "prebuild": "[ -d node_modules/.bin ] || bun install || npm install",
     "build": "NODE_ENV=production next build",
-    "start": "sh -c 'exec next start -p ${PORT:-3001} -H 0.0.0.0'",
+    "start": "sh -c 'exec next start -p ${PORT:-3002} -H 0.0.0.0'",
     "prelint": "[ -d node_modules/.bin ] || bun install || npm install",
     "lint": "tsc --noEmit"
   },
