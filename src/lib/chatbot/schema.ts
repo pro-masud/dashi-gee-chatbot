@@ -1,4 +1,4 @@
-import type { FeedbackReason } from './types';
+import type { ChannelSource, FeedbackReason } from './types';
 
 export const ALLOWED_ADMIN_GEMINI_MODELS = [
   'gemini-4-hydrogen',
@@ -19,12 +19,27 @@ export function validateModelSelection(modelName: unknown): {
   return { valid: false, model: 'gemini-4-hydrogen' };
 }
 
+const VALID_CHANNELS = new Set<ChannelSource>([
+  'web',
+  'messenger',
+  'instagram',
+  'whatsapp',
+  'email',
+  'sms',
+]);
+
+export function sanitizeChannelSource(raw: unknown, fallback: ChannelSource = 'web'): ChannelSource {
+  const clean = String(raw || '').trim().toLowerCase() as ChannelSource;
+  return VALID_CHANNELS.has(clean) ? clean : fallback;
+}
+
 export interface ValidatedChatRequest {
   mode: 'published' | 'draft';
   uiLang: 'en' | 'bn';
   sessionId: string;
   isTestPlayground: boolean;
   stream: boolean;
+  channel: ChannelSource;
   messages: { role: 'user' | 'assistant'; text: string }[];
 }
 
@@ -62,6 +77,7 @@ export function validateChatRequestPayload(raw: unknown):
       sessionId: typeof obj.sessionId === 'string' && obj.sessionId.trim() ? obj.sessionId.trim() : 'sess_anon',
       isTestPlayground: Boolean(obj.isTestPlayground),
       stream: obj.stream !== false,
+      channel: sanitizeChannelSource(obj.channel, 'web'),
       messages: parsedMessages,
     },
   };

@@ -4,14 +4,23 @@ import { FormEvent, useEffect, useState } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
+  BellRing,
   CheckCircle2,
+  Clock,
   Edit3,
+  ExternalLink,
+  Headset,
+  ImagePlus,
   Loader2,
   PackageSearch,
+  RotateCw,
   Search,
+  Star,
+  Truck,
   XCircle,
 } from 'lucide-react';
 import {
+  DEFAULT_STORE_SETTINGS,
   OrderStatus,
   TrackingRecord,
   trackOrderLookup,
@@ -22,6 +31,11 @@ import {
   clientAssessAddressCompleteness,
   formatBdt,
 } from '../data/deshiGeeData';
+import {
+  evaluateOrderDelayStatus,
+  formatPaymentClarification,
+} from '../lib/chatbot/supportEngine';
+import type { RefillReminderDoc, SupportCategory } from '../lib/chatbot/types';
 
 interface TrackOrderViewProps {
   lang: Lang;
@@ -65,7 +79,67 @@ export function TrackOrderView({
     text: string;
   } | null>(null);
 
+  // Phase 3: Post-purchase support ticket + private evidence state
+  const [showSupportPanel, setShowSupportPanel] = useState(false);
+  const [ticketCategory, setTicketCategory] = useState<SupportCategory>('damaged_jar');
+  const [ticketName, setTicketName] = useState('');
+  const [ticketSummary, setTicketSummary] = useState('');
+  const [ticketConsent, setTicketConsent] = useState(false);
+  const [uploadedEvidence, setUploadedEvidence] = useState<
+    { evidenceId: string; filename: string }[]
+  >([]);
+  const [evidenceBusy, setEvidenceBusy] = useState(false);
+  const [ticketBusy, setTicketBusy] = useState(false);
+  const [ticketFeedback, setTicketFeedback] = useState<{
+    type: 'ok' | 'err';
+    text: string;
+  } | null>(null);
+
+  // Phase 3: After-delivery retention state (reorder, verified review, refill reminder)
+  const [reorderBusy, setReorderBusy] = useState(false);
+  const [reorderErr, setReorderErr] = useState('');
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewName, setReviewName] = useState('');
+  const [reviewComment, setReviewComment] = useState('');
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewStatus, setReviewStatus] = useState<{
+    type: 'ok' | 'err';
+    text: string;
+  } | null>(null);
+
+  const [reminderInterval, setReminderInterval] = useState<30 | 45 | 60 | 90>(45);
+  const [reminderConsent, setReminderConsent] = useState(false);
+  const [savedReminder, setSavedReminder] = useState<RefillReminderDoc | null>(null);
+  const [reminderBusy, setReminderBusy] = useState(false);
+  const [reminderFeedback, setReminderFeedback] = useState('');
+
   const bn = lang === 'bn';
+
+  const shrinkImageForUpload = async (file: File): Promise<string> => {
+    const rawUrl = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result || ''));
+      r.onerror = () => reject(new Error('Read error'));
+      r.readAsDataURL(file);
+    });
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error('Image error'));
+      i.src = rawUrl;
+    });
+    const maxDim = 1100;
+    const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round((img.width || 800) * scale));
+    canvas.height = Math.max(1, Math.round((img.height || 800) * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return rawUrl;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    let out = canvas.toDataURL('image/jpeg', 0.8);
+    if (out.length > 680_000) out = canvas.toDataURL('image/jpeg', 0.6);
+    return out;
+  };
 
   const runLookup = async (ord: string, ph: string) => {
     const cleanOrd = ord.trim().toUpperCase();
@@ -90,8 +164,13 @@ export function TrackOrderView({
     setLoading(true);
     setErrorMsg('');
     setManageFeedback(null);
+    setTicketFeedback(null);
     setShowEditForm(false);
     setShowCancelConfirm(false);
+    setShowSupportPanel(false);
+    setSavedReminder(null);
+    setReviewStatus(null);
+    setReorderErr('');
     setSearched(true);
     try {
       const record = await trackOrderLookup(cleanOrd, cleanPhone);
@@ -99,6 +178,20 @@ export function TrackOrderView({
       if (record) {
         setVerifiedPhone(cleanPhone);
         if (record.district) setEditDistrict(record.district);
+        if (record.status === 'delivered') {
+          fetch(
+            `/api/orders/refill-reminder?orderNumber=${encodeURIComponent(cleanOrd)}&phone=${encodeURIComponent(cleanPhone)}`
+          )
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d: { ok?: boolean; reminder?: RefillReminderDoc | null } | null) => {
+              if (d?.ok && d.reminder) {
+                setSavedReminder(d.reminder);
+                setReminderInterval(d.reminder.intervalDays);
+                setReminderConsent(Boolean(d.reminder.consentGranted));
+              }
+            })
+            .catch(() => {});
+        }
       }
     } catch {
       setErrorMsg(
@@ -259,6 +352,233 @@ export function TrackOrderView({
   const activeStepIdx = result
     ? ORDER_FLOW.findIndex((s) => s.key === result.status)
     : -1;
+
+  const paymentClarification = result
+    ? formatPaymentClarification(
+        result.paymentMethod,
+        result.paymentStatus,
+        DEFAULT_STORE_SETTINGS,
+        bn ? 'bn' : 'en'
+      )
+    : null;
+
+  const delayDiagnostic = result
+    ? evaluateOrderDelayStatus({
+        status: result.status,
+        estimatedDelivery: result.estimatedDelivery,
+        deliveryZone: result.deliveryZone,
+        updatedAt: result.updatedAt,
+      })
+    : null;
+
+  const handleUploadEvidence = async (file?: File | null) => {
+    if (!file || !result || evidenceBusy) return;
+    setEvidenceBusy(true);
+    setTicketFeedback(null);
+    try {
+      const dataUrl = await shrinkImageForUpload(file);
+      const res = await fetch('/api/support/evidence', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+        },
+        body: JSON.stringify({
+          dataUrl,
+          filename: file.name || 'evidence.jpg',
+          orderNumber: result.orderNumber,
+          sessionId: `track_${result.orderNumber}`,
+          purpose:
+            ticketCategory === 'payment_dispute'
+              ? 'payment_dispute'
+              : ticketCategory === 'damaged_jar'
+                ? 'damage_claim'
+                : 'general',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok || !data.evidenceId) {
+        throw new Error(data.error || 'Could not upload evidence image.');
+      }
+      setUploadedEvidence((prev) => [
+        ...prev.slice(-4),
+        { evidenceId: String(data.evidenceId), filename: String(data.filename || file.name) },
+      ]);
+    } catch (err) {
+      setTicketFeedback({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Failed to upload image.',
+      });
+    } finally {
+      setEvidenceBusy(false);
+    }
+  };
+
+  const handleSubmitSupportTicket = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!result || ticketBusy) return;
+    if (!ticketConsent) {
+      setTicketFeedback({
+        type: 'err',
+        text: bn
+          ? 'টিকিট পাঠাতে অনুগ্রহ করে সম্মতি চেকবক্সে টিক দিন।'
+          : 'Please check consent before submitting a support ticket.',
+      });
+      return;
+    }
+    setTicketBusy(true);
+    setTicketFeedback(null);
+    try {
+      const res = await fetch('/api/support/ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+        },
+        body: JSON.stringify({
+          sessionId: `track_${result.orderNumber}`,
+          customerName: ticketName.trim(),
+          phone: verifiedPhone,
+          orderNumber: result.orderNumber,
+          category: ticketCategory,
+          issueSummary: ticketSummary.trim(),
+          evidenceIds: uploadedEvidence.map((u) => u.evidenceId),
+          consentGranted: true,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Failed to create support ticket.');
+      }
+      const slaText = bn ? data.sla?.expectationBn : data.sla?.expectationEn;
+      setTicketFeedback({
+        type: 'ok',
+        text: bn
+          ? `টিকিট ${data.ticketNumber} জমা হয়েছে। ${slaText || ''}`
+          : `Ticket ${data.ticketNumber} created. ${slaText || ''}`,
+      });
+      setTicketSummary('');
+      setUploadedEvidence([]);
+    } catch (err) {
+      setTicketFeedback({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Support ticket submission failed.',
+      });
+    } finally {
+      setTicketBusy(false);
+    }
+  };
+
+  const handleOneClickReorder = async () => {
+    if (!result || reorderBusy) return;
+    setReorderBusy(true);
+    setReorderErr('');
+    try {
+      const res = await fetch('/api/orders/reorder', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+        },
+        body: JSON.stringify({
+          orderNumber: result.orderNumber,
+          phone: verifiedPhone,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok || !data.reorderUrl) {
+        throw new Error(
+          (bn ? data.messageBn : data.messageEn) ||
+            data.error ||
+            'Reorder unavailable right now.'
+        );
+      }
+      window.location.href = String(data.reorderUrl);
+    } catch (err) {
+      setReorderErr(err instanceof Error ? err.message : 'Could not prepare reorder.');
+      setReorderBusy(false);
+    }
+  };
+
+  const handleSubmitVerifiedReview = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!result || reviewBusy) return;
+    setReviewBusy(true);
+    setReviewStatus(null);
+    try {
+      const res = await fetch('/api/orders/review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+        },
+        body: JSON.stringify({
+          orderNumber: result.orderNumber,
+          phone: verifiedPhone,
+          customerName: reviewName.trim(),
+          district: result.district || 'Dhaka',
+          rating: reviewRating,
+          comment: reviewComment.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        throw new Error(
+          (bn ? data.messageBn : data.messageEn) ||
+            data.error ||
+            'Could not save verified review.'
+        );
+      }
+      setReviewStatus({
+        type: 'ok',
+        text: bn ? data.messageBn : data.messageEn,
+      });
+      setReviewComment('');
+    } catch (err) {
+      setReviewStatus({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Review failed.',
+      });
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  const handleSaveRefillReminder = async (
+    nextStatus: 'active' | 'paused' | 'opted_out' = 'active'
+  ) => {
+    if (!result || reminderBusy) return;
+    setReminderBusy(true);
+    setReminderFeedback('');
+    try {
+      const res = await fetch('/api/orders/refill-reminder', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+        },
+        body: JSON.stringify({
+          orderNumber: result.orderNumber,
+          phone: verifiedPhone,
+          intervalDays: reminderInterval,
+          status: nextStatus,
+          consentGranted: reminderConsent || nextStatus !== 'active',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        throw new Error(
+          (bn ? data.messageBn : data.messageEn) || data.error || 'Could not update reminder.'
+        );
+      }
+      setSavedReminder(data.reminder || null);
+      setReminderFeedback(bn ? data.messageBn : data.messageEn);
+    } catch (err) {
+      setReminderFeedback(err instanceof Error ? err.message : 'Failed updating reminder.');
+    } finally {
+      setReminderBusy(false);
+    }
+  };
 
   return (
     <section className="mx-auto min-h-[75vh] max-w-3xl px-4 py-10 sm:px-8 sm:py-14">
@@ -448,6 +768,41 @@ export function TrackOrderView({
             </span>
           </p>
 
+          {(result.courierPartner || result.consignmentId || result.courierTrackingUrl) && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] px-4 py-3 text-xs">
+              <div className="space-y-0.5">
+                <p className="font-medium text-[#1E1710]">
+                  <Truck className="mr-1.5 inline h-3.5 w-3.5 text-[#8A5A17]" />
+                  {bn ? 'কুরিয়ার কনসাইনমেন্ট:' : 'Courier Dispatch:'}{' '}
+                  <span className="font-mono uppercase">
+                    {result.courierPartner || 'courier'}
+                  </span>
+                  {result.consignmentId ? (
+                    <span className="font-mono text-[#8A5A17]"> · {result.consignmentId}</span>
+                  ) : null}
+                </p>
+                {result.dispatchedAtIso && (
+                  <p className="font-mono text-[11px] tabular-nums text-[#635647]">
+                    {bn ? 'পাঠানোর সময়:' : 'Dispatched:'}{' '}
+                    {new Date(result.dispatchedAtIso).toLocaleString()}
+                  </p>
+                )}
+              </div>
+              {result.courierTrackingUrl &&
+                /^https:\/\/[^\s]+$/i.test(result.courierTrackingUrl) && (
+                  <a
+                    href={result.courierTrackingUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex min-h-[38px] shrink-0 items-center gap-1.5 rounded-lg bg-[#1E1710] px-3.5 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E]"
+                  >
+                    <span>{bn ? 'কুরিয়ার ট্র্যাক করুন' : 'Track on Courier'}</span>
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                )}
+            </div>
+          )}
+
           {manageFeedback && (
             <div
               role="status"
@@ -607,10 +962,409 @@ export function TrackOrderView({
           ) : result.status !== 'cancelled' ? (
             <div className="border-t border-[rgba(30,23,16,0.10)] pt-4 text-xs text-[#635647]">
               {bn
-                ? 'এই অর্ডারটি ইতিমধ্যে প্যাকেজিং বা কুরিয়ার পর্যায়ে চলে যাওয়ায় অনলাইনে পরিবর্তন বন্ধ রয়েছে। জরুরি প্রয়োজনে আমাদের সাপোর্টে যোগাযোগ করুন।'
-                : 'This order is already being processed/shipped, so online edits or cancellation are locked. Please contact customer support if urgent.'}
+                ? 'এই অর্ডারটি ইতিমধ্যে প্যাকেজিং বা কুরিয়ার পর্যায়ে চলে যাওয়ায় অনলাইনে পরিবর্তন বন্ধ রয়েছে। জরুরি প্রয়োজনে নিচের সাপোর্ট অপশন ব্যবহার করুন।'
+                : 'This order is already being processed/shipped, so online edits or cancellation are locked. Use the support option below if urgent.'}
             </div>
           ) : null}
+
+          {/* Payment Verification Clarification Banner (Non-COD) */}
+          {paymentClarification && result.paymentMethod !== 'cod' && (
+            <div
+              className={`rounded-xl border p-4 text-xs ${
+                result.paymentStatus === 'verified'
+                  ? 'border-emerald-200 bg-emerald-50/70 text-emerald-950'
+                  : 'border-amber-200 bg-amber-50/80 text-amber-950'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-semibold">{paymentClarification.headline}</p>
+                {paymentClarification.canEscalateDispute && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTicketCategory('payment_dispute');
+                      setShowSupportPanel(true);
+                    }}
+                    className="rounded-lg border border-amber-400 bg-[#FFFDF9] px-3 py-1 text-[11px] font-semibold text-[#1E1710] hover:bg-[#F2ECE1]"
+                  >
+                    {bn ? 'পেমেন্ট ডিসপিউট টিকিট দিন' : 'Dispute Payment Verification'}
+                  </button>
+                )}
+              </div>
+              <p className="mt-1 leading-relaxed">{paymentClarification.detail}</p>
+            </div>
+          )}
+
+          {/* Delivery Delay Diagnostic */}
+          {delayDiagnostic && result.status !== 'delivered' && result.status !== 'cancelled' && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] p-4 text-xs">
+              <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                <Clock className="mt-0.5 h-4 w-4 shrink-0 text-[#8A5A17]" />
+                <p className="text-[#635647]">
+                  {bn ? delayDiagnostic.statusNoteBn : delayDiagnostic.statusNoteEn}
+                </p>
+              </div>
+              {delayDiagnostic.recommendEscalation && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTicketCategory('late_delivery');
+                    setShowSupportPanel(true);
+                  }}
+                  className="shrink-0 rounded-lg border border-[rgba(180,123,43,0.45)] bg-[#FFFDF9] px-3 py-1.5 text-[11px] font-semibold text-[#1E1710] hover:bg-[#F2ECE1]"
+                >
+                  {bn ? 'জরুরি ডেলিভারি ফলো-আপ' : 'Report Delay (Urgent)'}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Report Issue / Upload Private Evidence / Open Support Ticket */}
+          <div className="border-t border-[rgba(30,23,16,0.10)] pt-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-[#1E1710]">
+                  <Headset className="h-4 w-4 text-[#8A5A17]" />
+                  <span>
+                    {bn
+                      ? 'ক্ষতিগ্রস্ত জার, পেমেন্ট বা ডেলিভারি সহায়তা'
+                      : 'Need Help? Report Issue or Upload Photo'}
+                  </span>
+                </h3>
+                <p className="mt-0.5 text-xs text-[#635647]">
+                  {bn
+                    ? 'ডেলিভারির ২৪ ঘণ্টার মধ্যে ভাঙা জারের ছবি বা পেমেন্ট স্ক্রিনশট দিয়ে সরাসরি টিকিট খুলুন।'
+                    : 'Upload a delivery-day jar photo (within 24h) or payment screenshot to open an escalated ticket.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSupportPanel((v) => !v)}
+                className="min-h-[38px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-3.5 py-1.5 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+              >
+                {showSupportPanel
+                  ? bn
+                    ? 'বন্ধ করুন'
+                    : 'Close Form'
+                  : bn
+                    ? 'সাপোর্ট টিকিট খুলুন'
+                    : 'Open Support Ticket'}
+              </button>
+            </div>
+
+            {ticketFeedback && (
+              <div
+                className={`mt-3 rounded-xl border px-4 py-3 text-xs font-medium ${
+                  ticketFeedback.type === 'ok'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-950'
+                    : 'border-red-300 bg-red-50 text-red-900'
+                }`}
+              >
+                {ticketFeedback.text}
+              </div>
+            )}
+
+            {showSupportPanel && (
+              <form
+                onSubmit={handleSubmitSupportTicket}
+                className="mt-4 space-y-3 rounded-xl border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] p-4 text-xs"
+              >
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-[#635647]">
+                      {bn ? 'সমস্যার ধরন *' : 'Issue Category *'}
+                    </label>
+                    <select
+                      value={ticketCategory}
+                      onChange={(e) => setTicketCategory(e.target.value as SupportCategory)}
+                      className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-xs"
+                    >
+                      <option value="damaged_jar">
+                        {bn ? 'ভাঙা বা লিক হওয়া জার (Urgent)' : 'Damaged / Leaking Jar (Urgent)'}
+                      </option>
+                      <option value="payment_dispute">
+                        {bn ? 'bKash/Nagad পেমেন্ট সমস্যা (Urgent)' : 'Payment Verification Issue (Urgent)'}
+                      </option>
+                      <option value="late_delivery">
+                        {bn ? 'ডেলিভারিতে দেরি (Urgent)' : 'Late Delivery Follow-up (Urgent)'}
+                      </option>
+                      <option value="refund_return">
+                        {bn ? 'রিটার্ন বা রিফান্ড অনুরোধ' : 'Return / Refund Inquiry'}
+                      </option>
+                      <option value="general">
+                        {bn ? 'অন্যান্য সহায়তা' : 'General Order Help'}
+                      </option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[#635647]">
+                      {bn ? 'আপনার নাম *' : 'Your Name *'}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={ticketName}
+                      onChange={(e) => setTicketName(e.target.value)}
+                      placeholder={bn ? 'যেমন: রাকিব হাসান' : 'Full Name'}
+                      className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[#635647]">
+                    {bn ? 'সমস্যার বিবরণ *' : 'Describe the Issue *'}
+                  </label>
+                  <textarea
+                    rows={3}
+                    required
+                    value={ticketSummary}
+                    onChange={(e) => setTicketSummary(e.target.value)}
+                    placeholder={
+                      bn
+                        ? 'দয়া করে আপনার সমস্যাটি সংক্ষেপে লিখুন...'
+                        : 'Briefly explain the jar condition, payment TxnID, or delivery concern...'
+                    }
+                    className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-xs"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="inline-flex min-h-[38px] cursor-pointer items-center gap-2 rounded-lg border border-[rgba(180,123,43,0.4)] bg-[#FFFDF9] px-3 py-1.5 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]">
+                    {evidenceBusy ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-[#B47B2B]" />
+                    ) : (
+                      <ImagePlus className="h-3.5 w-3.5 text-[#8A5A17]" />
+                    )}
+                    <span>
+                      {evidenceBusy
+                        ? bn
+                          ? 'আপলোড হচ্ছে...'
+                          : 'Uploading...'
+                        : bn
+                          ? 'ছবি সংযুক্ত করুন (JPEG/PNG)'
+                          : 'Upload Photo Evidence'}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        handleUploadEvidence(e.target.files?.[0]);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+                  {uploadedEvidence.map((ev) => (
+                    <span
+                      key={ev.evidenceId}
+                      className="inline-flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 px-2.5 py-1 font-mono text-[11px] text-emerald-900"
+                    >
+                      {ev.filename}
+                    </span>
+                  ))}
+                </div>
+
+                <label className="flex items-start gap-2 text-[11px] text-[#635647]">
+                  <input
+                    type="checkbox"
+                    checked={ticketConsent}
+                    onChange={(e) => setTicketConsent(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 accent-[#B47B2B]"
+                  />
+                  <span>
+                    {bn
+                      ? 'আমি এই অর্ডার নম্বর, ফোন ও সংযুক্ত ছবি সাপোর্ট পর্যালোচনার জন্য Deshi Gee টিমের সাথে শেয়ার করতে সম্মতি দিচ্ছি।'
+                      : 'I consent to share my order details, phone, and uploaded photo with the Deshi Gee human support team for ticket review.'}
+                  </span>
+                </label>
+
+                <button
+                  type="submit"
+                  disabled={ticketBusy}
+                  className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-[#B47B2B] px-4 py-2 text-xs font-semibold text-[#FFFDF9] hover:bg-[#9D6820] disabled:opacity-60"
+                >
+                  {ticketBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  <span>{bn ? 'সাপোর্ট টিকিট জমা দিন' : 'Submit Support Ticket'}</span>
+                </button>
+              </form>
+            )}
+          </div>
+
+          {/* T3.3 After-Delivery Retention Features (Delivered Orders Only) */}
+          {result.status === 'delivered' && (
+            <div className="space-y-5 border-t border-[rgba(30,23,16,0.10)] pt-5">
+              {/* 1. One-Click Reorder */}
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(180,123,43,0.35)] bg-[#F2ECE1]/70 p-4">
+                <div>
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-[#1E1710]">
+                    <RotateCw className="h-4 w-4 text-[#8A5A17]" />
+                    <span>{bn ? 'আগের মতোই আবার অর্ডার করুন' : 'Enjoyed Deshi Gee? Order Again'}</span>
+                  </h3>
+                  <p className="mt-0.5 text-xs text-[#635647]">
+                    {bn
+                      ? 'বর্তমান লাইভ স্টক ও মূল্য যাচাই করে এক ক্লিকেই কার্ট সাজিয়ে নিন।'
+                      : 'Pre-fill your cart in one click using live jar stock and current BDT pricing.'}
+                  </p>
+                  {reorderErr && <p className="mt-1 text-xs text-red-700">{reorderErr}</p>}
+                </div>
+                <button
+                  type="button"
+                  disabled={reorderBusy}
+                  onClick={handleOneClickReorder}
+                  className="inline-flex min-h-[42px] items-center gap-2 rounded-xl bg-[#1E1710] px-4 py-2 text-xs font-semibold text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-60"
+                >
+                  {reorderBusy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RotateCw className="h-3.5 w-3.5 text-[#D89B2B]" />
+                  )}
+                  <span>{bn ? 'ওয়ান-ক্লিক রিঅর্ডার' : 'One-Click Reorder'}</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                {/* 2. Verified Review Prompt */}
+                <form
+                  onSubmit={handleSubmitVerifiedReview}
+                  className="space-y-3 rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] p-4 text-xs"
+                >
+                  <h4 className="flex items-center gap-1.5 font-semibold text-[#1E1710]">
+                    <Star className="h-4 w-4 text-[#B47B2B]" />
+                    <span>
+                      {bn ? 'যাচাইকৃত ক্রেতা রিভিউ দিন' : 'Share Your Verified Review'}
+                    </span>
+                  </h4>
+                  <div className="flex items-center gap-1">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setReviewRating(star)}
+                        aria-label={`${star} stars`}
+                        className="p-1"
+                      >
+                        <Star
+                          className={`h-4 w-4 ${
+                            star <= reviewRating
+                              ? 'fill-[#B47B2B] text-[#B47B2B]'
+                              : 'text-[#C5B8A5]'
+                          }`}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    value={reviewName}
+                    onChange={(e) => setReviewName(e.target.value)}
+                    placeholder={bn ? 'আপনার নাম' : 'Your name'}
+                    className="w-full rounded-lg border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3 py-2 text-xs"
+                  />
+                  <textarea
+                    rows={2}
+                    required
+                    value={reviewComment}
+                    onChange={(e) => setReviewComment(e.target.value)}
+                    placeholder={
+                      bn
+                        ? 'ঘিয়ের স্বাদ, দানা ও প্যাকেজিং কেমন লেগেছে লিখুন...'
+                        : 'Tell us how the aroma, danadar texture, and jar arrived...'
+                    }
+                    className="w-full rounded-lg border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3 py-2 text-xs"
+                  />
+                  {reviewStatus && (
+                    <p
+                      className={`text-[11px] font-medium ${
+                        reviewStatus.type === 'ok' ? 'text-emerald-800' : 'text-red-700'
+                      }`}
+                    >
+                      {reviewStatus.text}
+                    </p>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={reviewBusy}
+                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-3.5 py-1.5 text-xs font-semibold text-[#FFFDF9] disabled:opacity-60"
+                  >
+                    {reviewBusy && <Loader2 className="h-3 w-3 animate-spin" />}
+                    <span>{bn ? 'রিভিউ জমা দিন' : 'Submit Verified Review'}</span>
+                  </button>
+                </form>
+
+                {/* 3. Opt-in Refill Reminder */}
+                <div className="space-y-3 rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] p-4 text-xs">
+                  <h4 className="flex items-center gap-1.5 font-semibold text-[#1E1710]">
+                    <BellRing className="h-4 w-4 text-[#8A5A17]" />
+                    <span>{bn ? 'রিফিল রিমাইন্ডার (ঐচ্ছিক)' : 'Opt-in Refill Reminder'}</span>
+                  </h4>
+                  <p className="text-[11px] text-[#635647]">
+                    {bn
+                      ? 'আপনি চাইলে নির্দিষ্ট দিন পর ঘি রিফিলের স্মরণবার্তা সেট করে রাখতে পারেন (যেকোনো সময় বন্ধ করা যাবে)।'
+                      : 'Choose an optional refill interval reminder tailored to your kitchen pace. Pause or opt out anytime.'}
+                  </p>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {([30, 45, 60, 90] as const).map((days) => (
+                      <button
+                        key={days}
+                        type="button"
+                        onClick={() => setReminderInterval(days)}
+                        className={`min-h-[36px] rounded-lg border font-mono text-xs font-semibold ${
+                          reminderInterval === days
+                            ? 'border-[#B47B2B] bg-[#B47B2B] text-[#FFFDF9]'
+                            : 'border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] text-[#1E1710]'
+                        }`}
+                      >
+                        {days}d
+                      </button>
+                    ))}
+                  </div>
+                  <label className="flex items-start gap-2 text-[11px] text-[#635647]">
+                    <input
+                      type="checkbox"
+                      checked={reminderConsent}
+                      onChange={(e) => setReminderConsent(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 accent-[#B47B2B]"
+                    />
+                    <span>
+                      {bn
+                        ? 'আমি সম্মতি দিচ্ছি যেন নির্বাচিত সময়ে রিফিল রিমাইন্ডার শিডিউল করা হয়।'
+                        : 'I explicitly opt in to schedule this refill reminder.'}
+                    </span>
+                  </label>
+                  {savedReminder && (
+                    <p className="font-mono text-[10.5px] text-[#8A5A17]">
+                      Status: {savedReminder.status} · {savedReminder.intervalDays} days
+                    </p>
+                  )}
+                  {reminderFeedback && (
+                    <p className="text-[11px] font-medium text-[#1E1710]">{reminderFeedback}</p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={reminderBusy || !reminderConsent}
+                      onClick={() => handleSaveRefillReminder('active')}
+                      className="min-h-[38px] rounded-lg bg-[#1E1710] px-3.5 py-1.5 text-xs font-semibold text-[#FAF7F2] disabled:opacity-50"
+                    >
+                      {bn ? 'রিমাইন্ডার চালু করুন' : 'Save Reminder'}
+                    </button>
+                    {savedReminder && savedReminder.status === 'active' && (
+                      <button
+                        type="button"
+                        disabled={reminderBusy}
+                        onClick={() => handleSaveRefillReminder('opted_out')}
+                        className="min-h-[38px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FFFDF9] px-3 py-1.5 text-xs font-medium text-[#635647]"
+                      >
+                        {bn ? 'বন্ধ করুন' : 'Opt Out'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </section>

@@ -80,6 +80,15 @@ function sanitizeConfigPayload(cfg: ChatbotConfigDoc): Record<string, unknown> {
     closeHourBst: Math.max(0, Math.min(23, Math.round(Number(cfg.closeHourBst) || 0))),
     closedDays: String(cfg.closedDays || '').slice(0, 80),
     supportAvailabilityNote: String(cfg.supportAvailabilityNote || '').slice(0, 300),
+    humanSupportEnabled: cfg.humanSupportEnabled !== false,
+    slaStandardMinutes: Math.max(
+      15,
+      Math.min(1440, Math.round(Number(cfg.slaStandardMinutes ?? 120) || 120))
+    ),
+    slaUrgentMinutes: Math.max(
+      5,
+      Math.min(720, Math.round(Number(cfg.slaUrgentMinutes ?? 30) || 30))
+    ),
     deliveryPolicy: String(cfg.deliveryPolicy || '').slice(0, 1200),
     returnPolicy: String(cfg.returnPolicy || '').slice(0, 1200),
     replacementPolicy: String(cfg.replacementPolicy || '').slice(0, 1200),

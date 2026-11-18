@@ -296,13 +296,16 @@ export function detectSensitiveSecret(text: string): boolean {
   return SECRET_PATTERNS.some((rx) => rx.test(text));
 }
 
-export function getBusinessHoursStatus(cfg: ChatbotConfigDoc): {
+export function getBusinessHoursStatus(
+  cfg: ChatbotConfigDoc,
+  referenceDate?: Date
+): {
   isOpenNow: boolean;
   currentTimeBst: string;
   currentDayEn: string;
 } {
   try {
-    const now = new Date();
+    const now = referenceDate || new Date();
     const parts = new Intl.DateTimeFormat('en-US', {
       timeZone: 'Asia/Dhaka',
       weekday: 'long',

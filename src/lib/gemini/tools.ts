@@ -6,11 +6,13 @@ import {
   normalizeWeight,
 } from '../chatbot/domain-guard';
 import {
+  buildVerifiedReorderPayload,
   checkRecentOrderFingerprint,
   createServerSupportRequest,
   fetchServerCouponByCode,
   fetchServerOrderTracking,
   manageServerOrder,
+  upsertRefillReminder,
 } from '../chatbot/firestoreRest';
 import { runHybridKnowledgeSearch } from '../chatbot/hybridRag';
 import {
@@ -35,6 +37,11 @@ import {
   buildStoreFactsSnapshot,
   type StoreFactsSnapshot,
 } from '../chatbot/storeFacts';
+import {
+  computeSupportSlaTarget,
+  evaluateOrderDelayStatus,
+  formatPaymentClarification,
+} from '../chatbot/supportEngine';
 import type {
   ChatActionItem,
   ChatbotConfigDoc,
@@ -44,6 +51,8 @@ import type {
   OrderStatePhase,
   OrderSummaryCard,
   ProductCardItem,
+  SupportCategory,
+  SupportPriority,
   TrackingCardData,
 } from '../chatbot/types';
 import { dispatchWebhookWithRetry, notificationLogs } from '../serverState';
@@ -285,15 +294,100 @@ export const CHATBOT_FUNCTION_DECLARATIONS: FunctionDeclaration[] = [
   {
     name: 'submit_support_handover',
     description:
-      'Create a consented human customer support callback/handover ticket when customer asks for a real agent, reports a damaged jar, requests bulk > 10 jars, or needs refund/payment help.',
+      'Create a consented human customer support callback/handover ticket when customer asks for a real agent, reports a damaged jar, payment dispute, late delivery, bulk > 10 jars, or needs refund help.',
     parameters: {
       type: Type.OBJECT,
       properties: {
         customerName: { type: Type.STRING },
         phone: { type: Type.STRING },
         issueSummary: { type: Type.STRING },
+        order_id: { type: Type.STRING, description: 'Optional DG-XXXXX order ID' },
+        category: {
+          type: Type.STRING,
+          description:
+            'damaged_jar, payment_dispute, late_delivery, refund_return, bulk_order, or general',
+        },
+        priority: { type: Type.STRING, description: 'standard or urgent' },
+        evidence_ids: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: 'Optional private evidence IDs uploaded earlier',
+        },
+        consent_granted: { type: Type.BOOLEAN },
       },
       required: ['customerName', 'phone', 'issueSummary'],
+    },
+  },
+  {
+    name: 'check_payment_verification',
+    description:
+      'Verify an order via Order ID and checkout phone number and explain manual bKash/Nagad TxnID verification status or COD dues honestly.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        order_id: { type: Type.STRING, description: 'Order ID in DG-XXXXX format' },
+        phone: { type: Type.STRING, description: '11-digit BD mobile number (01XXXXXXXXX)' },
+      },
+      required: ['order_id', 'phone'],
+    },
+  },
+  {
+    name: 'inspect_delivery_delay',
+    description:
+      'Check an order transit duration against the expected zone delivery window and determine whether urgent escalation is recommended.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        order_id: { type: Type.STRING, description: 'Order ID in DG-XXXXX format' },
+        phone: { type: Type.STRING, description: '11-digit BD mobile number (01XXXXXXXXX)' },
+      },
+      required: ['order_id', 'phone'],
+    },
+  },
+  {
+    name: 'submit_damage_or_return_claim',
+    description:
+      'Open an urgent damaged/leaking jar or return claim ticket tied to a verified order after obtaining explicit customer consent.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        customerName: { type: Type.STRING },
+        phone: { type: Type.STRING },
+        order_id: { type: Type.STRING },
+        issueSummary: { type: Type.STRING },
+        evidence_ids: { type: Type.ARRAY, items: { type: Type.STRING } },
+        consent_granted: { type: Type.BOOLEAN },
+      },
+      required: ['customerName', 'phone', 'order_id', 'issueSummary', 'consent_granted'],
+    },
+  },
+  {
+    name: 'get_reorder_summary',
+    description:
+      'Prepare a one-click reorder link and current subtotal in BDT from a verified past order, clamped to live jar stock.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        order_id: { type: Type.STRING },
+        phone: { type: Type.STRING },
+      },
+      required: ['order_id', 'phone'],
+    },
+  },
+  {
+    name: 'register_refill_reminder',
+    description:
+      'Save or update a consented opt-in refill reminder (30, 45, 60, or 90 days) for a verified delivered or existing order.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        order_id: { type: Type.STRING },
+        phone: { type: Type.STRING },
+        interval_days: { type: Type.NUMBER, description: '30, 45, 60, or 90' },
+        status: { type: Type.STRING, description: 'active, paused, or opted_out' },
+        consent_granted: { type: Type.BOOLEAN },
+      },
+      required: ['order_id', 'phone', 'consent_granted'],
     },
   },
   {
@@ -422,6 +516,7 @@ export interface ToolRuntimeContext {
   detectedIntent: string;
   verifiedMonetaryAmounts: Set<number>;
   verifiedOrderTrackingStatus?: string;
+  verifiedPaymentStatus?: string;
   customerPhoneInTurn?: string;
   errorCode?: string;
 }
@@ -926,8 +1021,15 @@ export async function executeChatbotTool(
         };
       }
 
+      const safeCourierUrl =
+        typeof tracking.courierTrackingUrl === 'string' &&
+        /^https:\/\/[^\s]+$/i.test(tracking.courierTrackingUrl.trim())
+          ? tracking.courierTrackingUrl.trim()
+          : undefined;
+
       ctx.verifiedMonetaryAmounts.add(Math.round(tracking.totalBdt));
       ctx.verifiedOrderTrackingStatus = tracking.status;
+      ctx.verifiedPaymentStatus = tracking.paymentStatus;
       ctx.collectedTrackingCard = {
         orderNumber: tracking.orderNumber,
         status: tracking.status,
@@ -936,6 +1038,10 @@ export async function executeChatbotTool(
         itemsSummary: tracking.itemsSummary,
         totalBdt: tracking.totalBdt,
         estimatedDelivery: tracking.estimatedDelivery,
+        ...(tracking.courierPartner ? { courierPartner: tracking.courierPartner } : {}),
+        ...(tracking.consignmentId ? { consignmentId: tracking.consignmentId } : {}),
+        ...(safeCourierUrl ? { courierTrackingUrl: safeCourierUrl } : {}),
+        ...(tracking.dispatchedAtIso ? { dispatchedAtIso: tracking.dispatchedAtIso } : {}),
       };
       pushUniqueAction(ctx.collectedActions, {
         type: 'track_order',
@@ -944,6 +1050,15 @@ export async function executeChatbotTool(
         value: tracking.orderNumber,
         href: `/track?order=${encodeURIComponent(tracking.orderNumber)}`,
       });
+      if (safeCourierUrl) {
+        pushUniqueAction(ctx.collectedActions, {
+          type: 'open_url',
+          labelEn: 'Track Courier Parcel',
+          labelBn: 'কুরিয়ার পার্সেল ট্র্যাক করুন',
+          value: tracking.consignmentId || tracking.courierPartner || tracking.orderNumber,
+          href: safeCourierUrl,
+        });
+      }
       return {
         found: true,
         orderNumber: tracking.orderNumber,
@@ -953,6 +1068,10 @@ export async function executeChatbotTool(
         paymentMethod: tracking.paymentMethod,
         paymentStatus: tracking.paymentStatus,
         estimatedDelivery: tracking.estimatedDelivery,
+        courierPartner: tracking.courierPartner || '',
+        consignmentId: tracking.consignmentId || '',
+        courierTrackingUrl: safeCourierUrl || '',
+        dispatchedAtIso: tracking.dispatchedAtIso || '',
         preDispatchEditable: tracking.status === 'pending' || tracking.status === 'confirmed',
       };
     }
@@ -1284,6 +1403,16 @@ export async function executeChatbotTool(
       const customerName = String(args.customerName || '').trim().slice(0, 100);
       const phone = normalizeBangladeshPhone(String(args.phone || ''));
       const issueSummary = String(args.issueSummary || '').trim().slice(0, 500);
+      const orderId = args.order_id
+        ? convertBanglaDigitsToEnglish(String(args.order_id)).trim().toUpperCase()
+        : '';
+
+      if (args.consent_granted === false) {
+        return {
+          submitted: false,
+          message: 'Customer consent is required before creating a support ticket.',
+        };
+      }
 
       if (customerName.length < 2 || !isValidBangladeshPhone(phone) || issueSummary.length < 4) {
         return {
@@ -1293,11 +1422,59 @@ export async function executeChatbotTool(
       }
       ctx.customerPhoneInTurn = phone;
 
+      const rawCategory = String(args.category || '').trim() as SupportCategory;
+      const category: SupportCategory = (
+        ['damaged_jar', 'payment_dispute', 'late_delivery', 'refund_return', 'bulk_order', 'general'] as SupportCategory[]
+      ).includes(rawCategory)
+        ? rawCategory
+        : 'general';
+      const priority: SupportPriority =
+        String(args.priority || '').trim() === 'urgent' ||
+        category === 'damaged_jar' ||
+        category === 'payment_dispute'
+          ? 'urgent'
+          : 'standard';
+
+      let verifiedOrderStatus: string | undefined;
+      let verifiedPaymentStatus: string | undefined;
+      if (orderId) {
+        if (!/^DG-[0-9]{4,8}$/.test(orderId)) {
+          return { submitted: false, message: 'Order ID must follow format DG-10421.' };
+        }
+        const tracking = await fetchServerOrderTracking(orderId, phone);
+        if (!tracking) {
+          return {
+            submitted: false,
+            message: 'Could not verify Order ID with that checkout phone number.',
+          };
+        }
+        verifiedOrderStatus = tracking.status;
+        verifiedPaymentStatus = tracking.paymentStatus;
+        ctx.verifiedOrderTrackingStatus = tracking.status;
+        ctx.verifiedPaymentStatus = tracking.paymentStatus;
+      }
+
+      const sla = computeSupportSlaTarget({ config, priority });
+      const evidenceIds = Array.isArray(args.evidence_ids)
+        ? args.evidence_ids.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 6)
+        : undefined;
+
       const saved = await createServerSupportRequest({
         sessionId: ctx.sessionId,
         customerName,
         phone,
+        orderNumber: orderId || undefined,
+        category,
+        priority,
         issueSummary,
+        consentGranted: true,
+        evidenceIds,
+        orderStatusSnapshot: verifiedOrderStatus,
+        paymentStatusSnapshot: verifiedPaymentStatus,
+        slaMinutes: sla.slaMinutes,
+        slaDueAtIso: sla.slaDueAtIso,
+        slaWindowLabelEn: sla.expectationEn,
+        slaWindowLabelBn: sla.expectationBn,
       });
       if (!saved.ok) {
         return { submitted: false, message: saved.error || 'Failed to save ticket.' };
@@ -1317,7 +1494,7 @@ export async function executeChatbotTool(
               t.channel,
               {
                 event: 'support_handover',
-                orderNumber: saved.requestId || 'SUPPORT',
+                orderNumber: saved.ticketNumber || saved.requestId || 'SUPPORT',
                 customerName,
                 phone,
                 issueSummary,
@@ -1362,7 +1539,294 @@ export async function executeChatbotTool(
       return {
         submitted: true,
         ticketId: saved.requestId,
+        ticketNumber: saved.ticketNumber,
+        slaExpectation: ctx.replyLang === 'bn' ? sla.expectationBn : sla.expectationEn,
+        slaDueAtIso: sla.slaDueAtIso,
         message: 'Human support handover saved to database.',
+      };
+    }
+
+    case 'check_payment_verification': {
+      ctx.detectedIntent = 'payment_dispute';
+      const orderNumber = convertBanglaDigitsToEnglish(String(args.order_id || ''))
+        .trim()
+        .toUpperCase();
+      const phone = normalizeBangladeshPhone(String(args.phone || ''));
+      if (!/^DG-[0-9]{4,8}$/.test(orderNumber) || !isValidBangladeshPhone(phone)) {
+        return {
+          found: false,
+          message: 'Valid Order ID (DG-XXXXX) and 11-digit BD phone (01XXXXXXXXX) are required.',
+        };
+      }
+      ctx.customerPhoneInTurn = phone;
+      const tracking = await fetchServerOrderTracking(orderNumber, phone);
+      if (!tracking) {
+        return {
+          found: false,
+          message: 'No matching order found for that Order ID and phone number.',
+        };
+      }
+      ctx.verifiedMonetaryAmounts.add(Math.round(tracking.totalBdt));
+      ctx.verifiedOrderTrackingStatus = tracking.status;
+      ctx.verifiedPaymentStatus = tracking.paymentStatus;
+
+      const clarification = formatPaymentClarification(
+        tracking.paymentMethod,
+        tracking.paymentStatus,
+        settings,
+        ctx.replyLang
+      );
+
+      pushUniqueAction(ctx.collectedActions, {
+        type: 'track_order',
+        labelEn: 'Open Order Tracker',
+        labelBn: 'অর্ডার ট্র্যাকার খুলুন',
+        value: tracking.orderNumber,
+        href: `/track?order=${encodeURIComponent(tracking.orderNumber)}`,
+      });
+      const phoneDigits = cleanDialDigits(settings.supportPhone);
+      if (phoneDigits.length >= 10) {
+        pushUniqueAction(ctx.collectedActions, {
+          type: 'call',
+          labelEn: 'Call Support',
+          labelBn: 'ফোন করুন',
+          value: settings.supportPhone,
+          href: `tel:+${phoneDigits}`,
+        });
+      }
+      const waDigits = cleanDialDigits(settings.whatsappNumber);
+      if (waDigits.length >= 10) {
+        pushUniqueAction(ctx.collectedActions, {
+          type: 'whatsapp',
+          labelEn: 'Chat on WhatsApp',
+          labelBn: 'WhatsApp-এ কথা বলুন',
+          value: settings.whatsappNumber,
+          href: `https://wa.me/${waDigits}`,
+        });
+      }
+
+      return {
+        found: true,
+        orderNumber: tracking.orderNumber,
+        paymentMethod: tracking.paymentMethod,
+        paymentStatus: tracking.paymentStatus,
+        headline: clarification.headline,
+        explanation: clarification.detail,
+        canEscalateDispute: clarification.canEscalateDispute,
+      };
+    }
+
+    case 'inspect_delivery_delay': {
+      ctx.detectedIntent = 'late_delivery';
+      const orderNumber = convertBanglaDigitsToEnglish(String(args.order_id || ''))
+        .trim()
+        .toUpperCase();
+      const phone = normalizeBangladeshPhone(String(args.phone || ''));
+      if (!/^DG-[0-9]{4,8}$/.test(orderNumber) || !isValidBangladeshPhone(phone)) {
+        return {
+          found: false,
+          message: 'Valid Order ID (DG-XXXXX) and 11-digit BD phone (01XXXXXXXXX) are required.',
+        };
+      }
+      ctx.customerPhoneInTurn = phone;
+      const tracking = await fetchServerOrderTracking(orderNumber, phone);
+      if (!tracking) {
+        return {
+          found: false,
+          message: 'No matching order found for that Order ID and phone number.',
+        };
+      }
+      ctx.verifiedMonetaryAmounts.add(Math.round(tracking.totalBdt));
+      ctx.verifiedOrderTrackingStatus = tracking.status;
+      ctx.verifiedPaymentStatus = tracking.paymentStatus;
+
+      const diag = evaluateOrderDelayStatus({
+        status: tracking.status,
+        estimatedDelivery: tracking.estimatedDelivery,
+        deliveryZone: tracking.deliveryZone,
+        updatedAt: tracking.updatedAt,
+      });
+
+      pushUniqueAction(ctx.collectedActions, {
+        type: 'track_order',
+        labelEn: 'Open Order Tracker',
+        labelBn: 'অর্ডার ট্র্যাকার খুলুন',
+        value: tracking.orderNumber,
+        href: `/track?order=${encodeURIComponent(tracking.orderNumber)}`,
+      });
+
+      return {
+        found: true,
+        orderNumber: tracking.orderNumber,
+        status: tracking.status,
+        isDelayed: diag.isDelayed,
+        elapsedHours: diag.elapsedHours,
+        expectedMaxHours: diag.expectedMaxHours,
+        recommendEscalation: diag.recommendEscalation,
+        note: ctx.replyLang === 'bn' ? diag.statusNoteBn : diag.statusNoteEn,
+      };
+    }
+
+    case 'submit_damage_or_return_claim': {
+      ctx.detectedIntent = 'complaint';
+      const customerName = String(args.customerName || '').trim().slice(0, 100);
+      const phone = normalizeBangladeshPhone(String(args.phone || ''));
+      const orderId = convertBanglaDigitsToEnglish(String(args.order_id || ''))
+        .trim()
+        .toUpperCase();
+      const issueSummary = String(args.issueSummary || '').trim().slice(0, 500);
+
+      if (args.consent_granted !== true) {
+        return {
+          submitted: false,
+          message: 'Explicit customer consent (consent_granted=true) is required to file a claim ticket.',
+        };
+      }
+      if (
+        customerName.length < 2 ||
+        !isValidBangladeshPhone(phone) ||
+        !/^DG-[0-9]{4,8}$/.test(orderId) ||
+        issueSummary.length < 4
+      ) {
+        return {
+          submitted: false,
+          message: 'Need customerName, valid BD phone, valid Order ID (DG-XXXXX), and issueSummary.',
+        };
+      }
+      ctx.customerPhoneInTurn = phone;
+
+      const tracking = await fetchServerOrderTracking(orderId, phone);
+      if (!tracking) {
+        return {
+          submitted: false,
+          message: 'Order ID and phone number do not match our records.',
+        };
+      }
+      ctx.verifiedOrderTrackingStatus = tracking.status;
+      ctx.verifiedPaymentStatus = tracking.paymentStatus;
+
+      const sla = computeSupportSlaTarget({ config, priority: 'urgent' });
+      const evidenceIds = Array.isArray(args.evidence_ids)
+        ? args.evidence_ids.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 6)
+        : undefined;
+
+      const saved = await createServerSupportRequest({
+        sessionId: ctx.sessionId,
+        customerName,
+        phone,
+        orderNumber: orderId,
+        category: 'damaged_jar',
+        priority: 'urgent',
+        issueSummary,
+        consentGranted: true,
+        evidenceIds,
+        orderStatusSnapshot: tracking.status,
+        paymentStatusSnapshot: tracking.paymentStatus,
+        slaMinutes: sla.slaMinutes,
+        slaDueAtIso: sla.slaDueAtIso,
+        slaWindowLabelEn: sla.expectationEn,
+        slaWindowLabelBn: sla.expectationBn,
+      });
+      if (!saved.ok) {
+        return { submitted: false, message: saved.error || 'Failed to save damage claim.' };
+      }
+
+      ctx.handoverTriggered = true;
+      pushUniqueAction(ctx.collectedActions, {
+        type: 'track_order',
+        labelEn: 'Open Order Tracker',
+        labelBn: 'অর্ডার ট্র্যাকার খুলুন',
+        value: orderId,
+        href: `/track?order=${encodeURIComponent(orderId)}`,
+      });
+
+      return {
+        submitted: true,
+        ticketId: saved.requestId,
+        ticketNumber: saved.ticketNumber,
+        slaExpectation: ctx.replyLang === 'bn' ? sla.expectationBn : sla.expectationEn,
+        note: 'Claim queued for human review. Never state that refund or replacement is already approved before team inspection.',
+      };
+    }
+
+    case 'get_reorder_summary': {
+      ctx.detectedIntent = 'reorder';
+      const orderId = convertBanglaDigitsToEnglish(String(args.order_id || ''))
+        .trim()
+        .toUpperCase();
+      const phone = normalizeBangladeshPhone(String(args.phone || ''));
+      if (!/^DG-[0-9]{4,8}$/.test(orderId) || !isValidBangladeshPhone(phone)) {
+        return {
+          ok: false,
+          message: 'Valid Order ID (DG-XXXXX) and 11-digit BD phone are required.',
+        };
+      }
+      ctx.customerPhoneInTurn = phone;
+      const res = await buildVerifiedReorderPayload(orderId, phone);
+      if (!res.ok) {
+        return {
+          ok: false,
+          message: ctx.replyLang === 'bn' ? res.messageBn : res.messageEn,
+        };
+      }
+      if (typeof res.subtotalBdt === 'number') {
+        ctx.verifiedMonetaryAmounts.add(res.subtotalBdt);
+      }
+      pushUniqueAction(ctx.collectedActions, {
+        type: 'reorder',
+        labelEn: `Reorder (${res.itemsSummary})`,
+        labelBn: `আবার অর্ডার করুন (${res.itemsSummary})`,
+        value: res.orderNumber || orderId,
+        href: res.reorderUrl,
+        reorderData: {
+          qty250g: res.qty250g || 0,
+          qty500g: res.qty500g || 0,
+          qty1kg: res.qty1kg || 0,
+          totalBdt: res.subtotalBdt || 0,
+        },
+      });
+      return {
+        ok: true,
+        orderNumber: res.orderNumber,
+        itemsSummary: res.itemsSummary,
+        subtotalBdt: res.subtotalBdt,
+        adjustedForStock: res.adjustedForStock,
+        reorderUrl: res.reorderUrl,
+        message: ctx.replyLang === 'bn' ? res.messageBn : res.messageEn,
+      };
+    }
+
+    case 'register_refill_reminder': {
+      ctx.detectedIntent = 'reorder';
+      const orderId = convertBanglaDigitsToEnglish(String(args.order_id || ''))
+        .trim()
+        .toUpperCase();
+      const phone = normalizeBangladeshPhone(String(args.phone || ''));
+      const rawStatus = String(args.status || 'active').trim();
+      const status = rawStatus === 'paused' || rawStatus === 'opted_out' ? rawStatus : 'active';
+      const rawInterval = Number(args.interval_days || 45);
+      const intervalDays: 30 | 45 | 60 | 90 =
+        rawInterval === 30 || rawInterval === 45 || rawInterval === 60 || rawInterval === 90
+          ? rawInterval
+          : 45;
+
+      const res = await upsertRefillReminder({
+        orderNumber: orderId,
+        phone,
+        intervalDays,
+        status,
+        consentGranted: args.consent_granted === true,
+      });
+      if (!res.ok) {
+        return {
+          ok: false,
+          message: ctx.replyLang === 'bn' ? res.messageBn : res.messageEn,
+        };
+      }
+      return {
+        ok: true,
+        reminder: res.reminder,
+        message: ctx.replyLang === 'bn' ? res.messageBn : res.messageEn,
       };
     }
 

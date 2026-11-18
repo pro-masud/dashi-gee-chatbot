@@ -22,6 +22,7 @@ import {
   verifySignedOrderToken,
 } from '../../../src/lib/chatbot/orderToken';
 import { sanitizeUserText } from '../../../src/lib/chatbot/security';
+import { sanitizeChannelSource } from '../../../src/lib/chatbot/schema';
 import { dispatchWebhookWithRetry, notificationLogs } from '../../../src/lib/serverState';
 
 export async function POST(request: Request) {
@@ -66,6 +67,7 @@ export async function POST(request: Request) {
 
   const confirmationToken = String(body.confirmationToken || '').trim();
   const sessionId = sanitizeUserText(String(body.sessionId || ''), 64);
+  const sourceChannel = sanitizeChannelSource(body.sourceChannel, 'web');
 
   const orderRate = await checkCompositeOrderRateLimit({
     request,
@@ -474,6 +476,8 @@ export async function POST(request: Request) {
       payload.paymentMethod === 'cod' && settings.codConfirmEnabled
         ? 'not_configured'
         : 'not_required',
+    sourceChannel,
+    attributedSessionId: sessionId.slice(0, 64),
   };
 
   const writeRes = await createServerOrderAtomically(

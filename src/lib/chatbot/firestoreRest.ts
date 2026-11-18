@@ -5,12 +5,14 @@ import {
   DEFAULT_STORE_SETTINGS,
   type BatchRecord,
   type CouponRecord,
+  type CourierPartner,
   type DeliveryZone,
   type OrderAuditLogRecord,
   type OrderRecord,
   type StoreSettingsDoc,
   type TrackingRecord,
 } from '../storeTypes';
+import { dispatchWebhookWithRetry, notificationLogs } from '../serverState';
 import {
   assessAddressCompleteness,
   resolveConfiguredDistrictAndZone,
@@ -18,7 +20,16 @@ import {
 } from './orderToken';
 import { maskSensitivePii } from './domain-guard';
 import {
+  computePhase5AttributionAnalytics,
+  evaluateRetentionEligibility,
+  identifyAbandonedDraftCandidates,
+  isWithinDhakaQuietHours,
+} from './channelEngine';
+import {
   DEFAULT_CHATBOT_CONFIG,
+  type ChannelSource,
+  type ChannelWebhookEventDoc,
+  type ChatAgentReplyItem,
   type ChatSessionDoc,
   type ChatbotConfigDoc,
   type ChatbotExecutionPath,
@@ -26,9 +37,19 @@ import {
   type ChatbotFeedbackDoc,
   type ChatbotKbDocRecord,
   type ChatbotLang,
+  type ChatbotLogRecord,
+  type ChatbotSupportRequestRecord,
   type FeedbackReason,
   type KnowledgeChunkRecord,
+  type MarketingConsentDoc,
   type OrderDraftDoc,
+  type Phase5AttributionAnalytics,
+  type RefillReminderDoc,
+  type SupportAgentReplyDoc,
+  type SupportCategory,
+  type SupportEvidenceDoc,
+  type SupportPriority,
+  type SupportTicketStatus,
 } from './types';
 
 const PROJECT_ID = firebaseConfig.projectId;
@@ -213,6 +234,12 @@ async function runFsStructuredQuery(
 export async function verifyServerAdminToken(
   authHeader: string | null
 ): Promise<{ ok: boolean; email: string; uid: string }> {
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeAdminVerifyOverride
+  ) {
+    return globalFirestoreTestHooks.__deshiGeeAdminVerifyOverride(authHeader);
+  }
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return { ok: false, email: '', uid: '' };
   }
@@ -822,6 +849,24 @@ export async function fetchServerOrderAuditLogs(
   }
 }
 
+export function buildDefaultCourierTrackingUrl(
+  partner: CourierPartner,
+  consignmentId: string
+): string {
+  const cleanId = String(consignmentId || '').trim();
+  if (!/^[a-zA-Z0-9_-]{3,80}$/.test(cleanId)) return '';
+  if (partner === 'steadfast') {
+    return `https://steadfast.com.bd/t/${encodeURIComponent(cleanId)}`;
+  }
+  if (partner === 'pathao') {
+    return `https://merchant.pathao.com/tracking?consignment_id=${encodeURIComponent(cleanId)}`;
+  }
+  if (partner === 'redx') {
+    return `https://redx.com.bd/track-global-parcel/?trackingId=${encodeURIComponent(cleanId)}`;
+  }
+  return '';
+}
+
 export interface ManageOrderParams {
   action:
     | 'check'
@@ -829,13 +874,18 @@ export interface ManageOrderParams {
     | 'edit_address'
     | 'admin_review_approve'
     | 'admin_review_reject'
-    | 'admin_cancel';
+    | 'admin_cancel'
+    | 'admin_update_courier';
   orderNumber: string;
   phone?: string;
   district?: string;
   area?: string;
   address?: string;
   reason?: string;
+  courierPartner?: CourierPartner;
+  consignmentId?: string;
+  courierTrackingUrl?: string;
+  markShipped?: boolean;
   adminIdToken?: string;
   actorEmail?: string;
 }
@@ -853,6 +903,10 @@ export interface ManageOrderResult {
   updatedZone?: DeliveryZone;
   updatedDistrict?: string;
   estimatedDelivery?: string;
+  courierPartner?: CourierPartner;
+  consignmentId?: string;
+  courierTrackingUrl?: string;
+  dispatchedAtIso?: string;
   stockRestored?: boolean;
   refundNoticeEn?: string;
   refundNoticeBn?: string;
@@ -866,7 +920,8 @@ export async function manageServerOrder(params: ManageOrderParams): Promise<Mana
   const isAdminOp =
     params.action === 'admin_review_approve' ||
     params.action === 'admin_review_reject' ||
-    params.action === 'admin_cancel';
+    params.action === 'admin_cancel' ||
+    params.action === 'admin_update_courier';
 
   if (!/^DG-[0-9]{4,8}$/.test(cleanOrder)) {
     return {
@@ -1310,6 +1365,167 @@ export async function manageServerOrder(params: ManageOrderParams): Promise<Mana
     };
   }
 
+  if (params.action === 'admin_update_courier') {
+    const partnerRaw = String(params.courierPartner || '').trim().toLowerCase();
+    if (
+      partnerRaw !== 'steadfast' &&
+      partnerRaw !== 'pathao' &&
+      partnerRaw !== 'redx' &&
+      partnerRaw !== 'manual'
+    ) {
+      return {
+        ok: false,
+        eligible: false,
+        code: 'invalid_courier_partner',
+        orderNumber: cleanOrder,
+        messageEn: 'Courier partner must be steadfast, pathao, redx, or manual.',
+        messageBn: 'কুরিয়ার পার্টনার steadfast, pathao, redx অথবা manual হতে হবে।',
+      };
+    }
+    const partner = partnerRaw as CourierPartner;
+    const consignmentId = String(params.consignmentId || '').trim().slice(0, 80);
+    const rawTrackingUrl = String(params.courierTrackingUrl || '').trim().slice(0, 300);
+
+    if (rawTrackingUrl && !/^https:\/\/[^\s]+$/i.test(rawTrackingUrl)) {
+      return {
+        ok: false,
+        eligible: false,
+        code: 'invalid_tracking_url',
+        orderNumber: cleanOrder,
+        messageEn: 'Courier tracking URL must start with https://',
+        messageBn: 'কুরিয়ার ট্র্যাকিং লিংক অবশ্যই https:// দিয়ে শুরু হতে হবে।',
+      };
+    }
+
+    const courierTrackingUrl =
+      rawTrackingUrl || buildDefaultCourierTrackingUrl(partner, consignmentId);
+    const markShipped = params.markShipped !== false;
+    const nextStatus =
+      markShipped && currentStatus !== 'delivered' && currentStatus !== 'cancelled'
+        ? 'shipped'
+        : currentStatus;
+    const dispatchedAtIso =
+      adminOrderDoc?.dispatchedAtIso ||
+      tracking.dispatchedAtIso ||
+      (nextStatus === 'shipped' || consignmentId ? new Date().toISOString() : '');
+
+    if (memEnabled) {
+      const mem = globalFirestoreTestHooks.__deshiGeeOrderMemoryState!;
+      const ord = mem.orders.get(cleanOrder);
+      if (ord) {
+        ord.courierPartner = partner;
+        ord.consignmentId = consignmentId;
+        ord.courierTrackingUrl = courierTrackingUrl;
+        if (dispatchedAtIso) ord.dispatchedAtIso = dispatchedAtIso;
+        ord.status = nextStatus;
+      }
+      tracking.courierPartner = partner;
+      tracking.consignmentId = consignmentId;
+      tracking.courierTrackingUrl = courierTrackingUrl;
+      if (dispatchedAtIso) tracking.dispatchedAtIso = dispatchedAtIso;
+      tracking.status = nextStatus;
+
+      mem.auditLogs.push({
+        id: auditId,
+        orderNumber: cleanOrder,
+        action: 'courier_updated',
+        actorType: 'admin',
+        summary: `Courier ${partner}${consignmentId ? ` (${consignmentId})` : ''} assigned by ${params.actorEmail || 'admin'}.`.slice(
+          0,
+          300
+        ),
+        previousStatus: currentStatus,
+        nextStatus,
+        metadata: { partner, consignmentId },
+        createdAt: new Date().toISOString(),
+      });
+    } else if (params.adminIdToken) {
+      const updateFields: Record<string, unknown> = {
+        courierPartner: partner,
+        consignmentId,
+        courierTrackingUrl,
+        status: nextStatus,
+      };
+      if (dispatchedAtIso) {
+        updateFields.dispatchedAtIso = dispatchedAtIso;
+      }
+      const fieldPaths = Object.keys(updateFields);
+      const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${params.adminIdToken}`,
+        },
+        body: JSON.stringify({
+          writes: [
+            {
+              currentDocument: { exists: true },
+              update: {
+                name: docName('orders', cleanOrder),
+                fields: encodeFsFields(updateFields),
+              },
+              updateMask: { fieldPaths },
+              updateTransforms: [{ fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' }],
+            },
+            {
+              currentDocument: { exists: true },
+              update: {
+                name: docName('order_tracking', `${cleanOrder}_${effectivePhone}`),
+                fields: encodeFsFields(updateFields),
+              },
+              updateMask: { fieldPaths },
+              updateTransforms: [{ fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' }],
+            },
+            {
+              currentDocument: { exists: false },
+              update: {
+                name: docName('order_audit_logs', auditId),
+                fields: encodeFsFields({
+                  orderNumber: cleanOrder,
+                  action: 'courier_updated',
+                  actorType: 'admin',
+                  summary: `Courier ${partner}${consignmentId ? ` (${consignmentId})` : ''} updated by admin.`.slice(
+                    0,
+                    300
+                  ),
+                  previousStatus: currentStatus,
+                  nextStatus,
+                  metadata: { partner, consignmentId },
+                }),
+              },
+              updateTransforms: [{ fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' }],
+            },
+          ],
+        }),
+        cache: 'no-store',
+      });
+      if (!res.ok) {
+        return {
+          ok: false,
+          eligible: false,
+          code: 'courier_update_failed',
+          orderNumber: cleanOrder,
+          messageEn: 'Could not update courier consignment details.',
+          messageBn: 'কুরিয়ার কনসাইনমেন্ট তথ্য আপডেট করা যায়নি।',
+        };
+      }
+    }
+
+    return {
+      ok: true,
+      eligible: true,
+      orderNumber: cleanOrder,
+      currentStatus,
+      nextStatus,
+      courierPartner: partner,
+      consignmentId,
+      courierTrackingUrl,
+      dispatchedAtIso,
+      messageEn: `Courier updated (${partner.toUpperCase()}${consignmentId ? ` · ${consignmentId}` : ''}).`,
+      messageBn: `কুরিয়ার তথ্য আপডেট হয়েছে (${partner.toUpperCase()}${consignmentId ? ` · ${consignmentId}` : ''})।`,
+    };
+  }
+
   // admin_review_approve
   const nextStatus = currentStatus === 'pending' ? 'confirmed' : currentStatus;
   if (memEnabled) {
@@ -1405,26 +1621,120 @@ export async function manageServerOrder(params: ManageOrderParams): Promise<Mana
   };
 }
 
-export async function createServerSupportRequest(input: {
+export interface CreateSupportRequestInput {
   sessionId: string;
   customerName: string;
   phone: string;
   issueSummary: string;
-}): Promise<{ ok: boolean; requestId?: string; error?: string }> {
+  orderNumber?: string;
+  category?: SupportCategory;
+  priority?: SupportPriority;
+  contextSummary?: string;
+  transcriptExcerpt?: string;
+  consentGranted?: boolean;
+  evidenceIds?: string[];
+  paymentStatusSnapshot?: string;
+  orderStatusSnapshot?: string;
+  slaMinutes?: number;
+  slaDueAtIso?: string;
+  slaWindowLabelEn?: string;
+  slaWindowLabelBn?: string;
+  channel?: ChannelSource;
+  externalThreadId?: string;
+}
+
+export async function createServerSupportRequest(
+  input: CreateSupportRequestInput
+): Promise<{ ok: boolean; requestId?: string; ticketNumber?: string; error?: string }> {
   const cleanPhone = input.phone.replace(/[\s-]/g, '');
   if (!/^01[3-9][0-9]{8}$/.test(cleanPhone)) {
     return { ok: false, error: 'Valid Bangladesh mobile number (01XXXXXXXXX) is required.' };
   }
+  const cleanName = input.customerName.trim().slice(0, 100);
+  const cleanSummary = input.issueSummary.trim().slice(0, 500);
+  if (cleanName.length < 2 || cleanSummary.length < 4) {
+    return { ok: false, error: 'Customer name and issue summary are required.' };
+  }
+
   const reqId = `sup_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const ticketNumber = `TK-${String(Date.now()).slice(-6)}`;
   const docPath = docName('chatbot_support_requests', reqId);
 
-  const payload = {
+  const cleanOrder = input.orderNumber ? input.orderNumber.trim().toUpperCase() : '';
+  const safeEvidenceIds = Array.isArray(input.evidenceIds)
+    ? input.evidenceIds
+        .map((id) => String(id || '').trim())
+        .filter((id) => /^[a-zA-Z0-9_-]{4,96}$/.test(id))
+        .slice(0, 6)
+    : undefined;
+
+  const payload: Record<string, unknown> = {
     sessionId: input.sessionId.slice(0, 64),
-    customerName: input.customerName.trim().slice(0, 100),
+    customerName: cleanName,
     phone: cleanPhone,
-    issueSummary: input.issueSummary.trim().slice(0, 500),
+    issueSummary: cleanSummary,
     status: 'open',
+    ticketNumber,
   };
+  if (cleanOrder && /^DG-[0-9]{4,8}$/.test(cleanOrder)) {
+    payload.orderNumber = cleanOrder;
+  }
+  if (input.category) {
+    payload.category = input.category;
+  }
+  if (input.priority) {
+    payload.priority = input.priority;
+  }
+  if (input.contextSummary) {
+    payload.contextSummary = maskSensitivePii(input.contextSummary.trim()).slice(0, 1000);
+  }
+  if (input.consentGranted !== undefined) {
+    payload.consentGranted = Boolean(input.consentGranted);
+  }
+  if (input.transcriptExcerpt && input.consentGranted !== false) {
+    payload.transcriptExcerpt = maskSensitivePii(input.transcriptExcerpt.trim()).slice(0, 2000);
+  }
+  if (safeEvidenceIds && safeEvidenceIds.length > 0) {
+    payload.evidenceIds = safeEvidenceIds;
+  }
+  if (input.paymentStatusSnapshot) {
+    payload.paymentStatusSnapshot = String(input.paymentStatusSnapshot).slice(0, 40);
+  }
+  if (input.orderStatusSnapshot) {
+    payload.orderStatusSnapshot = String(input.orderStatusSnapshot).slice(0, 40);
+  }
+  if (typeof input.slaMinutes === 'number' && Number.isFinite(input.slaMinutes)) {
+    payload.slaMinutes = Math.max(5, Math.min(2880, Math.round(input.slaMinutes)));
+  }
+  if (input.slaDueAtIso) {
+    payload.slaDueAtIso = String(input.slaDueAtIso).slice(0, 48);
+  }
+  if (input.slaWindowLabelEn) {
+    payload.slaWindowLabelEn = String(input.slaWindowLabelEn).slice(0, 240);
+  }
+  if (input.slaWindowLabelBn) {
+    payload.slaWindowLabelBn = String(input.slaWindowLabelBn).slice(0, 300);
+  }
+  if (input.channel) {
+    payload.channel = input.channel;
+  }
+  if (input.externalThreadId) {
+    payload.externalThreadId = String(input.externalThreadId).slice(0, 128);
+  }
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeSupportMemoryState?.enabled
+  ) {
+    const nowIso = new Date().toISOString();
+    globalFirestoreTestHooks.__deshiGeeSupportMemoryState.tickets.set(reqId, {
+      ...(payload as unknown as ChatbotSupportRequestRecord),
+      id: reqId,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+    return { ok: true, requestId: reqId, ticketNumber };
+  }
 
   try {
     const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
@@ -1450,7 +1760,7 @@ export async function createServerSupportRequest(input: {
     if (!res.ok) {
       return { ok: false, error: `HTTP ${res.status}` };
     }
-    return { ok: true, requestId: reqId };
+    return { ok: true, requestId: reqId, ticketNumber };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Failed to log request' };
   }
@@ -1483,6 +1793,7 @@ export interface ServerChatLogInput {
   toolMs?: number;
   ragSources?: string[];
   confidence?: number;
+  channel?: ChannelSource;
 }
 
 export interface PersistentCostLedgerState {
@@ -1527,7 +1838,87 @@ const globalFirestoreTestHooks = globalThis as unknown as {
     fingerprints: Map<string, { orderNumber: string; createdAtMs: number }>;
     auditLogs: OrderAuditLogRecord[];
   } | null;
+  __deshiGeeSupportMemoryState?: {
+    enabled: boolean;
+    tickets: Map<string, ChatbotSupportRequestRecord>;
+    evidence: Map<string, SupportEvidenceDoc>;
+    agentReplies: SupportAgentReplyDoc[];
+  } | null;
+  __deshiGeeRetentionMemoryState?: {
+    enabled: boolean;
+    reviewClaims: Map<string, { orderNumber: string; createdAt: string }>;
+    reviews: Map<string, Record<string, unknown>>;
+    refillReminders: Map<string, RefillReminderDoc>;
+  } | null;
+  __deshiGeeChannelMemoryState?: {
+    enabled: boolean;
+    webhookEvents: Map<string, ChannelWebhookEventDoc>;
+    marketingConsents: Map<string, MarketingConsentDoc>;
+    chatLogs: ChatbotLogRecord[];
+  } | null;
+  __deshiGeeAdminVerifyOverride?:
+    | ((authHeader: string | null) => Promise<{ ok: boolean; email: string; uid: string }>)
+    | null;
 };
+
+export function setAdminAuthOverrideForTests(
+  fn: ((authHeader: string | null) => Promise<{ ok: boolean; email: string; uid: string }>) | null
+): void {
+  if (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') {
+    globalFirestoreTestHooks.__deshiGeeAdminVerifyOverride = fn;
+  }
+}
+
+export function setSupportInboxMemoryModeForTests(enabled: boolean): void {
+  if (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') {
+    globalFirestoreTestHooks.__deshiGeeSupportMemoryState = enabled
+      ? {
+          enabled: true,
+          tickets: new Map(),
+          evidence: new Map(),
+          agentReplies: [],
+        }
+      : null;
+  }
+}
+
+export function getSupportInboxMemoryStateForTests() {
+  return globalFirestoreTestHooks.__deshiGeeSupportMemoryState || null;
+}
+
+export function setRetentionMemoryModeForTests(enabled: boolean): void {
+  if (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') {
+    globalFirestoreTestHooks.__deshiGeeRetentionMemoryState = enabled
+      ? {
+          enabled: true,
+          reviewClaims: new Map(),
+          reviews: new Map(),
+          refillReminders: new Map(),
+        }
+      : null;
+  }
+}
+
+export function getRetentionMemoryStateForTests() {
+  return globalFirestoreTestHooks.__deshiGeeRetentionMemoryState || null;
+}
+
+export function setChannelMemoryModeForTests(enabled: boolean): void {
+  if (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') {
+    globalFirestoreTestHooks.__deshiGeeChannelMemoryState = enabled
+      ? {
+          enabled: true,
+          webhookEvents: new Map(),
+          marketingConsents: new Map(),
+          chatLogs: [],
+        }
+      : null;
+  }
+}
+
+export function getChannelMemoryStateForTests() {
+  return globalFirestoreTestHooks.__deshiGeeChannelMemoryState || null;
+}
 
 export function setInventoryMemoryModeForTests(
   settingsOverride: Partial<StoreSettingsDoc> | null
@@ -1882,7 +2273,6 @@ export async function checkServerFirestoreHealth(
 
 export async function createServerChatLog(entry: ServerChatLogInput): Promise<string> {
   const logId = `log_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const docPath = docName('chatbot_logs', logId);
   const maskedUserMsg = maskSensitivePii(entry.userMessage).slice(0, 1000) || '(empty)';
   const maskedReply = maskSensitivePii(entry.assistantReply).slice(0, 2500);
   const path: ChatbotExecutionPath = entry.path || 'fallback';
@@ -1919,33 +2309,51 @@ export async function createServerChatLog(entry: ServerChatLogInput): Promise<st
     toolMs: Math.max(0, Math.min(60000, Math.round(entry.toolMs || 0))),
     ragSources: (entry.ragSources || []).slice(0, 8).map((s) => String(s).slice(0, 120)),
     confidence: Math.max(0, Math.min(1, Number(entry.confidence ?? 0.9))),
+    channel: entry.channel || 'web',
   };
 
   // Emit structured non-PII diagnostic telemetry for server logs
-  console.info(
-    JSON.stringify({
-      event: 'chatbot_turn',
-      logId,
-      path: payload.path,
-      model: payload.model,
-      isError: payload.isError,
-      intent: payload.intent,
-      confidence: payload.confidence,
-      errorCode: payload.errorCode || null,
-      finishReason: payload.finishReason || null,
-      guardCategory: payload.guardCategory || null,
-      retryCount: payload.retryCount,
-      toolCallCount: payload.toolCallCount,
-      ragMs: payload.ragMs,
-      modelMs: payload.modelMs,
-      toolMs: payload.toolMs,
-      factsVersion: payload.factsVersion || null,
-      latencyMs: payload.latencyMs,
-      promptTokens: payload.promptTokens,
-      outputTokens: payload.outputTokens,
-      isTestPlayground: payload.isTestPlayground,
-    })
-  );
+  const telemetryLog: Record<string, unknown> = {
+    event: 'chatbot_turn',
+    logId,
+    channel: payload.channel,
+    path: payload.path,
+    model: payload.model,
+    status: payload.isError ? 'failed' : 'ok',
+    intent: payload.intent,
+    confidence: payload.confidence,
+    finishReason: payload.finishReason || null,
+    guardCategory: payload.guardCategory || null,
+    retryCount: payload.retryCount,
+    toolCallCount: payload.toolCallCount,
+    ragMs: payload.ragMs,
+    modelMs: payload.modelMs,
+    toolMs: payload.toolMs,
+    factsVersion: payload.factsVersion || null,
+    latencyMs: payload.latencyMs,
+    promptTokens: payload.promptTokens,
+    outputTokens: payload.outputTokens,
+    isTestPlayground: payload.isTestPlayground,
+  };
+  if (payload.isError || payload.errorCode) {
+    telemetryLog.failureCode = payload.errorCode || 'unknown';
+  }
+  if (payload.isError) {
+    console.error(JSON.stringify(telemetryLog));
+  } else {
+    console.info(JSON.stringify(telemetryLog));
+  }
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeChannelMemoryState?.enabled
+  ) {
+    globalFirestoreTestHooks.__deshiGeeChannelMemoryState.chatLogs.push({
+      id: logId,
+      ...payload,
+      createdAt: new Date().toISOString(),
+    });
+  }
 
   if (
     (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
@@ -1964,7 +2372,7 @@ export async function createServerChatLog(entry: ServerChatLogInput): Promise<st
           {
             currentDocument: { exists: false },
             update: {
-              name: docPath,
+              name: docName('chatbot_logs', logId),
               fields: encodeFsFields(payload),
             },
             updateTransforms: [
@@ -1992,6 +2400,7 @@ export async function createServerChatLog(entry: ServerChatLogInput): Promise<st
         toolMs: _omitToolMs,
         ragSources: _omitRagSources,
         confidence: _omitConfidence,
+        channel: _omitChannel,
         ...legacyPayload
       } = payload;
       await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
@@ -2002,7 +2411,7 @@ export async function createServerChatLog(entry: ServerChatLogInput): Promise<st
             {
               currentDocument: { exists: false },
               update: {
-                name: docPath,
+                name: docName('chatbot_logs', logId),
                 fields: encodeFsFields(legacyPayload),
               },
               updateTransforms: [
@@ -2034,6 +2443,18 @@ export async function fetchServerChatSession(sessionId: string): Promise<ChatSes
   try {
     const doc = await fetchFsGet(`chat_sessions/${encodeURIComponent(cleanId)}`);
     if (!doc) return null;
+    const rawReplies = Array.isArray(doc.agentReplies) ? doc.agentReplies : [];
+    const agentReplies: ChatAgentReplyItem[] = rawReplies
+      .filter((r): r is Record<string, unknown> => Boolean(r && typeof r === 'object'))
+      .map((r) => ({
+        id: String(r.id || '').slice(0, 64),
+        agentName: String(r.agentName || 'Deshi Gee Support').slice(0, 80),
+        text: String(r.text || '').slice(0, 2000),
+        createdAtIso: String(r.createdAtIso || ''),
+      }))
+      .filter((r) => r.text.length > 0)
+      .slice(-25);
+
     return {
       sessionId: String(doc.sessionId || cleanId),
       language: doc.language === 'bn' ? 'bn' : 'en',
@@ -2046,6 +2467,17 @@ export async function fetchServerChatSession(sessionId: string): Promise<ChatSes
       currentIntent: String(doc.currentIntent || 'general'),
       orderDraftId: String(doc.orderDraftId || ''),
       turnCount: Number(doc.turnCount || 0),
+      aiPaused: Boolean(doc.aiPaused ?? false),
+      activeTicketId: typeof doc.activeTicketId === 'string' ? doc.activeTicketId : '',
+      assignedAgentName: typeof doc.assignedAgentName === 'string' ? doc.assignedAgentName : '',
+      agentReplies,
+      channel:
+        typeof doc.channel === 'string' &&
+        ['web', 'messenger', 'instagram', 'whatsapp', 'email', 'sms'].includes(doc.channel)
+          ? (doc.channel as ChannelSource)
+          : 'web',
+      externalUserId: typeof doc.externalUserId === 'string' ? doc.externalUserId : '',
+      linkedPhone: typeof doc.linkedPhone === 'string' ? doc.linkedPhone : '',
     };
   } catch {
     return null;
@@ -2060,12 +2492,25 @@ export async function upsertServerChatSession(session: ChatSessionDoc): Promise<
     (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
     globalFirestoreTestHooks.__deshiGeeSessionMemoryMap
   ) {
-    globalFirestoreTestHooks.__deshiGeeSessionMemoryMap.set(cleanId, { ...session, sessionId: cleanId });
+    const prev = globalFirestoreTestHooks.__deshiGeeSessionMemoryMap.get(cleanId);
+    globalFirestoreTestHooks.__deshiGeeSessionMemoryMap.set(cleanId, {
+      ...prev,
+      ...session,
+      sessionId: cleanId,
+      aiPaused: session.aiPaused ?? prev?.aiPaused ?? false,
+      activeTicketId: session.activeTicketId ?? prev?.activeTicketId ?? '',
+      assignedAgentName: session.assignedAgentName ?? prev?.assignedAgentName ?? '',
+      agentReplies: session.agentReplies ?? prev?.agentReplies ?? [],
+      channel: session.channel ?? prev?.channel ?? 'web',
+      externalUserId: session.externalUserId ?? prev?.externalUserId ?? '',
+      linkedPhone: prev?.linkedPhone || session.linkedPhone || '',
+    });
     return;
   }
 
   try {
-    const payload = {
+    // Only write visitor-owned fields so admin-owned human handover fields cannot be tampered with
+    const payload: Record<string, unknown> = {
       sessionId: cleanId,
       language: session.language === 'bn' ? 'bn' : 'en',
       lockedLang: session.lockedLang === 'bn' || session.lockedLang === 'en' ? session.lockedLang : '',
@@ -2074,7 +2519,24 @@ export async function upsertServerChatSession(session: ChatSessionDoc): Promise<
       currentIntent: String(session.currentIntent || 'general').slice(0, 60),
       orderDraftId: String(session.orderDraftId || '').slice(0, 96),
       turnCount: Math.max(0, Math.round(Number(session.turnCount) || 0)),
+      channel: session.channel || 'web',
     };
+    const fieldPaths = [
+      'sessionId',
+      'language',
+      'lockedLang',
+      'scriptPreference',
+      'consent',
+      'currentIntent',
+      'orderDraftId',
+      'turnCount',
+      'channel',
+    ];
+    if (session.externalUserId) {
+      payload.externalUserId = String(session.externalUserId).slice(0, 128);
+      fieldPaths.push('externalUserId');
+    }
+
     await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2084,6 +2546,9 @@ export async function upsertServerChatSession(session: ChatSessionDoc): Promise<
             update: {
               name: docName('chat_sessions', cleanId),
               fields: encodeFsFields(payload),
+            },
+            updateMask: {
+              fieldPaths,
             },
             updateTransforms: [{ fieldPath: 'lastTurnAt', setToServerValue: 'REQUEST_TIME' }],
           },
@@ -2311,4 +2776,1927 @@ export async function createServerChatFeedback(input: {
   } catch {
     return { ok: false, feedbackId };
   }
+}
+
+export async function createServerSupportEvidence(input: {
+  sessionId: string;
+  orderNumber?: string;
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  filename: string;
+  sizeBytes: number;
+  dataBase64: string;
+  purpose: 'damage_claim' | 'payment_dispute' | 'general';
+}): Promise<{ ok: boolean; evidenceId?: string; error?: string }> {
+  const cleanSession = String(input.sessionId || 'track_anon').trim().slice(0, 64);
+  const cleanOrder = input.orderNumber ? input.orderNumber.trim().toUpperCase() : '';
+  const evidenceId = `ev_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  const payload: Record<string, unknown> = {
+    sessionId: /^[a-zA-Z0-9_-]{4,64}$/.test(cleanSession) ? cleanSession : 'track_anon',
+    mimeType: input.mimeType,
+    filename: String(input.filename || 'evidence.jpg').slice(0, 120),
+    sizeBytes: Math.round(Number(input.sizeBytes) || 0),
+    dataBase64: input.dataBase64,
+    purpose: input.purpose || 'general',
+  };
+  if (cleanOrder && /^DG-[0-9]{4,8}$/.test(cleanOrder)) {
+    payload.orderNumber = cleanOrder;
+  }
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeSupportMemoryState?.enabled
+  ) {
+    globalFirestoreTestHooks.__deshiGeeSupportMemoryState.evidence.set(evidenceId, {
+      id: evidenceId,
+      sessionId: payload.sessionId as string,
+      orderNumber: cleanOrder || undefined,
+      mimeType: input.mimeType,
+      filename: payload.filename as string,
+      sizeBytes: payload.sizeBytes as number,
+      dataBase64: input.dataBase64,
+      purpose: input.purpose,
+      createdAt: new Date().toISOString(),
+    });
+    return { ok: true, evidenceId };
+  }
+
+  try {
+    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        writes: [
+          {
+            currentDocument: { exists: false },
+            update: {
+              name: docName('support_evidence', evidenceId),
+              fields: encodeFsFields(payload),
+            },
+            updateTransforms: [{ fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' }],
+          },
+        ],
+      }),
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      return { ok: false, error: `HTTP ${res.status}` };
+    }
+    return { ok: true, evidenceId };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Failed to store evidence' };
+  }
+}
+
+export async function fetchAdminSupportEvidence(
+  evidenceId: string,
+  adminIdToken?: string
+): Promise<SupportEvidenceDoc | null> {
+  const cleanId = String(evidenceId || '').trim();
+  if (!/^[a-zA-Z0-9_-]{4,96}$/.test(cleanId)) return null;
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeSupportMemoryState?.enabled
+  ) {
+    return globalFirestoreTestHooks.__deshiGeeSupportMemoryState.evidence.get(cleanId) || null;
+  }
+
+  if (!adminIdToken) return null;
+  try {
+    const doc = await fetchFsGet(`support_evidence/${encodeURIComponent(cleanId)}`, adminIdToken);
+    return doc ? (doc as unknown as SupportEvidenceDoc) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchAdminSupportTickets(
+  adminIdToken?: string
+): Promise<ChatbotSupportRequestRecord[]> {
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeSupportMemoryState?.enabled
+  ) {
+    return Array.from(globalFirestoreTestHooks.__deshiGeeSupportMemoryState.tickets.values()).sort(
+      (a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''))
+    );
+  }
+  if (!adminIdToken) return [];
+  try {
+    const rows = await fetchFsCollectionList('chatbot_support_requests', 200, adminIdToken);
+    return (rows as unknown as ChatbotSupportRequestRecord[]).sort((a, b) =>
+      String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''))
+    );
+  } catch {
+    return [];
+  }
+}
+
+export async function setAdminSessionAiPause(input: {
+  sessionId: string;
+  aiPaused: boolean;
+  ticketId?: string;
+  agentName?: string;
+  adminIdToken?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const cleanSession = String(input.sessionId || '').trim().slice(0, 64);
+  if (!/^[a-zA-Z0-9_-]{4,64}$/.test(cleanSession)) {
+    return { ok: false, error: 'Invalid sessionId' };
+  }
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeSessionMemoryMap
+  ) {
+    const existing = globalFirestoreTestHooks.__deshiGeeSessionMemoryMap.get(cleanSession);
+    globalFirestoreTestHooks.__deshiGeeSessionMemoryMap.set(cleanSession, {
+      sessionId: cleanSession,
+      language: existing?.language || 'bn',
+      lockedLang: existing?.lockedLang || '',
+      scriptPreference: existing?.scriptPreference || 'bn_script',
+      consent: existing?.consent ?? true,
+      currentIntent: existing?.currentIntent || 'human_help',
+      orderDraftId: existing?.orderDraftId || '',
+      turnCount: existing?.turnCount || 0,
+      agentReplies: existing?.agentReplies || [],
+      ...existing,
+      aiPaused: input.aiPaused,
+      activeTicketId: input.ticketId !== undefined ? input.ticketId : existing?.activeTicketId || '',
+      assignedAgentName:
+        input.agentName !== undefined ? input.agentName : existing?.assignedAgentName || '',
+    });
+    return { ok: true };
+  }
+
+  if (!input.adminIdToken) return { ok: false, error: 'Admin token required' };
+  try {
+    const existingDoc = await fetchFsGet(`chat_sessions/${encodeURIComponent(cleanSession)}`, input.adminIdToken);
+    const updateFields: Record<string, unknown> = {
+      aiPaused: Boolean(input.aiPaused),
+      activeTicketId: String(input.ticketId ?? existingDoc?.activeTicketId ?? '').slice(0, 96),
+      assignedAgentName: String(input.agentName ?? existingDoc?.assignedAgentName ?? '').slice(0, 80),
+    };
+    if (!existingDoc) {
+      updateFields.sessionId = cleanSession;
+      updateFields.language = 'bn';
+      updateFields.lockedLang = '';
+      updateFields.scriptPreference = 'bn_script';
+      updateFields.consent = true;
+      updateFields.currentIntent = 'human_help';
+      updateFields.orderDraftId = '';
+      updateFields.turnCount = 0;
+    }
+    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${input.adminIdToken}`,
+      },
+      body: JSON.stringify({
+        writes: [
+          {
+            update: {
+              name: docName('chat_sessions', cleanSession),
+              fields: encodeFsFields(updateFields),
+            },
+            updateMask: { fieldPaths: Object.keys(updateFields) },
+            updateTransforms: [{ fieldPath: 'lastTurnAt', setToServerValue: 'REQUEST_TIME' }],
+          },
+        ],
+      }),
+      cache: 'no-store',
+    });
+    return res.ok ? { ok: true } : { ok: false, error: `HTTP ${res.status}` };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Failed to toggle AI pause' };
+  }
+}
+
+export async function updateAdminSupportTicket(input: {
+  ticketId: string;
+  status?: SupportTicketStatus;
+  priority?: SupportPriority;
+  assignedTo?: string;
+  tags?: string[];
+  resolutionReason?: string;
+  internalNotes?: string;
+  resumeAiOnResolve?: boolean;
+  adminIdToken?: string;
+  actorEmail?: string;
+}): Promise<{ ok: boolean; ticket?: ChatbotSupportRequestRecord; error?: string }> {
+  const cleanTicket = String(input.ticketId || '').trim();
+  if (!/^[a-zA-Z0-9_-]{4,96}$/.test(cleanTicket)) {
+    return { ok: false, error: 'Invalid ticketId' };
+  }
+
+  const nowIso = new Date().toISOString();
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeSupportMemoryState?.enabled
+  ) {
+    const ticket = globalFirestoreTestHooks.__deshiGeeSupportMemoryState.tickets.get(cleanTicket);
+    if (!ticket) return { ok: false, error: 'Ticket not found' };
+    if (input.status) ticket.status = input.status;
+    if (input.priority) ticket.priority = input.priority;
+    if (input.assignedTo !== undefined) ticket.assignedTo = input.assignedTo.slice(0, 120);
+    if (input.tags !== undefined) {
+      ticket.tags = input.tags.map((t) => String(t).trim().slice(0, 32)).filter(Boolean).slice(0, 10);
+    }
+    if (input.resolutionReason !== undefined) {
+      ticket.resolutionReason = input.resolutionReason.slice(0, 240);
+    }
+    if (input.internalNotes !== undefined) {
+      ticket.internalNotes = input.internalNotes.slice(0, 1000);
+    }
+    if (!ticket.firstRespondedAtIso && input.status && input.status !== 'open') {
+      ticket.firstRespondedAtIso = nowIso;
+    }
+    if (input.status === 'resolved') {
+      ticket.resolvedAtIso = nowIso;
+      if (input.resumeAiOnResolve !== false && ticket.sessionId) {
+        await setAdminSessionAiPause({
+          sessionId: ticket.sessionId,
+          aiPaused: false,
+          ticketId: cleanTicket,
+        });
+      }
+    }
+    ticket.updatedAt = nowIso;
+    return { ok: true, ticket };
+  }
+
+  if (!input.adminIdToken) return { ok: false, error: 'Admin token required' };
+
+  try {
+    const existing = await fetchFsGet(
+      `chatbot_support_requests/${encodeURIComponent(cleanTicket)}`,
+      input.adminIdToken
+    );
+    if (!existing) return { ok: false, error: 'Ticket not found' };
+
+    const updateFields: Record<string, unknown> = {};
+    if (input.status) updateFields.status = input.status;
+    if (input.priority) updateFields.priority = input.priority;
+    if (input.assignedTo !== undefined) updateFields.assignedTo = input.assignedTo.slice(0, 120);
+    if (input.tags !== undefined) {
+      updateFields.tags = input.tags
+        .map((t) => String(t).trim().slice(0, 32))
+        .filter(Boolean)
+        .slice(0, 10);
+    }
+    if (input.resolutionReason !== undefined) {
+      updateFields.resolutionReason = input.resolutionReason.slice(0, 240);
+    }
+    if (input.internalNotes !== undefined) {
+      updateFields.internalNotes = input.internalNotes.slice(0, 1000);
+    }
+    if (!existing.firstRespondedAtIso && input.status && input.status !== 'open') {
+      updateFields.firstRespondedAtIso = nowIso;
+    }
+    if (input.status === 'resolved') {
+      updateFields.resolvedAtIso = nowIso;
+    }
+
+    if (Object.keys(updateFields).length === 0) {
+      return { ok: true, ticket: existing as unknown as ChatbotSupportRequestRecord };
+    }
+
+    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${input.adminIdToken}`,
+      },
+      body: JSON.stringify({
+        writes: [
+          {
+            currentDocument: { exists: true },
+            update: {
+              name: docName('chatbot_support_requests', cleanTicket),
+              fields: encodeFsFields(updateFields),
+            },
+            updateMask: { fieldPaths: Object.keys(updateFields) },
+            updateTransforms: [{ fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' }],
+          },
+        ],
+      }),
+      cache: 'no-store',
+    });
+
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+
+    if (input.status === 'resolved' && input.resumeAiOnResolve !== false && typeof existing.sessionId === 'string') {
+      await setAdminSessionAiPause({
+        sessionId: existing.sessionId,
+        aiPaused: false,
+        ticketId: cleanTicket,
+        adminIdToken: input.adminIdToken,
+      });
+    }
+
+    return {
+      ok: true,
+      ticket: {
+        ...(existing as unknown as ChatbotSupportRequestRecord),
+        ...(updateFields as Partial<ChatbotSupportRequestRecord>),
+        updatedAt: nowIso,
+      },
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Ticket update failed' };
+  }
+}
+
+export async function postAdminAgentReply(input: {
+  ticketId: string;
+  sessionId: string;
+  agentEmail: string;
+  agentName: string;
+  text: string;
+  adminIdToken?: string;
+}): Promise<{ ok: boolean; reply?: ChatAgentReplyItem; error?: string }> {
+  const cleanTicket = String(input.ticketId || '').trim();
+  const cleanSession = String(input.sessionId || '').trim();
+  const cleanText = String(input.text || '').trim().slice(0, 2000);
+  const cleanAgentName = String(input.agentName || 'Deshi Gee Support').trim().slice(0, 80);
+
+  if (!/^[a-zA-Z0-9_-]{4,96}$/.test(cleanTicket) || !/^[a-zA-Z0-9_-]{4,64}$/.test(cleanSession)) {
+    return { ok: false, error: 'Valid ticketId and sessionId are required.' };
+  }
+  if (!cleanText) {
+    return { ok: false, error: 'Reply message cannot be empty.' };
+  }
+
+  const replyId = `rep_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const nowIso = new Date().toISOString();
+  const replyItem: ChatAgentReplyItem = {
+    id: replyId,
+    agentName: cleanAgentName,
+    text: cleanText,
+    createdAtIso: nowIso,
+  };
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeSupportMemoryState?.enabled
+  ) {
+    const supportMem = globalFirestoreTestHooks.__deshiGeeSupportMemoryState;
+    supportMem.agentReplies.push({
+      id: replyId,
+      ticketId: cleanTicket,
+      sessionId: cleanSession,
+      agentEmail: input.agentEmail,
+      agentName: cleanAgentName,
+      text: cleanText,
+      createdAtIso: nowIso,
+      createdAt: nowIso,
+    });
+    const ticket = supportMem.tickets.get(cleanTicket);
+    if (ticket) {
+      if (!ticket.firstRespondedAtIso) ticket.firstRespondedAtIso = nowIso;
+      if (!ticket.assignedTo) ticket.assignedTo = input.agentEmail || cleanAgentName;
+      if (ticket.status === 'open' || ticket.status === 'pending') {
+        ticket.status = 'contacted';
+      }
+      ticket.updatedAt = nowIso;
+    }
+    if (globalFirestoreTestHooks.__deshiGeeSessionMemoryMap) {
+      const prev = globalFirestoreTestHooks.__deshiGeeSessionMemoryMap.get(cleanSession);
+      const nextReplies = [...(prev?.agentReplies || []), replyItem].slice(-25);
+      globalFirestoreTestHooks.__deshiGeeSessionMemoryMap.set(cleanSession, {
+        sessionId: cleanSession,
+        language: prev?.language || 'bn',
+        lockedLang: prev?.lockedLang || '',
+        scriptPreference: prev?.scriptPreference || 'bn_script',
+        consent: prev?.consent ?? true,
+        currentIntent: prev?.currentIntent || 'human_help',
+        orderDraftId: prev?.orderDraftId || '',
+        turnCount: prev?.turnCount || 0,
+        ...prev,
+        aiPaused: true,
+        activeTicketId: cleanTicket,
+        assignedAgentName: cleanAgentName,
+        agentReplies: nextReplies,
+      });
+    }
+    return { ok: true, reply: replyItem };
+  }
+
+  if (!input.adminIdToken) return { ok: false, error: 'Admin token required' };
+
+  try {
+    const [existingTicket, existingSession] = await Promise.all([
+      fetchFsGet(`chatbot_support_requests/${encodeURIComponent(cleanTicket)}`, input.adminIdToken),
+      fetchServerChatSession(cleanSession),
+    ]);
+
+    const prevReplies = existingSession?.agentReplies || [];
+    const nextReplies = [...prevReplies, replyItem].slice(-25);
+
+    const sessionFields: Record<string, unknown> = {
+      sessionId: cleanSession,
+      language: existingSession?.language || 'bn',
+      lockedLang: existingSession?.lockedLang || '',
+      scriptPreference: existingSession?.scriptPreference || 'bn_script',
+      consent: existingSession?.consent ?? true,
+      currentIntent: existingSession?.currentIntent || 'human_help',
+      orderDraftId: existingSession?.orderDraftId || '',
+      turnCount: existingSession?.turnCount || 0,
+      aiPaused: true,
+      activeTicketId: cleanTicket,
+      assignedAgentName: cleanAgentName,
+      agentReplies: nextReplies,
+    };
+
+    const ticketUpdateFields: Record<string, unknown> = {
+      assignedTo: String(existingTicket?.assignedTo || input.agentEmail || cleanAgentName).slice(0, 120),
+      status:
+        existingTicket?.status === 'open' || existingTicket?.status === 'pending'
+          ? 'contacted'
+          : String(existingTicket?.status || 'contacted'),
+    };
+    if (!existingTicket?.firstRespondedAtIso) {
+      ticketUpdateFields.firstRespondedAtIso = nowIso;
+    }
+
+    const writes: Record<string, unknown>[] = [
+      {
+        currentDocument: { exists: false },
+        update: {
+          name: docName('support_agent_replies', replyId),
+          fields: encodeFsFields({
+            ticketId: cleanTicket,
+            sessionId: cleanSession,
+            agentEmail: String(input.agentEmail || '').slice(0, 160),
+            agentName: cleanAgentName,
+            text: cleanText,
+            createdAtIso: nowIso,
+          }),
+        },
+        updateTransforms: [{ fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' }],
+      },
+      {
+        update: {
+          name: docName('chat_sessions', cleanSession),
+          fields: encodeFsFields(sessionFields),
+        },
+        updateTransforms: [{ fieldPath: 'lastTurnAt', setToServerValue: 'REQUEST_TIME' }],
+      },
+    ];
+
+    if (existingTicket) {
+      writes.push({
+        currentDocument: { exists: true },
+        update: {
+          name: docName('chatbot_support_requests', cleanTicket),
+          fields: encodeFsFields(ticketUpdateFields),
+        },
+        updateMask: { fieldPaths: Object.keys(ticketUpdateFields) },
+        updateTransforms: [{ fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' }],
+      });
+    }
+
+    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${input.adminIdToken}`,
+      },
+      body: JSON.stringify({ writes }),
+      cache: 'no-store',
+    });
+
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    return { ok: true, reply: replyItem };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Failed to post reply' };
+  }
+}
+
+export async function createVerifiedDeliveryReview(input: {
+  orderNumber: string;
+  phone: string;
+  customerName: string;
+  district?: string;
+  rating: number;
+  comment: string;
+  photoData?: string;
+}): Promise<{ ok: boolean; reviewId?: string; code?: string; messageEn: string; messageBn: string }> {
+  const cleanOrder = String(input.orderNumber || '').trim().toUpperCase();
+  const cleanPhone = String(input.phone || '').replace(/[\s-]/g, '');
+  const cleanName = String(input.customerName || '').trim().slice(0, 80);
+  const cleanComment = String(input.comment || '').trim().slice(0, 600);
+  const rating = Math.round(Number(input.rating));
+
+  if (!/^DG-[0-9]{4,8}$/.test(cleanOrder) || !/^01[3-9][0-9]{8}$/.test(cleanPhone)) {
+    return {
+      ok: false,
+      code: 'invalid_credentials',
+      messageEn: 'Valid order number (DG-XXXXX) and 11-digit checkout phone are required.',
+      messageBn: 'সঠিক অর্ডার নম্বর ও ১১ সংখ্যার মোবাইল নম্বর দিন।',
+    };
+  }
+  if (cleanName.length < 2 || cleanComment.length < 6 || !(rating >= 1 && rating <= 5)) {
+    return {
+      ok: false,
+      code: 'invalid_review_fields',
+      messageEn: 'Please provide your name, a 1-5 star rating, and at least 6 characters of feedback.',
+      messageBn: 'অনুগ্রহ করে আপনার নাম, ১-৫ রেটিং এবং অন্তত ৬ অক্ষরের রিভিউ লিখুন।',
+    };
+  }
+
+  const tracking = await fetchServerOrderTracking(cleanOrder, cleanPhone);
+  if (!tracking) {
+    return {
+      ok: false,
+      code: 'order_not_found',
+      messageEn: 'No matching order was found for that order number and phone.',
+      messageBn: 'এই অর্ডার নম্বর ও ফোনের সাথে কোনো অর্ডার পাওয়া যায়নি।',
+    };
+  }
+
+  if (tracking.status !== 'delivered') {
+    return {
+      ok: false,
+      code: 'not_delivered',
+      messageEn: 'Verified purchase reviews can only be submitted once your order is delivered.',
+      messageBn: 'ভেরিফায়েড রিভিউ কেবল অর্ডার ডেলিভারি সম্পন্ন হওয়ার পর জমা দেওয়া যায়।',
+    };
+  }
+
+  const reviewId = `rev_${cleanOrder}`;
+  const cleanDistrict = String(input.district || tracking.district || 'Dhaka').trim().slice(0, 80) || 'Dhaka';
+  const cleanPhoto =
+    typeof input.photoData === 'string' && input.photoData.startsWith('data:image/')
+      ? input.photoData.slice(0, 180000)
+      : '';
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeRetentionMemoryState?.enabled
+  ) {
+    const mem = globalFirestoreTestHooks.__deshiGeeRetentionMemoryState;
+    if (mem.reviewClaims.has(cleanOrder) || mem.reviews.has(reviewId)) {
+      return {
+        ok: false,
+        code: 'already_reviewed',
+        messageEn: 'A verified review has already been submitted for this order.',
+        messageBn: 'এই অর্ডারের জন্য ইতিমধ্যে একটি ভেরিফায়েড রিভিউ জমা দেওয়া হয়েছে।',
+      };
+    }
+    const nowIso = new Date().toISOString();
+    mem.reviewClaims.set(cleanOrder, { orderNumber: cleanOrder, createdAt: nowIso });
+    mem.reviews.set(reviewId, {
+      id: reviewId,
+      customerName: cleanName,
+      district: cleanDistrict,
+      rating,
+      comment: cleanComment,
+      orderNumber: cleanOrder,
+      verifiedPurchase: true,
+      helpfulCount: 0,
+      photoData: cleanPhoto,
+      status: 'pending',
+      createdAt: nowIso,
+    });
+    return {
+      ok: true,
+      reviewId,
+      messageEn: 'Thank you! Your verified review has been submitted for moderation.',
+      messageBn: 'ধন্যবাদ! আপনার ভেরিফায়েড রিভিউটি অনুমোদনের জন্য জমা হয়েছে।',
+    };
+  }
+
+  try {
+    const existingClaim = await fetchFsGet(`order_review_claims/${encodeURIComponent(cleanOrder)}`);
+    if (existingClaim) {
+      return {
+        ok: false,
+        code: 'already_reviewed',
+        messageEn: 'A verified review has already been submitted for this order.',
+        messageBn: 'এই অর্ডারের জন্য ইতিমধ্যে একটি ভেরিফায়েড রিভিউ জমা দেওয়া হয়েছে।',
+      };
+    }
+
+    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        writes: [
+          {
+            currentDocument: { exists: false },
+            update: {
+              name: docName('order_review_claims', cleanOrder),
+              fields: encodeFsFields({ orderNumber: cleanOrder }),
+            },
+            updateTransforms: [{ fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' }],
+          },
+          {
+            currentDocument: { exists: false },
+            update: {
+              name: docName('reviews', reviewId),
+              fields: encodeFsFields({
+                customerName: cleanName,
+                district: cleanDistrict,
+                rating,
+                comment: cleanComment,
+                orderNumber: cleanOrder,
+                verifiedPurchase: true,
+                helpfulCount: 0,
+                photoData: cleanPhoto,
+                status: 'pending',
+              }),
+            },
+            updateTransforms: [{ fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' }],
+          },
+        ],
+      }),
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        code: res.status === 409 ? 'already_reviewed' : 'submit_failed',
+        messageEn:
+          res.status === 409
+            ? 'A verified review has already been submitted for this order.'
+            : 'Could not save review right now.',
+        messageBn:
+          res.status === 409
+            ? 'এই অর্ডারের জন্য ইতিমধ্যে একটি ভেরিফায়েড রিভিউ জমা দেওয়া হয়েছে।'
+            : 'এই মুহূর্তে রিভিউ সংরক্ষণ করা যায়নি।',
+      };
+    }
+
+    return {
+      ok: true,
+      reviewId,
+      messageEn: 'Thank you! Your verified review has been submitted for moderation.',
+      messageBn: 'ধন্যবাদ! আপনার ভেরিফায়েড রিভিউটি অনুমোদনের জন্য জমা হয়েছে।',
+    };
+  } catch {
+    return {
+      ok: false,
+      code: 'submit_failed',
+      messageEn: 'Could not save review right now.',
+      messageBn: 'এই মুহূর্তে রিভিউ সংরক্ষণ করা যায়নি।',
+    };
+  }
+}
+
+export async function fetchRefillReminder(
+  orderNumber: string,
+  phone: string
+): Promise<RefillReminderDoc | null> {
+  const cleanOrder = String(orderNumber || '').trim().toUpperCase();
+  const cleanPhone = String(phone || '').replace(/[\s-]/g, '');
+  if (!/^DG-[0-9]{4,8}$/.test(cleanOrder) || !/^01[3-9][0-9]{8}$/.test(cleanPhone)) {
+    return null;
+  }
+  const key = `${cleanOrder}_${cleanPhone}`;
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeRetentionMemoryState?.enabled
+  ) {
+    return globalFirestoreTestHooks.__deshiGeeRetentionMemoryState.refillReminders.get(key) || null;
+  }
+
+  try {
+    const doc = await fetchFsGet(`refill_reminders/${encodeURIComponent(key)}`);
+    return doc ? (doc as unknown as RefillReminderDoc) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function upsertRefillReminder(input: {
+  orderNumber: string;
+  phone: string;
+  intervalDays?: 30 | 45 | 60 | 90;
+  status?: 'active' | 'paused' | 'opted_out';
+  consentGranted?: boolean;
+  customerName?: string;
+}): Promise<{ ok: boolean; reminder?: RefillReminderDoc; code?: string; messageEn: string; messageBn: string }> {
+  const cleanOrder = String(input.orderNumber || '').trim().toUpperCase();
+  const cleanPhone = String(input.phone || '').replace(/[\s-]/g, '');
+  if (!/^DG-[0-9]{4,8}$/.test(cleanOrder) || !/^01[3-9][0-9]{8}$/.test(cleanPhone)) {
+    return {
+      ok: false,
+      code: 'invalid_credentials',
+      messageEn: 'Valid order number and 11-digit phone are required.',
+      messageBn: 'সঠিক অর্ডার নম্বর ও ১১ সংখ্যার মোবাইল নম্বর দিন।',
+    };
+  }
+
+  const tracking = await fetchServerOrderTracking(cleanOrder, cleanPhone);
+  if (!tracking) {
+    return {
+      ok: false,
+      code: 'order_not_found',
+      messageEn: 'Order could not be verified.',
+      messageBn: 'অর্ডারটি যাচাই করা যায়নি।',
+    };
+  }
+
+  const key = `${cleanOrder}_${cleanPhone}`;
+  const existing = await fetchRefillReminder(cleanOrder, cleanPhone);
+
+  if (!existing && input.consentGranted !== true) {
+    return {
+      ok: false,
+      code: 'consent_required',
+      messageEn: 'Explicit opt-in consent is required to enable refill reminders.',
+      messageBn: 'রিফিল রিমাইন্ডার চালু করতে আপনার স্পষ্ট সম্মতি প্রয়োজন।',
+    };
+  }
+
+  const validIntervals = [30, 45, 60, 90] as const;
+  const intervalDays: 30 | 45 | 60 | 90 =
+    input.intervalDays && (validIntervals as readonly number[]).includes(input.intervalDays)
+      ? input.intervalDays
+      : existing?.intervalDays || 45;
+  const nextStatus: 'active' | 'paused' | 'opted_out' =
+    input.status === 'active' || input.status === 'paused' || input.status === 'opted_out'
+      ? input.status
+      : existing?.status || 'active';
+
+  const nextReminderAtIso = new Date(Date.now() + intervalDays * 86_400_000).toISOString();
+  const payload: Omit<RefillReminderDoc, 'id' | 'createdAt' | 'updatedAt'> = {
+    orderNumber: cleanOrder,
+    phone: cleanPhone,
+    customerName: String(input.customerName || existing?.customerName || 'Customer').slice(0, 100),
+    weight: tracking.weight,
+    intervalDays,
+    status: nextStatus,
+    consentGranted: existing ? existing.consentGranted : true,
+    nextReminderAtIso,
+  };
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeRetentionMemoryState?.enabled
+  ) {
+    const nowIso = new Date().toISOString();
+    const doc: RefillReminderDoc = {
+      id: key,
+      ...payload,
+      createdAt: existing?.createdAt || nowIso,
+      updatedAt: nowIso,
+    };
+    globalFirestoreTestHooks.__deshiGeeRetentionMemoryState.refillReminders.set(key, doc);
+    return {
+      ok: true,
+      reminder: doc,
+      messageEn:
+        nextStatus === 'active'
+          ? `Refill reminder set for every ${intervalDays} days.`
+          : `Refill reminder ${nextStatus}.`,
+      messageBn:
+        nextStatus === 'active'
+          ? `প্রতি ${intervalDays} দিন পর রিফিল রিমাইন্ডার সেট করা হয়েছে।`
+          : `রিফিল রিমাইন্ডার ${nextStatus === 'paused' ? 'বিরতি দেওয়া' : 'বন্ধ করা'} হয়েছে।`,
+    };
+  }
+
+  try {
+    const writes = existing
+      ? [
+          {
+            currentDocument: { exists: true },
+            update: {
+              name: docName('refill_reminders', key),
+              fields: encodeFsFields({
+                intervalDays,
+                status: nextStatus,
+                nextReminderAtIso,
+              }),
+            },
+            updateMask: { fieldPaths: ['intervalDays', 'status', 'nextReminderAtIso'] },
+            updateTransforms: [{ fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' }],
+          },
+        ]
+      : [
+          {
+            currentDocument: { exists: false },
+            update: {
+              name: docName('refill_reminders', key),
+              fields: encodeFsFields(payload as unknown as Record<string, unknown>),
+            },
+            updateTransforms: [
+              { fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' },
+              { fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' },
+            ],
+          },
+        ];
+
+    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ writes }),
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        code: 'save_failed',
+        messageEn: 'Could not save refill reminder setting.',
+        messageBn: 'রিফিল রিমাইন্ডার সংরক্ষণ করা যায়নি।',
+      };
+    }
+
+    return {
+      ok: true,
+      reminder: { id: key, ...payload },
+      messageEn:
+        nextStatus === 'active'
+          ? `Refill reminder set for every ${intervalDays} days.`
+          : `Refill reminder ${nextStatus}.`,
+      messageBn:
+        nextStatus === 'active'
+          ? `প্রতি ${intervalDays} দিন পর রিফিল রিমাইন্ডার সেট করা হয়েছে।`
+          : `রিফিল রিমাইন্ডার ${nextStatus === 'paused' ? 'বিরতি দেওয়া' : 'বন্ধ করা'} হয়েছে।`,
+    };
+  } catch {
+    return {
+      ok: false,
+      code: 'save_failed',
+      messageEn: 'Could not save refill reminder setting.',
+      messageBn: 'রিফিল রিমাইন্ডার সংরক্ষণ করা যায়নি।',
+    };
+  }
+}
+
+export async function buildVerifiedReorderPayload(
+  orderNumber: string,
+  phone: string
+): Promise<{
+  ok: boolean;
+  code?: string;
+  orderNumber?: string;
+  qty250g?: number;
+  qty500g?: number;
+  qty1kg?: number;
+  subtotalBdt?: number;
+  adjustedForStock?: boolean;
+  reorderQuery?: string;
+  reorderUrl?: string;
+  itemsSummary?: string;
+  messageEn: string;
+  messageBn: string;
+}> {
+  const cleanOrder = String(orderNumber || '').trim().toUpperCase();
+  const cleanPhone = String(phone || '').replace(/[\s-]/g, '');
+  if (!/^DG-[0-9]{4,8}$/.test(cleanOrder) || !/^01[3-9][0-9]{8}$/.test(cleanPhone)) {
+    return {
+      ok: false,
+      code: 'invalid_credentials',
+      messageEn: 'Valid order number and 11-digit phone are required.',
+      messageBn: 'সঠিক অর্ডার নম্বর ও ১১ সংখ্যার মোবাইল নম্বর দিন।',
+    };
+  }
+
+  const [tracking, settings] = await Promise.all([
+    fetchServerOrderTracking(cleanOrder, cleanPhone),
+    fetchServerStoreSettings(),
+  ]);
+
+  if (!tracking) {
+    return {
+      ok: false,
+      code: 'order_not_found',
+      messageEn: 'No matching order found for that order number and phone.',
+      messageBn: 'এই অর্ডার নম্বর ও ফোনের সাথে কোনো অর্ডার পাওয়া যায়নি।',
+    };
+  }
+
+  const req250 = Number(tracking.qty250g ?? (tracking.weight === '250g' ? tracking.qty : 0));
+  const req500 = Number(tracking.qty500g ?? (tracking.weight === '500g' ? tracking.qty : 0));
+  const req1k = Number(tracking.qty1kg ?? (tracking.weight === '1kg' ? tracking.qty : 0));
+
+  const qty250g = Math.max(0, Math.min(req250, settings.stock250g));
+  const qty500g = Math.max(0, Math.min(req500, settings.stock500g));
+  const qty1kg = Math.max(0, Math.min(req1k, settings.stock1kg));
+
+  if (qty250g + qty500g + qty1kg === 0) {
+    return {
+      ok: false,
+      code: 'out_of_stock',
+      orderNumber: cleanOrder,
+      messageEn: 'Sorry, all jar sizes from that previous order are currently out of stock.',
+      messageBn: 'দুঃখিত, আগের অর্ডারের জার সাইজগুলো বর্তমানে স্টকে নেই।',
+    };
+  }
+
+  const adjustedForStock = qty250g !== req250 || qty500g !== req500 || qty1kg !== req1k;
+  const subtotalBdt =
+    qty250g * settings.price250g + qty500g * settings.price500g + qty1kg * settings.price1kg;
+
+  const parts: string[] = [];
+  const summaryParts: string[] = [];
+  if (qty250g > 0) {
+    parts.push(`250g:${qty250g}`);
+    summaryParts.push(`${qty250g}x 250g`);
+  }
+  if (qty500g > 0) {
+    parts.push(`500g:${qty500g}`);
+    summaryParts.push(`${qty500g}x 500g`);
+  }
+  if (qty1kg > 0) {
+    parts.push(`1kg:${qty1kg}`);
+    summaryParts.push(`${qty1kg}x 1kg`);
+  }
+
+  const reorderQuery = parts.join(',');
+  const reorderUrl = `/?reorder=${encodeURIComponent(reorderQuery)}`;
+  const itemsSummary = summaryParts.join(', ');
+
+  return {
+    ok: true,
+    orderNumber: cleanOrder,
+    qty250g,
+    qty500g,
+    qty1kg,
+    subtotalBdt,
+    adjustedForStock,
+    reorderQuery,
+    reorderUrl,
+    itemsSummary,
+    messageEn: adjustedForStock
+      ? `Prepared reorder (${itemsSummary}, current subtotal ৳${subtotalBdt}) adjusted to live stock.`
+      : `Prepared reorder (${itemsSummary}, current subtotal ৳${subtotalBdt}) matching your previous order.`,
+    messageBn: adjustedForStock
+      ? `বর্তমান স্টক অনুযায়ী রিঅর্ডার (${itemsSummary}, বর্তমান মূল্য ৳${subtotalBdt}) প্রস্তুত করা হয়েছে।`
+      : `আপনার আগের অর্ডারের (${itemsSummary}, বর্তমান মূল্য ৳${subtotalBdt}) রিঅর্ডার লিংক প্রস্তুত হয়েছে।`,
+  };
+}
+
+export async function fetchAdminRefillReminders(
+  adminIdToken?: string
+): Promise<RefillReminderDoc[]> {
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeRetentionMemoryState?.enabled
+  ) {
+    return Array.from(
+      globalFirestoreTestHooks.__deshiGeeRetentionMemoryState.refillReminders.values()
+    ).sort((a, b) => Date.parse(a.nextReminderAtIso) - Date.parse(b.nextReminderAtIso));
+  }
+
+  try {
+    const rows = await fetchFsCollectionList('refill_reminders', 200, adminIdToken);
+    return (rows as unknown as RefillReminderDoc[]).sort(
+      (a, b) => Date.parse(a.nextReminderAtIso) - Date.parse(b.nextReminderAtIso)
+    );
+  } catch {
+    return [];
+  }
+}
+
+export interface RefillDispatchItemResult {
+  id: string;
+  orderNumber: string;
+  customerName?: string;
+  weight?: string;
+  intervalDays: number;
+  previousDueAtIso: string;
+  nextReminderAtIso: string;
+  reminderCount: number;
+  status: 'dry_run_due' | 'dispatched' | 'logged_no_webhook' | 'failed';
+  detail?: string;
+}
+
+export interface RefillDispatchSummary {
+  ok: boolean;
+  dryRun: boolean;
+  evaluatedAtIso: string;
+  totalReminders: number;
+  totalActive: number;
+  dueCount: number;
+  dispatchedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  items: RefillDispatchItemResult[];
+}
+
+export async function dispatchDueRefillReminders(options?: {
+  now?: Date;
+  dryRun?: boolean;
+  adminIdToken?: string;
+  reminderIds?: string[];
+}): Promise<RefillDispatchSummary> {
+  const now = options?.now || new Date();
+  const nowMs = now.getTime();
+  const nowIso = now.toISOString();
+  const dryRun = Boolean(options?.dryRun);
+  const all = await fetchAdminRefillReminders(options?.adminIdToken);
+  const filterSet =
+    options?.reminderIds && options.reminderIds.length > 0
+      ? new Set(options.reminderIds.map((id) => id.trim()))
+      : null;
+
+  const activeReminders = all.filter(
+    (r) => r.status === 'active' && r.consentGranted === true
+  );
+  const dueReminders = activeReminders.filter((r) => {
+    if (filterSet && !filterSet.has(r.id) && !filterSet.has(r.orderNumber)) {
+      return false;
+    }
+    const dueMs = Date.parse(r.nextReminderAtIso);
+    return Number.isFinite(dueMs) && dueMs <= nowMs;
+  });
+
+  const webhookTargets = [
+    { channel: 'whatsapp_api', url: process.env.WHATSAPP_WEBHOOK_URL },
+    { channel: 'email_api', url: process.env.EMAIL_WEBHOOK_URL },
+    { channel: 'owner_webhook', url: process.env.OWNER_WEBHOOK_URL },
+  ].filter((t) => Boolean(t.url));
+
+  const memEnabled =
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeRetentionMemoryState?.enabled;
+
+  const items: RefillDispatchItemResult[] = [];
+  let dispatchedCount = 0;
+  let failedCount = 0;
+
+  for (const r of dueReminders) {
+    const nextReminderAtIso = new Date(nowMs + r.intervalDays * 86_400_000).toISOString();
+    const prevCount = Number(r.reminderCount || 0);
+    const nextCount = prevCount + 1;
+
+    if (dryRun) {
+      items.push({
+        id: r.id,
+        orderNumber: r.orderNumber,
+        customerName: r.customerName,
+        weight: r.weight,
+        intervalDays: r.intervalDays,
+        previousDueAtIso: r.nextReminderAtIso,
+        nextReminderAtIso,
+        reminderCount: prevCount,
+        status: 'dry_run_due',
+        detail: 'Eligible for refill reminder dispatch',
+      });
+      continue;
+    }
+
+    let deliveryStatus: 'dispatched' | 'logged_no_webhook' | 'failed' = 'logged_no_webhook';
+    let detail = 'No webhook URL configured; schedule advanced.';
+
+    if (webhookTargets.length > 0) {
+      const payload = {
+        event: 'refill_reminder_due',
+        orderNumber: r.orderNumber,
+        customerName: r.customerName || 'Customer',
+        phone: r.phone,
+        weight: r.weight || '500g',
+        intervalDays: r.intervalDays,
+        reminderCount: nextCount,
+        reorderUrl: `/?reorder=${encodeURIComponent(`${r.weight || '500g'}:1`)}`,
+      };
+      const results = await Promise.all(
+        webhookTargets.map((target) =>
+          dispatchWebhookWithRetry(target.url as string, `refill_${target.channel}`, payload, 1)
+        )
+      );
+      for (const res of results) {
+        notificationLogs.unshift(res);
+        if (notificationLogs.length > 50) notificationLogs.pop();
+      }
+      const anySent = results.some((res) => res.status === 'sent');
+      if (anySent) {
+        deliveryStatus = 'dispatched';
+        detail = 'Webhook notification delivered';
+      } else {
+        deliveryStatus = 'failed';
+        detail = results.map((res) => `${res.channel}: ${res.detail}`).join('; ');
+      }
+    }
+
+    if (deliveryStatus === 'failed') {
+      failedCount += 1;
+      items.push({
+        id: r.id,
+        orderNumber: r.orderNumber,
+        customerName: r.customerName,
+        weight: r.weight,
+        intervalDays: r.intervalDays,
+        previousDueAtIso: r.nextReminderAtIso,
+        nextReminderAtIso: r.nextReminderAtIso,
+        reminderCount: prevCount,
+        status: 'failed',
+        detail,
+      });
+      continue;
+    }
+
+    // Persist schedule advance
+    if (memEnabled) {
+      const mem = globalFirestoreTestHooks.__deshiGeeRetentionMemoryState!;
+      const existing = mem.refillReminders.get(r.id);
+      if (existing) {
+        existing.lastNotifiedAtIso = nowIso;
+        existing.reminderCount = nextCount;
+        existing.nextReminderAtIso = nextReminderAtIso;
+        existing.updatedAt = nowIso;
+      }
+    } else if (options?.adminIdToken) {
+      const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${options.adminIdToken}`,
+        },
+        body: JSON.stringify({
+          writes: [
+            {
+              currentDocument: { exists: true },
+              update: {
+                name: docName('refill_reminders', r.id),
+                fields: encodeFsFields({
+                  lastNotifiedAtIso: nowIso,
+                  reminderCount: nextCount,
+                  nextReminderAtIso,
+                }),
+              },
+              updateMask: {
+                fieldPaths: ['lastNotifiedAtIso', 'reminderCount', 'nextReminderAtIso'],
+              },
+              updateTransforms: [{ fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' }],
+            },
+          ],
+        }),
+        cache: 'no-store',
+      });
+      if (!res.ok) {
+        failedCount += 1;
+        items.push({
+          id: r.id,
+          orderNumber: r.orderNumber,
+          customerName: r.customerName,
+          weight: r.weight,
+          intervalDays: r.intervalDays,
+          previousDueAtIso: r.nextReminderAtIso,
+          nextReminderAtIso: r.nextReminderAtIso,
+          reminderCount: prevCount,
+          status: 'failed',
+          detail: `Firestore update HTTP ${res.status}`,
+        });
+        continue;
+      }
+    }
+
+    dispatchedCount += 1;
+    items.push({
+      id: r.id,
+      orderNumber: r.orderNumber,
+      customerName: r.customerName,
+      weight: r.weight,
+      intervalDays: r.intervalDays,
+      previousDueAtIso: r.nextReminderAtIso,
+      nextReminderAtIso,
+      reminderCount: nextCount,
+      status: deliveryStatus,
+      detail,
+    });
+  }
+
+  return {
+    ok: failedCount === 0,
+    dryRun,
+    evaluatedAtIso: nowIso,
+    totalReminders: all.length,
+    totalActive: activeReminders.length,
+    dueCount: dueReminders.length,
+    dispatchedCount,
+    skippedCount: Math.max(0, all.length - dueReminders.length),
+    failedCount,
+    items,
+  };
+}
+
+// =========================================================================
+// Phase 5: Omnichannel Webhooks, Identity Linking, Consent Retention & Attribution
+// =========================================================================
+
+export async function recordOrCheckWebhookEventIdempotency(input: {
+  channel: 'messenger' | 'instagram' | 'whatsapp';
+  eventId: string;
+  senderId: string;
+  verifiedPhone?: string;
+  status?: 'processed' | 'duplicate' | 'rejected';
+}): Promise<{ ok: boolean; isDuplicate: boolean; docId: string }> {
+  const docId =
+    String(input.eventId || '')
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .slice(0, 128) || `evt_${Date.now()}`;
+  const nowIso = new Date().toISOString();
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeChannelMemoryState?.enabled
+  ) {
+    const store = globalFirestoreTestHooks.__deshiGeeChannelMemoryState.webhookEvents;
+    if (store.has(docId)) {
+      return { ok: true, isDuplicate: true, docId };
+    }
+    store.set(docId, {
+      id: docId,
+      channel: input.channel,
+      eventId: docId,
+      senderId: String(input.senderId || '').slice(0, 128),
+      verifiedPhone:
+        input.verifiedPhone && /^01[3-9][0-9]{8}$/.test(input.verifiedPhone)
+          ? input.verifiedPhone
+          : undefined,
+      status: input.status || 'processed',
+      createdAtIso: nowIso,
+    });
+    return { ok: true, isDuplicate: false, docId };
+  }
+
+  try {
+    const existing = await fetchFsGet(`channel_webhook_events/${encodeURIComponent(docId)}`);
+    if (existing) {
+      return { ok: true, isDuplicate: true, docId };
+    }
+
+    const payload: Record<string, unknown> = {
+      channel: input.channel,
+      eventId: docId,
+      senderId: String(input.senderId || '').slice(0, 128) || 'unknown_sender',
+      status: input.status || 'processed',
+      createdAtIso: nowIso,
+    };
+    if (input.verifiedPhone && /^01[3-9][0-9]{8}$/.test(input.verifiedPhone)) {
+      payload.verifiedPhone = input.verifiedPhone;
+    }
+
+    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        writes: [
+          {
+            currentDocument: { exists: false },
+            update: {
+              name: docName('channel_webhook_events', docId),
+              fields: encodeFsFields(payload),
+            },
+            updateTransforms: [{ fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' }],
+          },
+        ],
+      }),
+      cache: 'no-store',
+    });
+    if (res.status === 409) {
+      return { ok: true, isDuplicate: true, docId };
+    }
+    return { ok: res.ok, isDuplicate: false, docId };
+  } catch {
+    return { ok: false, isDuplicate: false, docId };
+  }
+}
+
+export async function linkSessionVerifiedPhone(input: {
+  sessionId: string;
+  phone: string;
+  channel?: ChannelSource;
+  externalUserId?: string;
+}): Promise<{ ok: boolean; linkedPhone?: string }> {
+  const cleanSession = String(input.sessionId || '').trim().slice(0, 64);
+  const cleanPhone = String(input.phone || '').replace(/[\s-]/g, '');
+  if (!/^[a-zA-Z0-9_-]{4,64}$/.test(cleanSession) || !/^01[3-9][0-9]{8}$/.test(cleanPhone)) {
+    return { ok: false };
+  }
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeSessionMemoryMap
+  ) {
+    const prev = globalFirestoreTestHooks.__deshiGeeSessionMemoryMap.get(cleanSession);
+    const effectivePhone = prev?.linkedPhone || cleanPhone;
+    globalFirestoreTestHooks.__deshiGeeSessionMemoryMap.set(cleanSession, {
+      sessionId: cleanSession,
+      language: prev?.language || 'bn',
+      lockedLang: prev?.lockedLang || '',
+      scriptPreference: prev?.scriptPreference || 'bn_script',
+      consent: prev?.consent ?? true,
+      currentIntent: prev?.currentIntent || 'general',
+      orderDraftId: prev?.orderDraftId || '',
+      turnCount: prev?.turnCount || 0,
+      aiPaused: prev?.aiPaused ?? false,
+      activeTicketId: prev?.activeTicketId || '',
+      assignedAgentName: prev?.assignedAgentName || '',
+      agentReplies: prev?.agentReplies || [],
+      ...prev,
+      channel: input.channel || prev?.channel || 'web',
+      externalUserId: input.externalUserId || prev?.externalUserId || '',
+      linkedPhone: effectivePhone,
+    });
+    return { ok: true, linkedPhone: effectivePhone };
+  }
+
+  try {
+    const existing = await fetchServerChatSession(cleanSession);
+    if (existing?.linkedPhone) {
+      return { ok: true, linkedPhone: existing.linkedPhone };
+    }
+    const fields: Record<string, unknown> = existing
+      ? {
+          linkedPhone: cleanPhone,
+          channel: input.channel || existing.channel || 'web',
+          ...(input.externalUserId ? { externalUserId: input.externalUserId.slice(0, 128) } : {}),
+        }
+      : {
+          sessionId: cleanSession,
+          language: 'bn',
+          lockedLang: '',
+          scriptPreference: 'bn_script',
+          consent: true,
+          currentIntent: 'general',
+          orderDraftId: '',
+          turnCount: 0,
+          channel: input.channel || 'web',
+          externalUserId: String(input.externalUserId || '').slice(0, 128),
+          linkedPhone: cleanPhone,
+        };
+
+    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        writes: [
+          {
+            update: {
+              name: docName('chat_sessions', cleanSession),
+              fields: encodeFsFields(fields),
+            },
+            updateMask: { fieldPaths: Object.keys(fields) },
+            updateTransforms: [{ fieldPath: 'lastTurnAt', setToServerValue: 'REQUEST_TIME' }],
+          },
+        ],
+      }),
+      cache: 'no-store',
+    });
+    return { ok: res.ok, linkedPhone: cleanPhone };
+  } catch {
+    return { ok: false };
+  }
+}
+
+export async function fetchMarketingConsentByPhone(
+  phone: string
+): Promise<MarketingConsentDoc | null> {
+  const cleanPhone = String(phone || '').replace(/[\s-]/g, '');
+  if (!/^01[3-9][0-9]{8}$/.test(cleanPhone)) return null;
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeChannelMemoryState?.enabled
+  ) {
+    return (
+      globalFirestoreTestHooks.__deshiGeeChannelMemoryState.marketingConsents.get(cleanPhone) || null
+    );
+  }
+
+  try {
+    const doc = await fetchFsGet(`marketing_consents/${encodeURIComponent(cleanPhone)}`);
+    return doc ? (doc as unknown as MarketingConsentDoc) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function upsertMarketingConsent(input: {
+  phone: string;
+  customerName?: string;
+  channel: ChannelSource;
+  optIn: boolean;
+  unsubscribed: boolean;
+  source: MarketingConsentDoc['source'];
+  quietHoursRespect?: boolean;
+}): Promise<{ ok: boolean; record?: MarketingConsentDoc; error?: string }> {
+  const cleanPhone = String(input.phone || '').replace(/[\s-]/g, '');
+  if (!/^01[3-9][0-9]{8}$/.test(cleanPhone)) {
+    return { ok: false, error: 'Valid 11-digit Bangladesh mobile number (01XXXXXXXXX) is required.' };
+  }
+
+  const nowIso = new Date().toISOString();
+  const quietHoursRespect = input.quietHoursRespect ?? true;
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeChannelMemoryState?.enabled
+  ) {
+    const store = globalFirestoreTestHooks.__deshiGeeChannelMemoryState.marketingConsents;
+    const prev = store.get(cleanPhone);
+    const nextDoc: MarketingConsentDoc = {
+      id: cleanPhone,
+      phone: cleanPhone,
+      customerName: String(input.customerName || prev?.customerName || '').slice(0, 100) || undefined,
+      channel: input.channel || prev?.channel || 'web',
+      optIn: input.unsubscribed ? false : Boolean(input.optIn),
+      unsubscribed: Boolean(input.unsubscribed),
+      source: input.source,
+      quietHoursRespect,
+      consentTimestampIso: nowIso,
+      lastCampaignAtIso: prev?.lastCampaignAtIso,
+      campaignCount: prev?.campaignCount ?? 0,
+      createdAt: prev?.createdAt || nowIso,
+      updatedAt: nowIso,
+    };
+    store.set(cleanPhone, nextDoc);
+    return { ok: true, record: nextDoc };
+  }
+
+  try {
+    const existing = await fetchMarketingConsentByPhone(cleanPhone);
+    const nextOptIn = input.unsubscribed ? false : Boolean(input.optIn);
+    const writes = existing
+      ? [
+          {
+            currentDocument: { exists: true },
+            update: {
+              name: docName('marketing_consents', cleanPhone),
+              fields: encodeFsFields({
+                optIn: nextOptIn,
+                unsubscribed: Boolean(input.unsubscribed),
+                quietHoursRespect,
+                channel: input.channel || existing.channel || 'web',
+                source: input.source,
+                consentTimestampIso: nowIso,
+              }),
+            },
+            updateMask: {
+              fieldPaths: [
+                'optIn',
+                'unsubscribed',
+                'quietHoursRespect',
+                'channel',
+                'source',
+                'consentTimestampIso',
+              ],
+            },
+            updateTransforms: [{ fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' }],
+          },
+        ]
+      : [
+          {
+            currentDocument: { exists: false },
+            update: {
+              name: docName('marketing_consents', cleanPhone),
+              fields: encodeFsFields({
+                phone: cleanPhone,
+                ...(input.customerName
+                  ? { customerName: String(input.customerName).slice(0, 100) }
+                  : {}),
+                channel: input.channel || 'web',
+                optIn: nextOptIn,
+                unsubscribed: Boolean(input.unsubscribed),
+                source: input.source,
+                quietHoursRespect,
+                consentTimestampIso: nowIso,
+                campaignCount: 0,
+              }),
+            },
+            updateTransforms: [
+              { fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' },
+              { fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' },
+            ],
+          },
+        ];
+
+    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ writes }),
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      return { ok: false, error: `HTTP ${res.status}` };
+    }
+    return {
+      ok: true,
+      record: {
+        id: cleanPhone,
+        phone: cleanPhone,
+        customerName: input.customerName || existing?.customerName,
+        channel: input.channel || existing?.channel || 'web',
+        optIn: nextOptIn,
+        unsubscribed: Boolean(input.unsubscribed),
+        source: input.source,
+        quietHoursRespect,
+        consentTimestampIso: nowIso,
+        lastCampaignAtIso: existing?.lastCampaignAtIso,
+        campaignCount: existing?.campaignCount ?? 0,
+        createdAt: existing?.createdAt || nowIso,
+        updatedAt: nowIso,
+      },
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Consent update failed' };
+  }
+}
+
+export async function fetchAdminMarketingConsents(
+  adminIdToken?: string
+): Promise<MarketingConsentDoc[]> {
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeChannelMemoryState?.enabled
+  ) {
+    return Array.from(
+      globalFirestoreTestHooks.__deshiGeeChannelMemoryState.marketingConsents.values()
+    ).sort((a, b) => b.consentTimestampIso.localeCompare(a.consentTimestampIso));
+  }
+  if (!adminIdToken) return [];
+  try {
+    const rows = await fetchFsCollectionList('marketing_consents', 200, adminIdToken);
+    return (rows as unknown as MarketingConsentDoc[]).sort((a, b) =>
+      String(b.consentTimestampIso || '').localeCompare(String(a.consentTimestampIso || ''))
+    );
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchPhase5AttributionAnalyticsSnapshot(
+  adminIdToken?: string
+): Promise<Phase5AttributionAnalytics> {
+  const isTestMem = process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1';
+
+  let logs: ChatbotLogRecord[] = [];
+  let drafts: OrderDraftDoc[] = [];
+  let orders: OrderRecord[] = [];
+  let supportRequests: ChatbotSupportRequestRecord[] = [];
+
+  if (isTestMem && globalFirestoreTestHooks.__deshiGeeChannelMemoryState?.enabled) {
+    logs = globalFirestoreTestHooks.__deshiGeeChannelMemoryState.chatLogs;
+  } else if (adminIdToken) {
+    const rows = await fetchFsCollectionList('chatbot_logs', 200, adminIdToken).catch(() => []);
+    logs = rows as unknown as ChatbotLogRecord[];
+  }
+
+  if (isTestMem && globalFirestoreTestHooks.__deshiGeeDraftMemoryMap) {
+    drafts = Array.from(globalFirestoreTestHooks.__deshiGeeDraftMemoryMap.values());
+  } else if (adminIdToken) {
+    const rows = await fetchFsCollectionList('order_drafts', 200, adminIdToken).catch(() => []);
+    drafts = rows as unknown as OrderDraftDoc[];
+  }
+
+  if (isTestMem && globalFirestoreTestHooks.__deshiGeeOrderMemoryState?.enabled) {
+    orders = Array.from(globalFirestoreTestHooks.__deshiGeeOrderMemoryState.orders.values());
+  } else if (adminIdToken) {
+    const rows = await fetchFsCollectionList('orders', 200, adminIdToken).catch(() => []);
+    orders = rows as unknown as OrderRecord[];
+  }
+
+  if (isTestMem && globalFirestoreTestHooks.__deshiGeeSupportMemoryState?.enabled) {
+    supportRequests = Array.from(
+      globalFirestoreTestHooks.__deshiGeeSupportMemoryState.tickets.values()
+    );
+  } else if (adminIdToken) {
+    supportRequests = await fetchAdminSupportTickets(adminIdToken);
+  }
+
+  return computePhase5AttributionAnalytics({ logs, drafts, orders, supportRequests });
+}
+
+export interface RetentionCampaignItemResult {
+  phone: string;
+  customerName: string;
+  segment: 'abandoned_drafts' | 'subscribed_customers';
+  channel: string;
+  status:
+    | 'dry_run_eligible'
+    | 'dispatched'
+    | 'logged_no_channel_token'
+    | 'skipped_quiet_hours'
+    | 'skipped_suppressed'
+    | 'skipped_frequency_cap'
+    | 'failed';
+  detail: string;
+  draftId?: string;
+}
+
+export interface RetentionCampaignSummary {
+  ok: boolean;
+  dryRun: boolean;
+  segment: 'abandoned_drafts' | 'subscribed_customers';
+  channel: 'whatsapp' | 'email' | 'sms' | 'messenger' | 'instagram';
+  withinDhakaQuietHours: boolean;
+  evaluatedAtIso: string;
+  totalCandidates: number;
+  eligibleCount: number;
+  sentCount: number;
+  skippedQuietHours: number;
+  skippedSuppressed: number;
+  skippedFrequencyCap: number;
+  failedCount: number;
+  abandonedCandidates: AbandonedDraftCandidate[];
+  items: RetentionCampaignItemResult[];
+}
+
+export async function dispatchConsentRetentionCampaign(options: {
+  segment: 'abandoned_drafts' | 'subscribed_customers';
+  channel?: 'whatsapp' | 'email' | 'sms' | 'messenger' | 'instagram';
+  dryRun?: boolean;
+  now?: Date;
+  adminIdToken?: string;
+}): Promise<RetentionCampaignSummary> {
+  const now = options.now ?? new Date();
+  const nowIso = now.toISOString();
+  const dryRun = Boolean(options.dryRun);
+  const channel = options.channel || 'whatsapp';
+  const quietNow = isWithinDhakaQuietHours(now);
+  const isTestMem = process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1';
+
+  const [consents, orders, drafts] = await Promise.all([
+    fetchAdminMarketingConsents(options.adminIdToken),
+    isTestMem && globalFirestoreTestHooks.__deshiGeeOrderMemoryState?.enabled
+      ? Promise.resolve(
+          Array.from(globalFirestoreTestHooks.__deshiGeeOrderMemoryState.orders.values())
+        )
+      : options.adminIdToken
+        ? (fetchFsCollectionList('orders', 200, options.adminIdToken).catch(
+            () => []
+          ) as Promise<unknown> as Promise<OrderRecord[]>)
+        : Promise.resolve([] as OrderRecord[]),
+    isTestMem && globalFirestoreTestHooks.__deshiGeeDraftMemoryMap
+      ? Promise.resolve(Array.from(globalFirestoreTestHooks.__deshiGeeDraftMemoryMap.values()))
+      : options.adminIdToken
+        ? (fetchFsCollectionList('order_drafts', 200, options.adminIdToken).catch(
+            () => []
+          ) as Promise<unknown> as Promise<OrderDraftDoc[]>)
+        : Promise.resolve([] as OrderDraftDoc[]),
+  ]);
+
+  const consentMap = new Map<string, MarketingConsentDoc>();
+  const suppressedPhones = new Set<string>();
+  for (const c of consents) {
+    consentMap.set(c.phone, c);
+    if (c.unsubscribed || !c.optIn) {
+      suppressedPhones.add(c.phone);
+    }
+  }
+
+  const abandonedCandidates = identifyAbandonedDraftCandidates({
+    drafts,
+    orders,
+    suppressedPhones,
+    now,
+    minIdleMinutes: 30,
+  });
+
+  const targetList: Array<{
+    phone: string;
+    customerName: string;
+    messageBn: string;
+    messageEn: string;
+    draftId?: string;
+    subscriber?: MarketingConsentDoc;
+  }> = [];
+
+  if (options.segment === 'abandoned_drafts') {
+    for (const c of abandonedCandidates) {
+      targetList.push({
+        phone: c.phone,
+        customerName: c.customerName,
+        messageBn: c.recoveryMessageBn,
+        messageEn: c.recoveryMessageEn,
+        draftId: c.draftId,
+        subscriber: consentMap.get(c.phone),
+      });
+    }
+  } else {
+    for (const sub of consents) {
+      targetList.push({
+        phone: sub.phone,
+        customerName: sub.customerName || 'Valued Customer',
+        messageBn:
+          'আসসালামু আলাইকুম! পাবনার বিলোনার নতুন ব্যাচের খাঁটি দেশী গাওয়া ঘি এখন স্টকে রয়েছে। চাইলে ওয়েবসাইট থেকে অর্ডার করতে পারেন।',
+        messageEn:
+          'Hello from Deshi Gee! A fresh small-batch harvest of Pabna pure bilona ghee is now available if you would like to restock.',
+        subscriber: sub,
+      });
+    }
+  }
+
+  const webhookUrl =
+    channel === 'whatsapp'
+      ? process.env.WHATSAPP_WEBHOOK_URL
+      : channel === 'email'
+        ? process.env.EMAIL_WEBHOOK_URL
+        : undefined;
+
+  const items: RetentionCampaignItemResult[] = [];
+  let eligibleCount = 0;
+  let sentCount = 0;
+  let skippedQuietHours = 0;
+  let skippedSuppressed = 0;
+  let skippedFrequencyCap = 0;
+  let failedCount = 0;
+
+  for (const target of targetList) {
+    const subscriber: MarketingConsentDoc = target.subscriber || {
+      phone: target.phone,
+      customerName: target.customerName,
+      channel,
+      optIn: options.segment === 'abandoned_drafts' && !suppressedPhones.has(target.phone),
+      unsubscribed: suppressedPhones.has(target.phone),
+      source: 'chat',
+      quietHoursRespect: true,
+      consentTimestampIso: nowIso,
+      campaignCount: 0,
+    };
+
+    const elig = evaluateRetentionEligibility({
+      subscriber,
+      now,
+      minCooldownHours: 72,
+      maxCampaignsTotal: 12,
+    });
+
+    if (!elig.eligible) {
+      if (elig.reason === 'quiet_hours') {
+        skippedQuietHours += 1;
+        items.push({
+          phone: target.phone,
+          customerName: target.customerName,
+          segment: options.segment,
+          channel,
+          draftId: target.draftId,
+          status: 'skipped_quiet_hours',
+          detail: 'Held by Asia/Dhaka quiet hours (22:00–08:00 BST).',
+        });
+      } else if (elig.reason === 'unsubscribed' || elig.reason === 'opted_out') {
+        skippedSuppressed += 1;
+        items.push({
+          phone: target.phone,
+          customerName: target.customerName,
+          segment: options.segment,
+          channel,
+          draftId: target.draftId,
+          status: 'skipped_suppressed',
+          detail: elig.reason === 'unsubscribed' ? 'Unsubscribed suppression active.' : 'No marketing opt-in.',
+        });
+      } else {
+        skippedFrequencyCap += 1;
+        items.push({
+          phone: target.phone,
+          customerName: target.customerName,
+          segment: options.segment,
+          channel,
+          draftId: target.draftId,
+          status: 'skipped_frequency_cap',
+          detail: '72h cooldown or campaign cap active.',
+        });
+      }
+      continue;
+    }
+
+    eligibleCount += 1;
+
+    if (dryRun) {
+      items.push({
+        phone: target.phone,
+        customerName: target.customerName,
+        segment: options.segment,
+        channel,
+        draftId: target.draftId,
+        status: 'dry_run_eligible',
+        detail: 'Eligible for polite single-product retention nudge.',
+      });
+      continue;
+    }
+
+    let status: 'dispatched' | 'logged_no_channel_token' | 'failed' = 'logged_no_channel_token';
+    let detail = `Channel delivery webhook/token for ${channel} not configured; recorded in dispatch preview.`;
+
+    if (webhookUrl) {
+      const dispatchRes = await dispatchWebhookWithRetry(
+        webhookUrl,
+        `retention_${channel}`,
+        {
+          event:
+            options.segment === 'abandoned_drafts'
+              ? 'abandoned_draft_recovery'
+              : 'retention_restock_nudge',
+          phone: target.phone,
+          customerName: target.customerName,
+          draftId: target.draftId,
+          messageBn: target.messageBn,
+          messageEn: target.messageEn,
+        },
+        1
+      );
+      notificationLogs.unshift(dispatchRes);
+      if (notificationLogs.length > 50) notificationLogs.pop();
+      if (dispatchRes.status === 'sent') {
+        status = 'dispatched';
+        detail = 'Retention message dispatched via configured webhook.';
+      } else {
+        status = 'failed';
+        detail = dispatchRes.detail;
+      }
+    }
+
+    if (status === 'failed') {
+      failedCount += 1;
+      items.push({
+        phone: target.phone,
+        customerName: target.customerName,
+        segment: options.segment,
+        channel,
+        draftId: target.draftId,
+        status: 'failed',
+        detail,
+      });
+      continue;
+    }
+
+    const nextCount = Number(subscriber.campaignCount || 0) + 1;
+    if (isTestMem && globalFirestoreTestHooks.__deshiGeeChannelMemoryState?.enabled) {
+      const store = globalFirestoreTestHooks.__deshiGeeChannelMemoryState.marketingConsents;
+      const prev = store.get(target.phone);
+      if (prev) {
+        store.set(target.phone, {
+          ...prev,
+          lastCampaignAtIso: nowIso,
+          campaignCount: nextCount,
+          updatedAt: nowIso,
+        });
+      } else {
+        store.set(target.phone, {
+          ...subscriber,
+          lastCampaignAtIso: nowIso,
+          campaignCount: nextCount,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+      }
+    } else if (options.adminIdToken && target.subscriber) {
+      await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${options.adminIdToken}`,
+        },
+        body: JSON.stringify({
+          writes: [
+            {
+              currentDocument: { exists: true },
+              update: {
+                name: docName('marketing_consents', target.phone),
+                fields: encodeFsFields({
+                  lastCampaignAtIso: nowIso,
+                  campaignCount: nextCount,
+                }),
+              },
+              updateMask: { fieldPaths: ['lastCampaignAtIso', 'campaignCount'] },
+              updateTransforms: [{ fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' }],
+            },
+          ],
+        }),
+        cache: 'no-store',
+      }).catch(() => {});
+    }
+
+    sentCount += 1;
+    items.push({
+      phone: target.phone,
+      customerName: target.customerName,
+      segment: options.segment,
+      channel,
+      draftId: target.draftId,
+      status,
+      detail,
+    });
+  }
+
+  return {
+    ok: failedCount === 0,
+    dryRun,
+    segment: options.segment,
+    channel,
+    withinDhakaQuietHours: quietNow,
+    evaluatedAtIso: nowIso,
+    totalCandidates: targetList.length,
+    eligibleCount,
+    sentCount,
+    skippedQuietHours,
+    skippedSuppressed,
+    skippedFrequencyCap,
+    failedCount,
+    abandonedCandidates,
+    items,
+  };
 }

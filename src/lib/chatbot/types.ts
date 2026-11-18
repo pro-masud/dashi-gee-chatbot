@@ -17,8 +17,11 @@ export type TurnIntent =
   | 'offers'
   | 'delivery'
   | 'payment'
+  | 'payment_dispute'
+  | 'late_delivery'
   | 'order'
   | 'order_manage'
+  | 'reorder'
   | 'tracking'
   | 'policy'
   | 'complaint'
@@ -70,6 +73,10 @@ export interface TrackingCardData {
   itemsSummary: string;
   totalBdt: number;
   estimatedDelivery: string;
+  courierPartner?: string;
+  consignmentId?: string;
+  courierTrackingUrl?: string;
+  dispatchedAtIso?: string;
 }
 
 export interface ChatDiagnosticsMeta {
@@ -124,6 +131,9 @@ export interface ChatbotConfigDoc {
   closeHourBst: number;
   closedDays: string;
   supportAvailabilityNote: string;
+  humanSupportEnabled?: boolean;
+  slaStandardMinutes?: number;
+  slaUrgentMinutes?: number;
   deliveryPolicy: string;
   returnPolicy: string;
   replacementPolicy: string;
@@ -210,6 +220,9 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfigDoc = {
   closedDays: 'Friday',
   supportAvailabilityNote:
     'Our customer support team replies within business hours via Phone and WhatsApp.',
+  humanSupportEnabled: true,
+  slaStandardMinutes: 120,
+  slaUrgentMinutes: 30,
   deliveryPolicy:
     'Orders inside Dhaka typically arrive within 24–48 hours; nationwide orders outside Dhaka arrive within 2–4 business days. Free delivery applies automatically at or above the configured threshold.',
   returnPolicy:
@@ -345,6 +358,15 @@ export interface OrderDraftDoc {
   updatedAt?: unknown;
 }
 
+export interface ChatAgentReplyItem {
+  id: string;
+  agentName: string;
+  text: string;
+  createdAtIso: string;
+}
+
+export type ChannelSource = 'web' | 'messenger' | 'instagram' | 'whatsapp' | 'email' | 'sms';
+
 export interface ChatSessionDoc {
   sessionId: string;
   language: 'bn' | 'en';
@@ -354,6 +376,13 @@ export interface ChatSessionDoc {
   currentIntent: TurnIntent | string;
   orderDraftId?: string;
   turnCount: number;
+  channel?: ChannelSource;
+  externalUserId?: string;
+  linkedPhone?: string;
+  aiPaused?: boolean;
+  activeTicketId?: string;
+  assignedAgentName?: string;
+  agentReplies?: ChatAgentReplyItem[];
   lastTurnAt?: unknown;
   startedAt?: unknown;
 }
@@ -386,6 +415,7 @@ export interface ChatbotLogRecord {
   id: string;
   sessionId: string;
   lang: ChatbotLang;
+  channel?: ChannelSource;
   userMessage: string;
   assistantReply: string;
   intent: string;
@@ -479,15 +509,143 @@ export interface ChatbotVersionRecord {
   createdAt?: unknown;
 }
 
+export type SupportCategory =
+  | 'damaged_jar'
+  | 'payment_dispute'
+  | 'late_delivery'
+  | 'refund_return'
+  | 'bulk_order'
+  | 'general';
+
+export type SupportPriority = 'standard' | 'urgent';
+
+export type SupportTicketStatus =
+  | 'open'
+  | 'pending'
+  | 'contacted'
+  | 'waiting_for_customer'
+  | 'escalated'
+  | 'resolved';
+
 export interface ChatbotSupportRequestRecord {
   id: string;
+  ticketNumber?: string;
   sessionId: string;
+  channel?: ChannelSource;
+  externalThreadId?: string;
   customerName: string;
   phone: string;
+  orderNumber?: string;
+  category?: SupportCategory;
+  priority?: SupportPriority;
   issueSummary: string;
-  status: 'open' | 'contacted' | 'resolved';
+  contextSummary?: string;
+  transcriptExcerpt?: string;
+  consentGranted?: boolean;
+  evidenceIds?: string[];
+  paymentStatusSnapshot?: string;
+  orderStatusSnapshot?: string;
+  slaMinutes?: number;
+  slaDueAtIso?: string;
+  slaWindowLabelEn?: string;
+  slaWindowLabelBn?: string;
+  assignedTo?: string;
+  tags?: string[];
+  resolutionReason?: string;
+  internalNotes?: string;
+  firstRespondedAtIso?: string;
+  resolvedAtIso?: string;
+  status: SupportTicketStatus;
   createdAt?: unknown;
   updatedAt?: unknown;
+}
+
+export interface SupportEvidenceDoc {
+  id: string;
+  sessionId: string;
+  orderNumber?: string;
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  filename: string;
+  sizeBytes: number;
+  dataBase64: string;
+  purpose: 'damage_claim' | 'payment_dispute' | 'general';
+  createdAt?: unknown;
+}
+
+export interface SupportAgentReplyDoc {
+  id: string;
+  ticketId: string;
+  sessionId: string;
+  agentEmail: string;
+  agentName: string;
+  text: string;
+  createdAtIso: string;
+  createdAt?: unknown;
+}
+
+export interface RefillReminderDoc {
+  id: string;
+  orderNumber: string;
+  phone: string;
+  customerName?: string;
+  weight?: '250g' | '500g' | '1kg';
+  intervalDays: 30 | 45 | 60 | 90;
+  status: 'active' | 'paused' | 'opted_out';
+  consentGranted: boolean;
+  nextReminderAtIso: string;
+  lastNotifiedAtIso?: string;
+  reminderCount?: number;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export interface ChannelWebhookEventDoc {
+  id: string;
+  channel: 'messenger' | 'instagram' | 'whatsapp';
+  eventId: string;
+  senderId: string;
+  verifiedPhone?: string;
+  status: 'processed' | 'duplicate' | 'rejected';
+  createdAtIso: string;
+  createdAt?: unknown;
+}
+
+export interface MarketingConsentDoc {
+  id: string;
+  phone: string;
+  customerName?: string;
+  channel: ChannelSource;
+  optIn: boolean;
+  unsubscribed: boolean;
+  source: 'checkout' | 'chat' | 'track_order' | 'whatsapp' | 'admin';
+  quietHoursRespect: boolean;
+  lastCampaignAtIso?: string;
+  campaignCount?: number;
+  consentTimestampIso: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export interface Phase5AttributionAnalytics {
+  funnel: {
+    chatStartedSessions: number;
+    productInfoSessions: number;
+    orderIntentSessions: number;
+    summaryShownSessions: number;
+    confirmedOrdersCount: number;
+    deliveredOrdersCount: number;
+    attributedRevenueBdt: number;
+    attributedAovBdt: number;
+    chatToOrderPct: number;
+  };
+  channels: Array<{
+    channel: ChannelSource;
+    sessions: number;
+    orders: number;
+    revenueBdt: number;
+    handoverTickets: number;
+    conversionPct: number;
+  }>;
 }
 
 export interface ChatActionItem {
@@ -499,11 +657,18 @@ export interface ChatActionItem {
     | 'copy_phone'
     | 'track_order'
     | 'order_confirmed'
+    | 'reorder'
     | 'open_url';
   labelEn: string;
   labelBn: string;
   value: string;
   href?: string;
+  reorderData?: {
+    qty250g: number;
+    qty500g: number;
+    qty1kg: number;
+    totalBdt: number;
+  };
 }
 
 export type OrderStatePhase =
@@ -576,6 +741,8 @@ export interface ChatMessageItem {
   logId?: string;
   isError?: boolean;
   retryPrompt?: string;
+  isAgentReply?: boolean;
+  agentName?: string;
 }
 
 export const PROTECTED_CORE_RULES_SUMMARY = [

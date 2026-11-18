@@ -10,6 +10,9 @@ export interface ChatbotValidationInput {
   config: ChatbotConfigDoc;
   verifiedMonetaryAmounts: number[];
   verifiedOrderTrackingStatus?: string;
+  verifiedPaymentStatus?: string;
+  verifiedRefundApproved?: boolean;
+  verifiedReplacementDispatched?: boolean;
   hasPreparedOrderSummary: boolean;
   customerPhoneInTurn?: string;
   isMixedQuestion: boolean;
@@ -31,13 +34,16 @@ export interface ChatbotValidationResult {
 }
 
 const PROMPT_OR_SECRET_LEAK_RX =
-  /(PROTECTED\s+CORE\s+CONSTITUTION|SANDBOXED\s+ADMIN\s+CUSTOM\s+INSTRUCTIONS|buildSystemPrompt|GEMINI_API_KEY|ORDER_TOKEN_SECRET|AIzaSy[0-9A-Za-z_-]{10,}|firebase-applet-config|chatbot_config\/draft|chatbot_used_tokens|prepare_order_summary|get_current_price|get_business_contact|get_order_status|submit_support_handover|\{\{BOT_NAME\}\}|\{\{PRODUCT_TABLE\}\})/i;
+  /(PROTECTED\s+CORE\s+CONSTITUTION|SANDBOXED\s+ADMIN\s+CUSTOM\s+INSTRUCTIONS|buildSystemPrompt|GEMINI_API_KEY|ORDER_TOKEN_SECRET|AIzaSy[0-9A-Za-z_-]{10,}|firebase-applet-config|chatbot_config\/draft|chatbot_used_tokens|prepare_order_summary|get_current_price|get_business_contact|get_order_status|submit_support_handover|check_payment_verification|inspect_delivery_delay|submit_damage_or_return_claim|get_reorder_summary|register_refill_reminder|\{\{BOT_NAME\}\}|\{\{PRODUCT_TABLE\}\})/i;
 
 const AFFIRMATIVE_ORDER_STATUS_CLAIM_RX =
   /(order\s+(?:is\s+|has\s+been\s+|was\s+)?(?:placed|confirmed|completed|booked|submitted|received\s+successfully)|আপনার\s+অর্ডার(?:টি)?\s+(?:সফলভাবে\s+)?(?:সম্পন্ন|কনফার্ম|গ্রহণ\s+করা\s+হয়েছে|গ্রহণ\s+করা\s+হয়েছে)|অর্ডার\s+সম্পন্ন|\b(?:payment\s+(?:is\s+|has\s+been\s+)?(?:verified|received)|already\s+paid|order\s+(?:is\s+|has\s+been\s+)?(?:delivered|shipped))\b|পেমেন্ট\s+(?:সম্পন্ন|ভেরিফাইড|যাচাই\s+হয়েছে|যাচাই\s+হয়েছে)|ডেলিভারি\s+(?:সম্পন্ন|হয়ে\s+গেছে|হয়ে\s+গেছে))/i;
 
+const AFFIRMATIVE_POST_PURCHASE_RESOLUTION_RX =
+  /(\b(?:refund\s+(?:is\s+|has\s+been\s+|was\s+)?(?:approved|issued|processed|sent|completed)|replacement\s+(?:is\s+|has\s+been\s+|was\s+)?(?:dispatched|shipped|sent|approved))\b|(?:রিফান্ড\s+(?:অনুমোদিত|হয়ে\s+গেছে|হয়ে\s+গেছে|পাঠানো\s+হয়েছে|পাঠানো\s+হয়েছে|সম্পন্ন)|রিপ্লেসমেন্ট\s+(?:পাঠানো|ডিসপ্যাচ|অনুমোদিত)\s+(?:হয়েছে|হয়েছে)))/i;
+
 const NEGATED_OR_CONDITIONAL_CONTEXT_RX =
-  /(\b(?:not|n't|never|before|until|unless|once\s+you|when\s+you|after\s+you|to\s+have\s+your|to\s+get\s+your|yet|cannot|can't|won't|will\s+not)\b|ক্লিক\s+(?:করলে|করার)|আগে|পর্যন্ত|হয়নি|হয়নি|হবে\s+না|করা\s+হয়নি|করা\s+হয়নি|নয়|নয়)/i;
+  /(\b(?:not|n't|never|before|until|unless|once\s+you|when\s+you|after\s+you|if\s+|eligible|review|to\s+have\s+your|to\s+get\s+your|yet|cannot|can't|won't|will\s+not|pending|pending_verification)\b|ক্লিক\s+(?:করলে|করার)|আগে|পর্যন্ত|হয়নি|হয়নি|হবে\s+না|করা\s+হয়নি|করা\s+হয়নি|টিম\s+যাচাই|নয়|নয়)/i;
 
 function splitValidationClauses(text: string): string[] {
   // Split by sentence delimiters and contrast/coordination clause boundaries
@@ -47,11 +53,42 @@ function splitValidationClauses(text: string): string[] {
     .filter(Boolean);
 }
 
-function hasUnauthorizedOrderOrStatusClaim(text: string): boolean {
+function hasUnauthorizedOrderOrStatusClaim(
+  text: string,
+  opts?: {
+    verifiedOrderTrackingStatus?: string;
+    verifiedPaymentStatus?: string;
+    verifiedRefundApproved?: boolean;
+    verifiedReplacementDispatched?: boolean;
+    hasPreparedOrderSummary?: boolean;
+  }
+): boolean {
   for (const clause of splitValidationClauses(text)) {
+    if (AFFIRMATIVE_POST_PURCHASE_RESOLUTION_RX.test(clause)) {
+      if (!NEGATED_OR_CONDITIONAL_CONTEXT_RX.test(clause)) {
+        const isRefundClause = /\brefund\b|রিফান্ড/i.test(clause);
+        const isReplacementClause = /\breplacement\b|রিপ্লেসমেন্ট/i.test(clause);
+        if (isRefundClause && !opts?.verifiedRefundApproved) return true;
+        if (isReplacementClause && !opts?.verifiedReplacementDispatched) return true;
+      }
+    }
     if (AFFIRMATIVE_ORDER_STATUS_CLAIM_RX.test(clause)) {
       if (!NEGATED_OR_CONDITIONAL_CONTEXT_RX.test(clause)) {
-        return true;
+        const isPaymentVerifiedClaim =
+          /payment\s+(?:is\s+|has\s+been\s+)?verified|পেমেন্ট\s+(?:ভেরিফাইড|যাচাই\s+হ)/i.test(
+            clause
+          );
+        if (isPaymentVerifiedClaim) {
+          if (opts?.verifiedPaymentStatus !== 'verified') {
+            return true;
+          }
+          continue;
+        }
+        const allowedFromTracking =
+          Boolean(opts?.verifiedOrderTrackingStatus) && !opts?.hasPreparedOrderSummary;
+        if (!allowedFromTracking) {
+          return true;
+        }
       }
     }
   }
@@ -151,20 +188,24 @@ export function validateChatbotResponse(input: ChatbotValidationInput): ChatbotV
     };
   }
 
-  // 2. Unauthorized Order Placement / Paid / Delivered Claim Check
-  if (hasUnauthorizedOrderOrStatusClaim(text)) {
-    const allowedFromTracking =
-      Boolean(verifiedOrderTrackingStatus) && !hasPreparedOrderSummary;
-    if (!allowedFromTracking) {
-      return {
-        passed: false,
-        errorCategory: 'unauthorized_order_claim',
-        reason:
-          'Response claimed an order is placed, confirmed, paid, or delivered without confirmed backend order execution.',
-        correctiveHint:
-          'CRITICAL: You CANNOT place orders directly. Never say "your order is placed/confirmed". Simply ask the customer to review the Order Summary card below and click the Confirm Order button.',
-      };
-    }
+  // 2. Unauthorized Order Placement / Paid / Delivered / Refund / Replacement Claim Check
+  if (
+    hasUnauthorizedOrderOrStatusClaim(text, {
+      verifiedOrderTrackingStatus,
+      verifiedPaymentStatus: input.verifiedPaymentStatus,
+      verifiedRefundApproved: input.verifiedRefundApproved,
+      verifiedReplacementDispatched: input.verifiedReplacementDispatched,
+      hasPreparedOrderSummary,
+    })
+  ) {
+    return {
+      passed: false,
+      errorCategory: 'unauthorized_order_claim',
+      reason:
+        'Response claimed an order, payment verification, refund approval, or replacement dispatch without confirmed backend state.',
+      correctiveHint:
+        'CRITICAL: NEVER state "refund approved", "replacement dispatched", or "payment verified" unless verified by a backend tool result, and NEVER claim an order is placed before clicking Confirm Order.',
+    };
   }
 
   // 3. Monetary Amount Check (every ৳ / BDT amount must be grounded in verified catalog/tool amounts)

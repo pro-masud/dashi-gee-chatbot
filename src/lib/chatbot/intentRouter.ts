@@ -56,13 +56,80 @@ export function classifyTurnIntent(
     };
   }
 
-  // 1b. Order Tracking
+  // 1b. Payment Verification Dispute
+  if (
+    /(pending_verification|unverified|double\s*charged|deducted|money\s*cut|payment\s*(issue|problem|dispute|failed|not\s*verified|verify)|টাকা\s*কেটে|ভেরিফাই\s*হয়নি|ভেরিফাই\s*হয়নি|পেমেন্ট\s*(সমস্যা|যাচাই|ডিসপিউট))/i.test(
+      clean
+    )
+  ) {
+    return {
+      intent: 'payment_dispute',
+      confidence: 0.94,
+      allowedToolNames: [
+        'get_order_status',
+        'check_payment_verification',
+        'get_payment_methods',
+        'get_business_contact',
+        'submit_support_handover',
+      ],
+      canStreamSafely: false,
+      needsProductCards: false,
+    };
+  }
+
+  // 1c. Late Delivery / Delay Follow-up
+  if (
+    /(late\s*delivery|\bis\s+late\b|\brunning\s+late\b|\bdays?\s+late\b|delay|delayed|not\s*delivered|haven'?t\s*received|still\s*not\s*received|overdue|এখনো\s*পাইনি|দেরি|আসেনি|দেরী)/i.test(
+      clean
+    )
+  ) {
+    return {
+      intent: 'late_delivery',
+      confidence: 0.93,
+      allowedToolNames: [
+        'get_order_status',
+        'inspect_delivery_delay',
+        'get_delivery_information',
+        'get_business_contact',
+        'submit_support_handover',
+      ],
+      canStreamSafely: false,
+      needsProductCards: false,
+    };
+  }
+
+  // 1d. Reorder / Refill Reminder
+  if (
+    /(reorder|order\s*again|buy\s*again|same\s*as\s*last|refill\s*reminder|আবার\s*অর্ডার|রিঅর্ডার|আগের\s*মত|আগের\s*মতো|রিফিল\s*রিমাইন্ডার)/i.test(
+      clean
+    )
+  ) {
+    return {
+      intent: 'reorder',
+      confidence: 0.93,
+      allowedToolNames: [
+        'get_order_status',
+        'get_reorder_summary',
+        'register_refill_reminder',
+        'get_current_price',
+        'get_product_stock',
+      ],
+      canStreamSafely: false,
+      needsProductCards: false,
+    };
+  }
+
+  // 1e. Order Tracking
   if (/(dg-\d+|track|ট্র্যাক|অবস্থা|অর্ডার কোথায়|কবে পাব|status)/i.test(clean)) {
     return {
       intent: 'tracking',
       confidence: 0.94,
       allowedToolNames: [
         'get_order_status',
+        'check_payment_verification',
+        'inspect_delivery_delay',
+        'get_reorder_summary',
+        'register_refill_reminder',
         'request_cancel',
         'request_address_change',
         'get_delivery_information',
@@ -82,7 +149,13 @@ export function classifyTurnIntent(
     return {
       intent: 'complaint',
       confidence: 0.92,
-      allowedToolNames: ['get_return_policy', 'get_business_contact', 'submit_support_handover'],
+      allowedToolNames: [
+        'get_order_status',
+        'get_return_policy',
+        'get_business_contact',
+        'submit_damage_or_return_claim',
+        'submit_support_handover',
+      ],
       canStreamSafely: false,
       needsProductCards: false,
     };
@@ -98,7 +171,12 @@ export function classifyTurnIntent(
     return {
       intent: 'human_help',
       confidence: 0.9,
-      allowedToolNames: ['get_business_contact', 'get_business_hours', 'submit_support_handover'],
+      allowedToolNames: [
+        'get_business_contact',
+        'get_business_hours',
+        'submit_support_handover',
+        'submit_damage_or_return_claim',
+      ],
       canStreamSafely: false,
       needsProductCards: false,
     };
@@ -462,6 +540,18 @@ export function buildContextualSuggestedReplies(
       return replyLang === 'bn'
         ? ['সাপোর্টে কথা বলব', 'রিটার্ন পলিসি কী?']
         : ['Contact support', 'Return & replacement policy'];
+    case 'payment_dispute':
+      return replyLang === 'bn'
+        ? ['সাপোর্ট টিকিট খুলুন', 'অর্ডার ট্র্যাকার খুলুন']
+        : ['Open payment dispute ticket', 'Open Order Tracker'];
+    case 'late_delivery':
+      return replyLang === 'bn'
+        ? ['জরুরি ডেলিভারি টিকিট দিন', 'অর্ডার ট্র্যাক করুন']
+        : ['Submit urgent delay ticket', 'Track my order'];
+    case 'reorder':
+      return replyLang === 'bn'
+        ? ['ঘিয়ের দাম কত?', 'রিফিল রিমাইন্ডার সেট করুন']
+        : ['Show jar prices', 'Set refill reminder'];
     default:
       return replyLang === 'bn'
         ? ['ঘিয়ের দাম কত?', 'কোন সাইজ নেব?', 'অর্ডার করতে চাই']

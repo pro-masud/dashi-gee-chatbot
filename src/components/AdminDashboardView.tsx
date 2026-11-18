@@ -4,12 +4,17 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { User } from 'firebase/auth';
 import {
   ArrowLeft,
+  BellRing,
   Check,
+  Download,
+  ExternalLink,
   Loader2,
   LogOut,
   Printer,
+  Send,
   ShieldCheck,
   Trash2,
+  Truck,
 } from 'lucide-react';
 import {
   BatchRecord,
@@ -39,6 +44,9 @@ import {
   subscribeToAuth,
   updateAdminOrderStatus,
 } from '../lib/firebase';
+import type { CourierPartner } from '../lib/storeTypes';
+import { buildOrdersCsv } from '../lib/chatbot/supportEngine';
+import type { RefillReminderDoc } from '../lib/chatbot/types';
 import { formatBdt } from '../data/deshiGeeData';
 import { AdminChatbotPanel } from './AdminChatbotPanel';
 import { useStorefront } from './StorefrontProvider';
@@ -80,6 +88,18 @@ export function AdminDashboardView({
   const [auditLogs, setAuditLogs] = useState<OrderAuditLogRecord[]>([]);
   const [loadingAuditLogs, setLoadingAuditLogs] = useState(false);
   const [reviewActionLoading, setReviewActionLoading] = useState(false);
+
+  const [courierPartnerDraft, setCourierPartnerDraft] = useState<CourierPartner>('steadfast');
+  const [consignmentIdDraft, setConsignmentIdDraft] = useState('');
+  const [courierUrlDraft, setCourierUrlDraft] = useState('');
+  const [courierMarkShipped, setCourierMarkShipped] = useState(true);
+  const [courierSaving, setCourierSaving] = useState(false);
+  const [courierFeedback, setCourierFeedback] = useState('');
+
+  const [refillReminders, setRefillReminders] = useState<RefillReminderDoc[]>([]);
+  const [refillDueCount, setRefillDueCount] = useState(0);
+  const [refillDispatchBusy, setRefillDispatchBusy] = useState(false);
+  const [refillDispatchReport, setRefillDispatchReport] = useState('');
 
   // Editable Store Config Form
   const [draftSettings, setDraftSettings] = useState<StoreSettingsDoc>(settings);
@@ -134,6 +154,7 @@ export function AdminDashboardView({
       if (whRes.ok) {
         setWebhookInfo(await whRes.json());
       }
+      await loadRefillReminders();
     } catch (err) {
       console.error('Failed loading admin workspace:', err);
     } finally {
@@ -141,11 +162,28 @@ export function AdminDashboardView({
     }
   };
 
+  const loadRefillReminders = async () => {
+    if (!user) return;
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/orders/refill-reminder/dispatch', {
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRefillReminders(Array.isArray(data.reminders) ? data.reminders : []);
+        setRefillDueCount(Number(data.dueCount || 0));
+      }
+    } catch {
+      // Non-blocking refresh
+    }
+  };
+
   useEffect(() => {
-    if (isAdmin) {
+    if (isAdmin && user) {
       loadAdminWorkspace();
     }
-  }, [isAdmin]);
+  }, [isAdmin, user]);
 
   const handleGoogleSignIn = async () => {
     setAuthError('');
@@ -231,6 +269,17 @@ export function AdminDashboardView({
   };
 
   useEffect(() => {
+    if (selectedOrder) {
+      setCourierPartnerDraft(selectedOrder.courierPartner || 'steadfast');
+      setConsignmentIdDraft(selectedOrder.consignmentId || '');
+      setCourierUrlDraft(selectedOrder.courierTrackingUrl || '');
+      setCourierMarkShipped(
+        selectedOrder.status !== 'shipped' &&
+          selectedOrder.status !== 'delivered' &&
+          selectedOrder.status !== 'cancelled'
+      );
+      setCourierFeedback('');
+    }
     if (selectedOrder && user) {
       loadOrderAuditLogs(selectedOrder.orderNumber);
     } else {
@@ -292,6 +341,106 @@ export function AdminDashboardView({
     } finally {
       setReviewActionLoading(false);
     }
+  };
+
+  const handleSaveCourier = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selectedOrder || !user || courierSaving) return;
+    setCourierSaving(true);
+    setCourierFeedback('');
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/orders/manage', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: 'admin_update_courier',
+          orderNumber: selectedOrder.orderNumber,
+          courierPartner: courierPartnerDraft,
+          consignmentId: consignmentIdDraft.trim(),
+          courierTrackingUrl: courierUrlDraft.trim(),
+          markShipped: courierMarkShipped,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        setCourierFeedback(data.messageEn || data.error || 'Could not update courier.');
+        return;
+      }
+      const nextStatus = (data.nextStatus as OrderStatus) || selectedOrder.status;
+      const updatedFields: Partial<OrderRecord> = {
+        status: nextStatus,
+        courierPartner: data.courierPartner || courierPartnerDraft,
+        consignmentId: data.consignmentId ?? consignmentIdDraft.trim(),
+        courierTrackingUrl: data.courierTrackingUrl ?? courierUrlDraft.trim(),
+        dispatchedAtIso: data.dispatchedAtIso || selectedOrder.dispatchedAtIso,
+      };
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.orderNumber === selectedOrder.orderNumber ? { ...o, ...updatedFields } : o
+        )
+      );
+      setSelectedOrder({ ...selectedOrder, ...updatedFields });
+      if (data.courierTrackingUrl) {
+        setCourierUrlDraft(data.courierTrackingUrl);
+      }
+      setCourierFeedback(data.messageEn || 'Courier updated.');
+      await loadOrderAuditLogs(selectedOrder.orderNumber);
+    } catch (err) {
+      setCourierFeedback(err instanceof Error ? err.message : 'Courier update failed.');
+    } finally {
+      setCourierSaving(false);
+    }
+  };
+
+  const handleDispatchRefillQueue = async (dryRun: boolean) => {
+    if (!user || refillDispatchBusy) return;
+    setRefillDispatchBusy(true);
+    setRefillDispatchReport('');
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/orders/refill-reminder/dispatch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ dryRun }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok && res.status !== 207) {
+        setRefillDispatchReport(data.error || 'Refill dispatch failed.');
+        return;
+      }
+      setRefillDispatchReport(
+        dryRun
+          ? `Dry run: ${data.dueCount ?? 0} due out of ${data.totalActive ?? 0} active opt-in reminders.`
+          : `Processed ${data.dueCount ?? 0} due: ${data.dispatchedCount ?? 0} dispatched/logged, ${data.failedCount ?? 0} failed.`
+      );
+      await loadRefillReminders();
+    } catch (err) {
+      setRefillDispatchReport(err instanceof Error ? err.message : 'Dispatch error.');
+    } finally {
+      setRefillDispatchBusy(false);
+    }
+  };
+
+  const handleExportOrdersCsv = () => {
+    const csv = buildOrdersCsv(filteredOrders);
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `deshi-gee-orders-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const handleSaveBatch = async (e: FormEvent) => {
@@ -593,6 +742,15 @@ export function AdminDashboardView({
               <option value="delivered">Delivered</option>
               <option value="cancelled">Cancelled</option>
             </select>
+            <button
+              type="button"
+              onClick={handleExportOrdersCsv}
+              disabled={filteredOrders.length === 0}
+              className="inline-flex min-h-[42px] shrink-0 items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FFFDF9] px-4 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-50"
+            >
+              <Download className="h-3.5 w-3.5 text-[#8A5A17]" />
+              <span>Export CSV ({filteredOrders.length})</span>
+            </button>
           </div>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
@@ -760,6 +918,91 @@ export function AdminDashboardView({
                       <option value="failed">Failed</option>
                     </select>
                   </div>
+
+                  {/* Courier Consignment & Tracking Assignment */}
+                  <form
+                    onSubmit={handleSaveCourier}
+                    className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] p-3 text-xs space-y-2.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-1.5 font-semibold text-[#1E1710]">
+                        <Truck className="h-3.5 w-3.5 text-[#8A5A17]" />
+                        <span>Courier &amp; Consignment</span>
+                      </span>
+                      {selectedOrder.courierTrackingUrl &&
+                        /^https:\/\/[^\s]+$/i.test(selectedOrder.courierTrackingUrl) && (
+                          <a
+                            href={selectedOrder.courierTrackingUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[11px] font-medium text-[#8A5A17] hover:underline"
+                          >
+                            <span>Open Link</span>
+                            <ExternalLink className="h-2.5 w-2.5" />
+                          </a>
+                        )}
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <div>
+                        <label className="block text-[10px] text-[#635647]">Partner</label>
+                        <select
+                          value={courierPartnerDraft}
+                          onChange={(e) => setCourierPartnerDraft(e.target.value as CourierPartner)}
+                          className="mt-0.5 w-full rounded border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-2.5 py-1.5 text-base sm:text-xs"
+                        >
+                          <option value="steadfast">Steadfast</option>
+                          <option value="pathao">Pathao</option>
+                          <option value="redx">RedX</option>
+                          <option value="manual">Manual / Local Rider</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-[#635647]">Consignment ID</label>
+                        <input
+                          type="text"
+                          value={consignmentIdDraft}
+                          onChange={(e) => setConsignmentIdDraft(e.target.value)}
+                          placeholder="SF-994210"
+                          className="mt-0.5 w-full rounded border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-2.5 py-1.5 font-mono text-base sm:text-xs"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-[#635647]">
+                        Tracking URL (https:// optional — auto-built if blank)
+                      </label>
+                      <input
+                        type="url"
+                        value={courierUrlDraft}
+                        onChange={(e) => setCourierUrlDraft(e.target.value)}
+                        placeholder="https://steadfast.com.bd/t/..."
+                        className="mt-0.5 w-full rounded border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-2.5 py-1.5 font-mono text-base sm:text-xs"
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 text-[11px] text-[#635647]">
+                      <input
+                        type="checkbox"
+                        checked={courierMarkShipped}
+                        onChange={(e) => setCourierMarkShipped(e.target.checked)}
+                      />
+                      <span>Mark order status as Shipped on save</span>
+                    </label>
+                    {courierFeedback && (
+                      <p className="text-[11px] font-medium text-[#8A5A17]">{courierFeedback}</p>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={courierSaving}
+                      className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-[#1E1710] px-3 py-1.5 text-[11px] font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50"
+                    >
+                      {courierSaving ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Truck className="h-3 w-3" />
+                      )}
+                      <span>Save Courier Dispatch</span>
+                    </button>
+                  </form>
 
                   {/* Risk Signals & Manual Review Queue Controls */}
                   <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] p-3 text-xs space-y-2">
@@ -1510,21 +1753,101 @@ export function AdminDashboardView({
             )}
           </div>
 
-          <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6 lg:col-span-4">
-            <h2 className="font-display text-lg font-semibold">
-              Newsletter Subscribers ({subscribers.length})
-            </h2>
-            <ul className="mt-4 divide-y divide-[rgba(30,23,16,0.08)] text-xs">
-              {subscribers.map((s) => (
-                <li key={s.id} className="flex justify-between py-2.5">
-                  <span>{s.email}</span>
-                  <span className="uppercase text-[#635647]">{s.lang}</span>
-                </li>
-              ))}
-              {subscribers.length === 0 && (
-                <li className="py-4 text-[#635647]">No subscribers yet.</li>
+          <div className="space-y-6 lg:col-span-4">
+            <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="flex items-center gap-2 font-display text-lg font-semibold">
+                  <BellRing className="h-4 w-4 text-[#B47B2B]" />
+                  <span>Refill Reminders ({refillReminders.length})</span>
+                </h2>
+                <span className="font-mono text-xs tabular-nums text-[#8A5A17]">
+                  {refillDueCount} due
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-[#635647]">
+                Opt-in customer refill schedules. Dispatch triggers configured WhatsApp/Email
+                webhooks and advances the next due date.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={refillDispatchBusy}
+                  onClick={() => handleDispatchRefillQueue(true)}
+                  className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-3 py-1.5 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-50"
+                >
+                  <span>Preview Due</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={refillDispatchBusy || refillDueCount === 0}
+                  onClick={() => handleDispatchRefillQueue(false)}
+                  className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-3 py-1.5 text-xs font-medium text-[#FFFDF9] hover:bg-[#96621B] disabled:opacity-50"
+                >
+                  {refillDispatchBusy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Send className="h-3.5 w-3.5" />
+                  )}
+                  <span>Dispatch Due ({refillDueCount})</span>
+                </button>
+              </div>
+              {refillDispatchReport && (
+                <p className="mt-2.5 text-xs font-medium text-[#8A5A17]">
+                  {refillDispatchReport}
+                </p>
               )}
-            </ul>
+              <ul className="mt-4 max-h-64 divide-y divide-[rgba(30,23,16,0.08)] overflow-y-auto text-xs">
+                {refillReminders.map((r) => {
+                  const isDue =
+                    r.status === 'active' &&
+                    Number.isFinite(Date.parse(r.nextReminderAtIso)) &&
+                    Date.parse(r.nextReminderAtIso) <= Date.now();
+                  return (
+                    <li key={r.id} className="py-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono font-semibold text-[#1E1710]">
+                          {r.orderNumber} · {r.weight || '500g'}
+                        </span>
+                        <span
+                          className={`font-mono text-[10.5px] uppercase ${
+                            isDue ? 'font-semibold text-amber-800' : 'text-[#635647]'
+                          }`}
+                        >
+                          {isDue ? 'due now' : r.status}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 font-mono text-[11px] tabular-nums text-[#635647]">
+                        Every {r.intervalDays}d · Next{' '}
+                        {new Date(r.nextReminderAtIso).toLocaleDateString()} · Sent{' '}
+                        {r.reminderCount || 0}×
+                      </p>
+                    </li>
+                  );
+                })}
+                {refillReminders.length === 0 && (
+                  <li className="py-4 text-[#635647]">
+                    No opt-in refill reminders scheduled yet.
+                  </li>
+                )}
+              </ul>
+            </div>
+
+            <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6">
+              <h2 className="font-display text-lg font-semibold">
+                Newsletter Subscribers ({subscribers.length})
+              </h2>
+              <ul className="mt-4 divide-y divide-[rgba(30,23,16,0.08)] text-xs">
+                {subscribers.map((s) => (
+                  <li key={s.id} className="flex justify-between py-2.5">
+                    <span>{s.email}</span>
+                    <span className="uppercase text-[#635647]">{s.lang}</span>
+                  </li>
+                ))}
+                {subscribers.length === 0 && (
+                  <li className="py-4 text-[#635647]">No subscribers yet.</li>
+                )}
+              </ul>
+            </div>
           </div>
         </div>
       )}

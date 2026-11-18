@@ -3,22 +3,34 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  BarChart3,
   Bot,
   Check,
+  Clock,
   Download,
+  Eye,
   FileText,
+  Globe,
+  Headset,
   History,
   Loader2,
+  Megaphone,
   MessageSquare,
+  Paperclip,
+  Pause,
+  Play,
   Plus,
   RefreshCw,
   Send,
   ShieldAlert,
   Sparkles,
+  Tag,
   ThumbsDown,
   ThumbsUp,
   Trash2,
   Upload,
+  UserCheck,
+  Wand2,
 } from 'lucide-react';
 import { auth, type StoreSettingsDoc } from '../lib/firebase';
 import {
@@ -37,11 +49,17 @@ import {
   type ChatbotVersionRecord,
   type ClaimAuditEntry,
   type KnowledgeSourceRef,
+  type MarketingConsentDoc,
   type OrderSummaryCard,
+  type Phase5AttributionAnalytics,
   type ProductCardItem,
   type RuntimeHealthReport,
+  type SupportEvidenceDoc,
+  type SupportPriority,
+  type SupportTicketStatus,
   type TrackingCardData,
 } from '../lib/chatbot/types';
+import { generateAgentAssistSuggestion } from '../lib/chatbot/channelEngine';
 import { detectStoreFactConflicts } from '../lib/chatbot/storeFacts';
 import { CURATED_PRODUCT_KNOWLEDGE_PACK } from '../lib/chatbot/hybridRag';
 import { ALLOWED_ADMIN_GEMINI_MODELS } from '../lib/chatbot/schema';
@@ -62,8 +80,11 @@ import {
   saveAdminChatbotFaq,
   saveAdminChatbotKbDoc,
   saveDraftChatbotConfig,
-  updateSupportRequestStatus,
 } from '../lib/firebaseChatbot';
+import {
+  buildSupportTicketsCsv,
+  computeSupportSlaAnalytics,
+} from '../lib/chatbot/supportEngine';
 import { formatBdt } from '../data/deshiGeeData';
 import { ChatMessageBubble } from './chatbot/ChatMessageBubble';
 
@@ -131,6 +152,24 @@ export function AdminChatbotPanel({
   const [feedbackList, setFeedbackList] = useState<ChatbotFeedbackDoc[]>([]);
   const [showPromptPreview, setShowPromptPreview] = useState(false);
 
+  const slaAnalytics = useMemo(
+    () => computeSupportSlaAnalytics(supportRequests),
+    [supportRequests]
+  );
+
+  const handleExportSupportCsv = () => {
+    const csv = buildSupportTicketsCsv(supportRequests);
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `deshi-gee-support-tickets-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   // Synonym dictionary editor
   const [newSynKey, setNewSynKey] = useState('');
   const [newSynTerms, setNewSynTerms] = useState('');
@@ -173,6 +212,69 @@ export function AdminChatbotPanel({
 
   // Logs filter
   const [logFilter, setLogFilter] = useState('');
+
+  // Human Support Inbox state (Phase 3)
+  type TicketInboxFilter =
+    | 'all'
+    | 'open'
+    | 'pending'
+    | 'contacted'
+    | 'waiting_for_customer'
+    | 'escalated'
+    | 'sla_breached'
+    | 'resolved';
+  const [ticketFilter, setTicketFilter] = useState<TicketInboxFilter>('all');
+  const [ticketChannelFilter, setTicketChannelFilter] = useState<
+    'all' | 'web' | 'messenger' | 'instagram' | 'whatsapp'
+  >('all');
+  const [selectedTicketId, setSelectedTicketId] = useState<string>('');
+  const [ticketReplyDraft, setTicketReplyDraft] = useState<string>('');
+  const [ticketAssigneeDraft, setTicketAssigneeDraft] = useState<string>('');
+  const [ticketNoteDraft, setTicketNoteDraft] = useState<string>('');
+  const [ticketTagsDraft, setTicketTagsDraft] = useState<string>('');
+  const [ticketResReasonDraft, setTicketResReasonDraft] = useState<string>('');
+  const [ticketBusyId, setTicketBusyId] = useState<string>('');
+  const [pausedSessionIds, setPausedSessionIds] = useState<Record<string, boolean>>({});
+  const [evidencePreviewMap, setEvidencePreviewMap] = useState<
+    Record<string, SupportEvidenceDoc | 'loading' | 'error'>
+  >({});
+
+  // Phase 5 Attribution & Consent Retention state
+  const [attributionData, setAttributionData] = useState<{
+    analytics: Phase5AttributionAnalytics;
+    channelIntegration: Record<string, boolean>;
+  } | null>(null);
+  const [retentionStatus, setRetentionStatus] = useState<{
+    withinDhakaQuietHours: boolean;
+    optedInCount: number;
+    suppressedCount: number;
+    consents: MarketingConsentDoc[];
+    abandonedCandidates: Array<{
+      draftId: string;
+      phone: string;
+      customerName: string;
+      weightLabel: string;
+      idleMinutes: number;
+    }>;
+  } | null>(null);
+  const [retentionSegment, setRetentionSegment] = useState<
+    'abandoned_drafts' | 'subscribed_customers'
+  >('abandoned_drafts');
+  const [retentionChannel, setRetentionChannel] = useState<
+    'whatsapp' | 'email' | 'sms' | 'messenger' | 'instagram'
+  >('whatsapp');
+  const [retentionBusy, setRetentionBusy] = useState(false);
+  const [campaignPreview, setCampaignPreview] = useState<{
+    dryRun: boolean;
+    withinDhakaQuietHours: boolean;
+    totalCandidates: number;
+    eligibleCount: number;
+    sentCount: number;
+    skippedQuietHours: number;
+    skippedSuppressed: number;
+    skippedFrequencyCap: number;
+    items: Array<{ phone: string; customerName: string; status: string; detail: string }>;
+  } | null>(null);
 
   // Playground & benchmark state
   const [playMode, setPlayMode] = useState<'draft' | 'published'>('draft');
@@ -222,10 +324,30 @@ export function AdminChatbotPanel({
       const adminHealthUrl = forceHealthRefresh
         ? '/api/chatbot/admin?refresh=1'
         : '/api/chatbot/admin';
-      const [notifRes, adminRes] = await Promise.all([
+      const [notifRes, adminRes, ticketRes, attrRes, retRes] = await Promise.all([
         fetch('/api/notifications/status').catch(() => null),
         token
           ? fetch(adminHealthUrl, {
+              headers: { Authorization: `Bearer ${token}` },
+            }).catch(() => null)
+          : Promise.resolve(null),
+        token
+          ? fetch('/api/chatbot/admin', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ action: 'list_tickets' }),
+            }).catch(() => null)
+          : Promise.resolve(null),
+        token
+          ? fetch('/api/analytics/attribution', {
+              headers: { Authorization: `Bearer ${token}` },
+            }).catch(() => null)
+          : Promise.resolve(null),
+        token
+          ? fetch('/api/retention/campaigns', {
               headers: { Authorization: `Bearer ${token}` },
             }).catch(() => null)
           : Promise.resolve(null),
@@ -235,6 +357,35 @@ export function AdminChatbotPanel({
       }
       if (adminRes?.ok) {
         setServerStatus(await adminRes.json());
+      }
+      if (ticketRes?.ok) {
+        const ticketData = await ticketRes.json().catch(() => null);
+        if (ticketData?.ok && Array.isArray(ticketData.tickets)) {
+          setSupportRequests(ticketData.tickets);
+        }
+      }
+      if (attrRes?.ok) {
+        const attrData = await attrRes.json().catch(() => null);
+        if (attrData?.ok && attrData.analytics) {
+          setAttributionData({
+            analytics: attrData.analytics,
+            channelIntegration: attrData.channelIntegration || {},
+          });
+        }
+      }
+      if (retRes?.ok) {
+        const retData = await retRes.json().catch(() => null);
+        if (retData?.ok) {
+          setRetentionStatus({
+            withinDhakaQuietHours: Boolean(retData.withinDhakaQuietHours),
+            optedInCount: Number(retData.optedInCount || 0),
+            suppressedCount: Number(retData.suppressedCount || 0),
+            consents: Array.isArray(retData.consents) ? retData.consents : [],
+            abandonedCandidates: Array.isArray(retData.abandonedCandidates)
+              ? retData.abandonedCandidates
+              : [],
+          });
+        }
       }
     } catch (err) {
       setStatusMsg(
@@ -248,6 +399,265 @@ export function AdminChatbotPanel({
   useEffect(() => {
     loadChatbotAdminData();
   }, [loadChatbotAdminData]);
+
+  const handleRunRetentionCampaign = async (dryRun: boolean) => {
+    setRetentionBusy(true);
+    try {
+      const token = await auth.currentUser?.getIdToken().catch(() => '');
+      if (!token) throw new Error('Admin session token missing.');
+      const res = await fetch('/api/retention/campaigns', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: 'dispatch',
+          segment: retentionSegment,
+          channel: retentionChannel,
+          dryRun,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) {
+        throw new Error(data?.error || `Retention request failed (${res.status})`);
+      }
+      setCampaignPreview(data);
+      setStatusMsg(
+        dryRun
+          ? `Dry-run preview ready: ${data.eligibleCount} eligible out of ${data.totalCandidates} candidates.`
+          : `Retention dispatch completed: ${data.sentCount} processed (${data.skippedQuietHours} quiet hours, ${data.skippedSuppressed} suppressed, ${data.skippedFrequencyCap} cap).`
+      );
+      if (!dryRun) {
+        const retRes = await fetch('/api/retention/campaigns', {
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => null);
+        if (retRes?.ok) {
+          const retData = await retRes.json().catch(() => null);
+          if (retData?.ok) {
+            setRetentionStatus({
+              withinDhakaQuietHours: Boolean(retData.withinDhakaQuietHours),
+              optedInCount: Number(retData.optedInCount || 0),
+              suppressedCount: Number(retData.suppressedCount || 0),
+              consents: Array.isArray(retData.consents) ? retData.consents : [],
+              abandonedCandidates: Array.isArray(retData.abandonedCandidates)
+                ? retData.abandonedCandidates
+                : [],
+            });
+          }
+        }
+      }
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Failed to run retention campaign.');
+    } finally {
+      setRetentionBusy(false);
+    }
+  };
+
+  const isTicketSlaBreached = (req: ChatbotSupportRequestRecord): boolean => {
+    if (req.status === 'resolved' || !req.slaDueAtIso) return false;
+    const dueMs = Date.parse(req.slaDueAtIso);
+    return Number.isFinite(dueMs) && dueMs < Date.now();
+  };
+
+  const callAdminInboxAction = async (payload: Record<string, unknown>) => {
+    const token = await auth.currentUser?.getIdToken().catch(() => '');
+    if (!token) {
+      throw new Error('Admin session token missing. Please re-sign in.');
+    }
+    const res = await fetch('/api/chatbot/admin', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({ ok: false, error: 'Invalid response' }));
+    if (!res.ok || !data?.ok) {
+      throw new Error(data?.error || `Inbox action failed (${res.status})`);
+    }
+    return data;
+  };
+
+  const openTicketDrawer = (req: ChatbotSupportRequestRecord) => {
+    if (selectedTicketId === req.id) {
+      setSelectedTicketId('');
+      return;
+    }
+    setSelectedTicketId(req.id);
+    setTicketReplyDraft('');
+    setTicketAssigneeDraft(req.assignedTo || auth.currentUser?.email || 'Deshi Gee Support');
+    setTicketNoteDraft(req.internalNotes || '');
+    setTicketTagsDraft(Array.isArray(req.tags) ? req.tags.join(', ') : '');
+    setTicketResReasonDraft(req.resolutionReason || '');
+  };
+
+  const handleClaimTicket = async (req: ChatbotSupportRequestRecord) => {
+    setTicketBusyId(req.id);
+    try {
+      const assignedTo = auth.currentUser?.email || 'Admin';
+      const data = await callAdminInboxAction({
+        action: 'claim_ticket',
+        ticketId: req.id,
+        sessionId: req.sessionId,
+        assignedTo,
+        agentName: 'Deshi Gee Support',
+        status: req.status === 'open' || req.status === 'pending' ? 'contacted' : req.status,
+      });
+      if (data.ticket) {
+        setSupportRequests((prev) =>
+          prev.map((item) => (item.id === req.id ? { ...item, ...data.ticket } : item))
+        );
+      }
+      if (req.sessionId) {
+        setPausedSessionIds((prev) => ({ ...prev, [req.sessionId]: true }));
+      }
+      setSelectedTicketId(req.id);
+      setTicketAssigneeDraft(assignedTo);
+      setStatusMsg(
+        `Claimed ${req.ticketNumber || req.id.slice(-6)} and paused AI for live agent handover.`
+      );
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Failed to claim ticket.');
+    } finally {
+      setTicketBusyId('');
+    }
+  };
+
+  const handleToggleSessionAiPause = async (req: ChatbotSupportRequestRecord, nextPaused: boolean) => {
+    if (!req.sessionId) return;
+    setTicketBusyId(req.id);
+    try {
+      await callAdminInboxAction({
+        action: 'toggle_ai_pause',
+        sessionId: req.sessionId,
+        aiPaused: nextPaused,
+        ticketId: req.id,
+        agentName: 'Deshi Gee Support',
+      });
+      setPausedSessionIds((prev) => ({ ...prev, [req.sessionId]: nextPaused }));
+      setStatusMsg(
+        nextPaused
+          ? `AI assistant paused for session ${req.sessionId}.`
+          : `AI assistant resumed for session ${req.sessionId}.`
+      );
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Failed to toggle AI pause.');
+    } finally {
+      setTicketBusyId('');
+    }
+  };
+
+  const handleUpdateTicket = async (
+    req: ChatbotSupportRequestRecord,
+    overrides?: {
+      status?: SupportTicketStatus;
+      priority?: SupportPriority;
+      saveTriageFields?: boolean;
+    }
+  ) => {
+    setTicketBusyId(req.id);
+    try {
+      const nextStatus = overrides?.status || req.status;
+      const tags = overrides?.saveTriageFields
+        ? ticketTagsDraft
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean)
+            .slice(0, 10)
+        : undefined;
+      const data = await callAdminInboxAction({
+        action: 'update_ticket',
+        ticketId: req.id,
+        status: nextStatus,
+        priority: overrides?.priority || req.priority,
+        ...(overrides?.saveTriageFields
+          ? {
+              assignedTo: ticketAssigneeDraft.trim(),
+              internalNotes: ticketNoteDraft.trim(),
+              resolutionReason: ticketResReasonDraft.trim(),
+              tags,
+            }
+          : {}),
+        resumeAiOnResolve: true,
+      });
+      if (data.ticket) {
+        setSupportRequests((prev) =>
+          prev.map((item) => (item.id === req.id ? { ...item, ...data.ticket } : item))
+        );
+      }
+      if (nextStatus === 'resolved' && req.sessionId) {
+        setPausedSessionIds((prev) => ({ ...prev, [req.sessionId]: false }));
+      }
+      setStatusMsg(
+        nextStatus === 'resolved'
+          ? `Ticket ${req.ticketNumber || req.id.slice(-6)} resolved and AI auto-resumed.`
+          : `Updated ticket ${req.ticketNumber || req.id.slice(-6)}.`
+      );
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Failed to update ticket.');
+    } finally {
+      setTicketBusyId('');
+    }
+  };
+
+  const handleSendAgentReply = async (req: ChatbotSupportRequestRecord) => {
+    const cleanText = ticketReplyDraft.trim();
+    if (!cleanText || !req.sessionId) return;
+    setTicketBusyId(req.id);
+    try {
+      await callAdminInboxAction({
+        action: 'reply_chat',
+        ticketId: req.id,
+        sessionId: req.sessionId,
+        agentName: 'Deshi Gee Support',
+        text: cleanText,
+      });
+      setTicketReplyDraft('');
+      setPausedSessionIds((prev) => ({ ...prev, [req.sessionId]: true }));
+      setSupportRequests((prev) =>
+        prev.map((item) =>
+          item.id === req.id
+            ? {
+                ...item,
+                status:
+                  item.status === 'open' || item.status === 'pending' ? 'contacted' : item.status,
+                assignedTo: item.assignedTo || auth.currentUser?.email || 'Deshi Gee Support',
+              }
+            : item
+        )
+      );
+      setStatusMsg(`Live agent reply sent to customer chat for ${req.ticketNumber || req.id.slice(-6)}.`);
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : 'Failed to send agent reply.');
+    } finally {
+      setTicketBusyId('');
+    }
+  };
+
+  const handleLoadEvidence = async (evidenceId: string) => {
+    if (!evidenceId || evidencePreviewMap[evidenceId] === 'loading') return;
+    setEvidencePreviewMap((prev) => ({ ...prev, [evidenceId]: 'loading' }));
+    try {
+      const token = await auth.currentUser?.getIdToken().catch(() => '');
+      if (!token) throw new Error('Missing token');
+      const res = await fetch(
+        `/api/support/evidence?evidenceId=${encodeURIComponent(evidenceId)}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok || !data.evidence) {
+        setEvidencePreviewMap((prev) => ({ ...prev, [evidenceId]: 'error' }));
+        return;
+      }
+      setEvidencePreviewMap((prev) => ({ ...prev, [evidenceId]: data.evidence }));
+    } catch {
+      setEvidencePreviewMap((prev) => ({ ...prev, [evidenceId]: 'error' }));
+    }
+  };
 
   const withClaimAuditIfChanged = (
     cfg: ChatbotConfigDoc,
@@ -1095,6 +1505,245 @@ export function AdminChatbotPanel({
             </div>
           </div>
 
+          {/* Phase 5: 6-Stage Chat-to-Order Funnel & Multi-Channel Attribution */}
+          {attributionData && (
+            <div className="space-y-4 rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="flex items-center gap-2 font-display text-base font-semibold text-[#1E1710]">
+                  <BarChart3 className="h-4 w-4 text-[#B47B2B]" />
+                  <span>Chat-to-Order Funnel &amp; Revenue Attribution</span>
+                </h3>
+                <span className="font-mono text-xs font-semibold text-[#8A5A17]">
+                  Conversion: {attributionData.analytics.funnel.chatToOrderPct}% · AOV:{' '}
+                  {formatBdt(attributionData.analytics.funnel.attributedAovBdt)}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
+                <div className="rounded-xl border border-[rgba(30,23,16,0.1)] bg-[#FAF7F2] p-3">
+                  <p className="text-[10px] text-[#635647]">1. Chat Started</p>
+                  <p className="font-mono mt-1 text-base font-semibold tabular-nums">
+                    {attributionData.analytics.funnel.chatStartedSessions}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[rgba(30,23,16,0.1)] bg-[#FAF7F2] p-3">
+                  <p className="text-[10px] text-[#635647]">2. Product Info</p>
+                  <p className="font-mono mt-1 text-base font-semibold tabular-nums">
+                    {attributionData.analytics.funnel.productInfoSessions}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[rgba(30,23,16,0.1)] bg-[#FAF7F2] p-3">
+                  <p className="text-[10px] text-[#635647]">3. Order Intent</p>
+                  <p className="font-mono mt-1 text-base font-semibold tabular-nums">
+                    {attributionData.analytics.funnel.orderIntentSessions}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[rgba(30,23,16,0.1)] bg-[#FAF7F2] p-3">
+                  <p className="text-[10px] text-[#635647]">4. Summary Shown</p>
+                  <p className="font-mono mt-1 text-base font-semibold tabular-nums">
+                    {attributionData.analytics.funnel.summaryShownSessions}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[rgba(30,23,16,0.1)] bg-[#FAF7F2] p-3">
+                  <p className="text-[10px] text-[#635647]">5. Confirmed Orders</p>
+                  <p className="font-mono mt-1 text-base font-semibold tabular-nums text-[#8A5A17]">
+                    {attributionData.analytics.funnel.confirmedOrdersCount}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[rgba(30,23,16,0.1)] bg-[#FAF7F2] p-3">
+                  <p className="text-[10px] text-[#635647]">6. Delivered</p>
+                  <p className="font-mono mt-1 text-base font-semibold tabular-nums text-emerald-800">
+                    {attributionData.analytics.funnel.deliveredOrdersCount}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[rgba(180,123,43,0.3)] bg-[#F2ECE1] p-3">
+                  <p className="text-[10px] text-[#635647]">Attributed Revenue</p>
+                  <p className="font-mono mt-1 text-base font-semibold tabular-nums text-[#8A5A17]">
+                    {formatBdt(attributionData.analytics.funnel.attributedRevenueBdt)}
+                  </p>
+                </div>
+              </div>
+
+              {attributionData.analytics.channels.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-[rgba(30,23,16,0.1)] text-[10.5px] uppercase text-[#635647]">
+                        <th className="py-2 pr-3">Channel</th>
+                        <th className="py-2 pr-3">Sessions</th>
+                        <th className="py-2 pr-3">Orders</th>
+                        <th className="py-2 pr-3">Revenue</th>
+                        <th className="py-2 pr-3">Conv %</th>
+                        <th className="py-2">Support Tickets</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[rgba(30,23,16,0.08)] font-mono">
+                      {attributionData.analytics.channels.map((ch) => (
+                        <tr key={ch.channel}>
+                          <td className="py-2 pr-3 font-semibold uppercase text-[#1E1710]">
+                            {ch.channel}
+                          </td>
+                          <td className="py-2 pr-3">{ch.sessions}</td>
+                          <td className="py-2 pr-3">{ch.orders}</td>
+                          <td className="py-2 pr-3 text-[#8A5A17]">
+                            {formatBdt(ch.revenueBdt)}
+                          </td>
+                          <td className="py-2 pr-3">{ch.conversionPct}%</td>
+                          <td className="py-2">{ch.handoverTickets}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Phase 5: Omnichannel Webhook Configuration & Consent Retention Campaigns */}
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            <div className="space-y-3 rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-5 text-xs">
+              <h3 className="flex items-center gap-2 font-display text-base font-semibold text-[#1E1710]">
+                <Globe className="h-4 w-4 text-[#B47B2B]" />
+                <span>Omnichannel Webhook Status</span>
+              </h3>
+              <p className="text-[#635647]">
+                Read-only server environment status for Meta Messenger, Instagram DM, and WhatsApp Cloud webhooks (<code>/api/channels/webhook</code>).
+              </p>
+              <div className="grid grid-cols-2 gap-2.5 pt-1">
+                {(
+                  [
+                    ['Meta Verify Token', attributionData?.channelIntegration?.metaVerifyConfigured],
+                    ['Meta App Secret', attributionData?.channelIntegration?.metaWebhookSecretConfigured],
+                    ['Messenger / IG Token', attributionData?.channelIntegration?.metaPageTokenConfigured],
+                    ['WhatsApp Secret', attributionData?.channelIntegration?.whatsappSecretConfigured],
+                    ['WhatsApp Cloud Token', attributionData?.channelIntegration?.whatsappTokenConfigured],
+                  ] as const
+                ).map(([label, ok]) => (
+                  <div
+                    key={label}
+                    className="flex items-center justify-between rounded-xl border border-[rgba(30,23,16,0.1)] bg-[#FAF7F2] px-3 py-2"
+                  >
+                    <span className="font-medium text-[#1E1710]">{label}</span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${
+                        ok ? 'bg-emerald-100 text-emerald-900' : 'bg-[#F2ECE1] text-[#635647]'
+                      }`}
+                    >
+                      {ok ? 'Configured' : 'Not configured'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-[#635647]">
+                Configure Meta &amp; WhatsApp tokens in server environment variables to activate automated outbound replies.
+              </p>
+            </div>
+
+            <div className="space-y-3 rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-5 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="flex items-center gap-2 font-display text-base font-semibold text-[#1E1710]">
+                  <Megaphone className="h-4 w-4 text-[#B47B2B]" />
+                  <span>Consent Retention &amp; Draft Recovery</span>
+                </h3>
+                {retentionStatus && (
+                  <span
+                    className={`rounded px-2 py-0.5 font-mono text-[10px] font-semibold ${
+                      retentionStatus.withinDhakaQuietHours
+                        ? 'bg-amber-100 text-amber-900'
+                        : 'bg-emerald-100 text-emerald-900'
+                    }`}
+                  >
+                    {retentionStatus.withinDhakaQuietHours
+                      ? 'Dhaka Quiet Hours (22:00–08:00)'
+                      : 'Dhaka Daytime Window'}
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 font-mono">
+                <div className="rounded-xl bg-[#FAF7F2] p-2.5">
+                  <span className="block text-[10px] text-[#635647]">Opted-in</span>
+                  <strong>{retentionStatus?.optedInCount ?? 0}</strong>
+                </div>
+                <div className="rounded-xl bg-[#FAF7F2] p-2.5">
+                  <span className="block text-[10px] text-[#635647]">Unsubscribed</span>
+                  <strong>{retentionStatus?.suppressedCount ?? 0}</strong>
+                </div>
+                <div className="rounded-xl bg-[#FAF7F2] p-2.5">
+                  <span className="block text-[10px] text-[#635647]">Draft Candidates</span>
+                  <strong>{retentionStatus?.abandonedCandidates.length ?? 0}</strong>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10.5px] text-[#635647]">Target Segment</label>
+                  <select
+                    value={retentionSegment}
+                    onChange={(e) =>
+                      setRetentionSegment(
+                        e.target.value as 'abandoned_drafts' | 'subscribed_customers'
+                      )
+                    }
+                    className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-2.5 py-1.5 text-xs"
+                  >
+                    <option value="abandoned_drafts">Abandoned Order Drafts</option>
+                    <option value="subscribed_customers">Opted-In Subscribers</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10.5px] text-[#635647]">Channel</label>
+                  <select
+                    value={retentionChannel}
+                    onChange={(e) =>
+                      setRetentionChannel(
+                        e.target.value as 'whatsapp' | 'email' | 'sms' | 'messenger' | 'instagram'
+                      )
+                    }
+                    className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-2.5 py-1.5 text-xs"
+                  >
+                    <option value="whatsapp">WhatsApp</option>
+                    <option value="messenger">Messenger</option>
+                    <option value="instagram">Instagram</option>
+                    <option value="email">Email</option>
+                    <option value="sms">SMS</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={retentionBusy}
+                  onClick={() => handleRunRetentionCampaign(true)}
+                  className="rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-3 py-1.5 text-[11px] font-medium text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-50"
+                >
+                  Dry-Run Preview
+                </button>
+                <button
+                  type="button"
+                  disabled={retentionBusy}
+                  onClick={() => handleRunRetentionCampaign(false)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#1E1710] px-3 py-1.5 text-[11px] font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50"
+                >
+                  <Send className="h-3 w-3 text-[#D89B2B]" />
+                  <span>{retentionBusy ? 'Running...' : 'Dispatch Eligible Now'}</span>
+                </button>
+              </div>
+
+              {campaignPreview && (
+                <div className="rounded-xl border border-[rgba(180,123,43,0.3)] bg-[#FAF7F2] p-2.5 font-mono text-[10.5px] text-[#1E1710]">
+                  <p className="font-semibold">
+                    {campaignPreview.dryRun ? 'Dry-Run Summary' : 'Dispatch Summary'}:{' '}
+                    {campaignPreview.eligibleCount}/{campaignPreview.totalCandidates} eligible · Sent{' '}
+                    {campaignPreview.sentCount} · Quiet {campaignPreview.skippedQuietHours} · Unsub{' '}
+                    {campaignPreview.skippedSuppressed} · Cap {campaignPreview.skippedFrequencyCap}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
           {storeFactConflicts.length > 0 && (
             <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-950">
               <p className="font-semibold">Store Facts Consistency Check (Auto-Resolved to Store Settings):</p>
@@ -1154,6 +1803,66 @@ export function AdminChatbotPanel({
                   }
                   className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-3 py-2 text-base sm:text-xs"
                 />
+              </div>
+              <div className="border-t border-[rgba(30,23,16,0.1)] pt-3 space-y-2.5">
+                <label className="flex items-center justify-between rounded-xl bg-[#FAF7F2] p-3 text-xs">
+                  <span className="font-medium">Enable Human Support Handover &amp; Ticket SLA</span>
+                  <input
+                    type="checkbox"
+                    checked={draftConfig.humanSupportEnabled ?? true}
+                    onChange={(e) =>
+                      setDraftConfig({ ...draftConfig, humanSupportEnabled: e.target.checked })
+                    }
+                    className="h-4 w-4 accent-[#B47B2B]"
+                  />
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] text-[#635647]">
+                      Standard SLA (minutes)
+                    </label>
+                    <input
+                      type="number"
+                      min={15}
+                      max={1440}
+                      value={draftConfig.slaStandardMinutes ?? 120}
+                      onChange={(e) =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          slaStandardMinutes: Math.max(
+                            15,
+                            Math.min(1440, Number(e.target.value) || 120)
+                          ),
+                        })
+                      }
+                      className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-3 py-1.5 font-mono text-base sm:text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-[#635647]">
+                      Urgent SLA (minutes)
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={720}
+                      value={draftConfig.slaUrgentMinutes ?? 30}
+                      onChange={(e) =>
+                        setDraftConfig({
+                          ...draftConfig,
+                          slaUrgentMinutes: Math.max(
+                            5,
+                            Math.min(720, Number(e.target.value) || 30)
+                          ),
+                        })
+                      }
+                      className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-3 py-1.5 font-mono text-base sm:text-xs"
+                    />
+                  </div>
+                </div>
+                <p className="text-[11px] text-[#635647]">
+                  Default BST targets: Standard 120m (2h) / Urgent 30m during business hours; out-of-hours tickets schedule from next opening.
+                </p>
               </div>
             </div>
 
@@ -2549,41 +3258,537 @@ export function AdminChatbotPanel({
             </div>
 
             <div className="space-y-3 lg:col-span-6">
-              <h3 className="flex items-center gap-2 font-display text-base font-semibold">
-                <MessageSquare className="h-4 w-4 text-[#B47B2B]" />
-                <span>Human Support Requests ({supportRequests.length})</span>
-              </h3>
-              {supportRequests.map((req) => (
-                <div
-                  key={req.id}
-                  className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4 text-xs"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="font-semibold text-[#1E1710]">{req.customerName}</p>
-                      <a href={`tel:${req.phone}`} className="font-mono text-[#8A5A17] hover:underline">
-                        {req.phone}
-                      </a>
-                    </div>
-                    <select
-                      value={req.status}
-                      onChange={async (e) => {
-                        const nextStatus = e.target.value as ChatbotSupportRequestRecord['status'];
-                        await updateSupportRequestStatus(req.id, nextStatus);
-                        setSupportRequests((prev) =>
-                          prev.map((r) => (r.id === req.id ? { ...r, status: nextStatus } : r))
-                        );
-                      }}
-                      className="rounded border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-2.5 py-1 text-base sm:text-xs"
-                    >
-                      <option value="open">Open</option>
-                      <option value="contacted">Contacted</option>
-                      <option value="resolved">Resolved</option>
-                    </select>
-                  </div>
-                  <p className="mt-2 text-[#635647]">{req.issueSummary}</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="flex items-center gap-2 font-display text-base font-semibold">
+                  <Headset className="h-4 w-4 text-[#B47B2B]" />
+                  <span>Human Support Inbox ({supportRequests.length})</span>
+                </h3>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[10.5px] text-[#8A5A17]">
+                    SLA {draftConfig.slaUrgentMinutes ?? 30}m Urgent ·{' '}
+                    {draftConfig.slaStandardMinutes ?? 120}m Std
+                  </span>
+                  <button
+                    type="button"
+                    disabled={supportRequests.length === 0}
+                    onClick={handleExportSupportCsv}
+                    className="inline-flex items-center gap-1 rounded-md border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-2.5 py-1 text-[10.5px] font-medium text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-50"
+                  >
+                    <Download className="h-3 w-3 text-[#8A5A17]" />
+                    <span>Export CSV</span>
+                  </button>
                 </div>
-              ))}
+              </div>
+
+              {/* SLA Analytics KPI Strip */}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="rounded-lg border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] px-3 py-2">
+                  <p className="text-[10px] text-[#635647]">Open / Resolved</p>
+                  <p className="font-mono mt-0.5 text-sm font-semibold tabular-nums text-[#1E1710]">
+                    {slaAnalytics.openCount} / {slaAnalytics.resolvedCount}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] px-3 py-2">
+                  <p className="text-[10px] text-[#635647]">SLA Compliance</p>
+                  <p className="font-mono mt-0.5 text-sm font-semibold tabular-nums text-[#8A5A17]">
+                    {slaAnalytics.slaCompliancePct !== null
+                      ? `${slaAnalytics.slaCompliancePct}%`
+                      : '—'}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] px-3 py-2">
+                  <p className="text-[10px] text-[#635647]">Avg First Reply</p>
+                  <p className="font-mono mt-0.5 text-sm font-semibold tabular-nums text-[#1E1710]">
+                    {slaAnalytics.avgFirstResponseMinutes !== null
+                      ? `${slaAnalytics.avgFirstResponseMinutes}m`
+                      : '—'}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] px-3 py-2">
+                  <p className="text-[10px] text-[#635647]">SLA Breached</p>
+                  <p
+                    className={`font-mono mt-0.5 text-sm font-semibold tabular-nums ${
+                      slaAnalytics.breachedCount > 0 ? 'text-red-700' : 'text-[#1E1710]'
+                    }`}
+                  >
+                    {slaAnalytics.breachedCount}
+                  </p>
+                </div>
+              </div>
+
+              {/* Ticket Filter Bar */}
+              <div className="flex flex-wrap gap-1.5">
+                {(
+                  [
+                    { id: 'all', label: 'All' },
+                    { id: 'open', label: 'Open' },
+                    { id: 'contacted', label: 'Contacted' },
+                    { id: 'waiting_for_customer', label: 'Waiting' },
+                    { id: 'escalated', label: 'Escalated' },
+                    { id: 'sla_breached', label: 'SLA Breached' },
+                    { id: 'resolved', label: 'Resolved' },
+                  ] as const
+                ).map((f) => {
+                  const count =
+                    f.id === 'all'
+                      ? supportRequests.length
+                      : f.id === 'sla_breached'
+                        ? supportRequests.filter(isTicketSlaBreached).length
+                        : supportRequests.filter((r) => r.status === f.id).length;
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setTicketFilter(f.id)}
+                      className={`rounded-md px-2.5 py-1 text-[10.5px] font-medium transition-colors ${
+                        ticketFilter === f.id
+                          ? 'bg-[#1E1710] text-[#FAF7F2]'
+                          : 'border border-[rgba(30,23,16,0.14)] bg-[#FFFDF9] text-[#635647] hover:bg-[#F2ECE1]'
+                      }`}
+                    >
+                      {f.label} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Channel Filter Bar (Phase 5 Omnichannel Inbox) */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[#635647]">
+                  Channel:
+                </span>
+                {(
+                  [
+                    { id: 'all', label: 'All Channels' },
+                    { id: 'web', label: 'Web' },
+                    { id: 'whatsapp', label: 'WhatsApp' },
+                    { id: 'messenger', label: 'Messenger' },
+                    { id: 'instagram', label: 'Instagram' },
+                  ] as const
+                ).map((ch) => {
+                  const count =
+                    ch.id === 'all'
+                      ? supportRequests.length
+                      : supportRequests.filter((r) => (r.channel || 'web') === ch.id).length;
+                  return (
+                    <button
+                      key={ch.id}
+                      type="button"
+                      onClick={() => setTicketChannelFilter(ch.id)}
+                      className={`rounded-md px-2 py-0.5 text-[10.5px] font-medium transition-colors ${
+                        ticketChannelFilter === ch.id
+                          ? 'bg-[#B47B2B] text-[#FFFDF9]'
+                          : 'border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] text-[#635647] hover:bg-[#F2ECE1]'
+                      }`}
+                    >
+                      {ch.label} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+
+              {supportRequests
+                .filter((req) => {
+                  if (ticketChannelFilter !== 'all' && (req.channel || 'web') !== ticketChannelFilter) {
+                    return false;
+                  }
+                  if (ticketFilter === 'all') return true;
+                  if (ticketFilter === 'sla_breached') return isTicketSlaBreached(req);
+                  return req.status === ticketFilter;
+                })
+                .map((req) => {
+                  const breached = isTicketSlaBreached(req);
+                  const isExpanded = selectedTicketId === req.id;
+                  const isBusy = ticketBusyId === req.id;
+                  const sessionAiPaused = pausedSessionIds[req.sessionId];
+                  return (
+                    <div
+                      key={req.id}
+                      className={`rounded-xl border p-4 text-xs transition-colors ${
+                        breached
+                          ? 'border-red-300 bg-[#FFF8F6]'
+                          : req.priority === 'urgent'
+                            ? 'border-amber-300 bg-[#FFFDF9]'
+                            : 'border-[rgba(30,23,16,0.12)] bg-[#FFFDF9]'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="rounded bg-[#1E1710] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#FAF7F2]">
+                              {req.ticketNumber || req.id.slice(-7)}
+                            </span>
+                            <span className="rounded border border-[rgba(180,123,43,0.35)] bg-[#FAF7F2] px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase text-[#8A5A17]">
+                              {req.channel || 'web'}
+                            </span>
+                            {req.priority && (
+                              <span
+                                className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase ${
+                                  req.priority === 'urgent'
+                                    ? 'bg-red-100 text-red-900'
+                                    : 'bg-[#F2ECE1] text-[#635647]'
+                                }`}
+                              >
+                                {req.priority}
+                              </span>
+                            )}
+                            {req.category && (
+                              <span className="rounded bg-[#F2ECE1] px-1.5 py-0.5 font-mono text-[10px] text-[#8A5A17]">
+                                {req.category.replace(/_/g, ' ')}
+                              </span>
+                            )}
+                            {breached && (
+                              <span className="inline-flex items-center gap-1 rounded bg-red-600 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white">
+                                <Clock className="h-2.5 w-2.5" />
+                                SLA BREACHED
+                              </span>
+                            )}
+                            {sessionAiPaused && (
+                              <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-900">
+                                AI PAUSED · AGENT LIVE
+                              </span>
+                            )}
+                          </div>
+                          <p className="font-semibold text-[#1E1710]">
+                            {req.customerName}{' '}
+                            {req.orderNumber && (
+                              <span className="font-mono text-[#8A5A17]">· {req.orderNumber}</span>
+                            )}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#635647]">
+                            <a href={`tel:${req.phone}`} className="font-mono text-[#8A5A17] hover:underline">
+                              {req.phone}
+                            </a>
+                            {req.orderStatusSnapshot && (
+                              <span className="font-mono">order={req.orderStatusSnapshot}</span>
+                            )}
+                            {req.paymentStatusSnapshot && (
+                              <span className="font-mono">pay={req.paymentStatusSnapshot}</span>
+                            )}
+                            {req.assignedTo && (
+                              <span className="inline-flex items-center gap-1 text-[#1E1710]">
+                                <UserCheck className="h-3 w-3 text-[#B47B2B]" />
+                                {req.assignedTo}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <select
+                          value={req.status}
+                          disabled={isBusy}
+                          onChange={(e) =>
+                            handleUpdateTicket(req, {
+                              status: e.target.value as SupportTicketStatus,
+                            })
+                          }
+                          className="rounded border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-2.5 py-1 text-base sm:text-xs"
+                        >
+                          <option value="open">Open</option>
+                          <option value="pending">Pending</option>
+                          <option value="contacted">Contacted</option>
+                          <option value="waiting_for_customer">Waiting for Customer</option>
+                          <option value="escalated">Escalated</option>
+                          <option value="resolved">Resolved (Resumes AI)</option>
+                        </select>
+                      </div>
+
+                      <p className="mt-2 text-[#1E1710]">{req.issueSummary}</p>
+
+                      {req.slaDueAtIso && req.status !== 'resolved' && (
+                        <p className="mt-1 font-mono text-[10px] text-[#635647]">
+                          SLA Due: {new Date(req.slaDueAtIso).toLocaleString()} ({req.slaMinutes || 120}m)
+                        </p>
+                      )}
+
+                      {Array.isArray(req.evidenceIds) && req.evidenceIds.length > 0 && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          {req.evidenceIds.map((evId) => (
+                            <button
+                              key={evId}
+                              type="button"
+                              onClick={() => {
+                                if (!isExpanded) openTicketDrawer(req);
+                                handleLoadEvidence(evId);
+                              }}
+                              className="inline-flex items-center gap-1 rounded border border-[#B47B2B]/40 bg-[#FAF7F2] px-2 py-0.5 font-mono text-[10px] text-[#8A5A17] hover:bg-[#F2ECE1]"
+                            >
+                              <Paperclip className="h-3 w-3" />
+                              <span>Evidence: {evId.slice(-8)}</span>
+                              <Eye className="h-3 w-3" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[rgba(30,23,16,0.08)] pt-2.5">
+                        {!req.assignedTo && req.status !== 'resolved' && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleClaimTicket(req)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-[#1E1710] px-2.5 py-1 text-[11px] font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50"
+                          >
+                            <UserCheck className="h-3 w-3 text-[#D89B2B]" />
+                            <span>Claim &amp; Pause AI</span>
+                          </button>
+                        )}
+                        {req.sessionId && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleToggleSessionAiPause(req, !sessionAiPaused)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-2.5 py-1 text-[11px] font-medium text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-50"
+                          >
+                            {sessionAiPaused ? (
+                              <>
+                                <Play className="h-3 w-3 text-emerald-700" />
+                                <span>Resume AI</span>
+                              </>
+                            ) : (
+                              <>
+                                <Pause className="h-3 w-3 text-[#B47B2B]" />
+                                <span>Pause AI</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => openTicketDrawer(req)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-[rgba(30,23,16,0.2)] px-2.5 py-1 text-[11px] font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+                        >
+                          <MessageSquare className="h-3 w-3 text-[#B47B2B]" />
+                          <span>{isExpanded ? 'Hide Workbench' : 'Reply & Triage'}</span>
+                        </button>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="mt-3 space-y-3 rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] p-3">
+                          {req.contextSummary && (
+                            <div>
+                              <p className="text-[10px] font-semibold uppercase tracking-wider text-[#8A5A17]">
+                                Ticket Context Snapshot
+                              </p>
+                              <p className="mt-1 whitespace-pre-wrap text-[11px] text-[#635647]">
+                                {req.contextSummary}
+                              </p>
+                            </div>
+                          )}
+
+                          {req.transcriptExcerpt && (
+                            <div>
+                              <p className="text-[10px] font-semibold uppercase tracking-wider text-[#8A5A17]">
+                                Consented Chat Transcript Excerpt
+                              </p>
+                              <p className="mt-1 max-h-28 overflow-y-auto whitespace-pre-wrap rounded border border-[rgba(30,23,16,0.1)] bg-[#FFFDF9] p-2 font-mono text-[10.5px] text-[#1E1710]">
+                                {req.transcriptExcerpt}
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Private Evidence Previews */}
+                          {Array.isArray(req.evidenceIds) && req.evidenceIds.length > 0 && (
+                            <div className="space-y-2">
+                              <p className="text-[10px] font-semibold uppercase tracking-wider text-[#8A5A17]">
+                                Uploaded Photo Evidence (Admin Only)
+                              </p>
+                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                {req.evidenceIds.map((evId) => {
+                                  const evState = evidencePreviewMap[evId];
+                                  if (!evState) {
+                                    return (
+                                      <button
+                                        key={evId}
+                                        type="button"
+                                        onClick={() => handleLoadEvidence(evId)}
+                                        className="rounded-lg border border-dashed border-[rgba(30,23,16,0.22)] bg-[#FFFDF9] p-3 text-left text-[11px] text-[#8A5A17] hover:bg-[#F2ECE1]"
+                                      >
+                                        Load private photo ({evId.slice(-8)})
+                                      </button>
+                                    );
+                                  }
+                                  if (evState === 'loading') {
+                                    return (
+                                      <div
+                                        key={evId}
+                                        className="flex items-center gap-2 rounded-lg border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-3 text-[11px] text-[#635647]"
+                                      >
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin text-[#B47B2B]" />
+                                        <span>Decrypting evidence...</span>
+                                      </div>
+                                    );
+                                  }
+                                  if (evState === 'error') {
+                                    return (
+                                      <div
+                                        key={evId}
+                                        className="rounded-lg border border-red-200 bg-red-50 p-3 text-[11px] text-red-800"
+                                      >
+                                        Could not load evidence {evId.slice(-8)}.
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <div
+                                      key={evId}
+                                      className="overflow-hidden rounded-lg border border-[rgba(30,23,16,0.15)] bg-[#FFFDF9] p-2"
+                                    >
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img
+                                        src={`data:${evState.mimeType};base64,${evState.dataBase64}`}
+                                        alt={evState.filename}
+                                        className="max-h-40 w-full rounded object-contain bg-black/5"
+                                      />
+                                      <p className="mt-1 truncate font-mono text-[10px] text-[#635647]">
+                                        {evState.filename} · {Math.round(evState.sizeBytes / 1024)}KB ·{' '}
+                                        {evState.purpose}
+                                      </p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Live Agent Reply to Customer Chat */}
+                          {req.sessionId && (
+                            <div className="space-y-1.5 border-t border-[rgba(30,23,16,0.1)] pt-2.5">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <label className="block text-[10px] font-semibold uppercase tracking-wider text-[#1E1710]">
+                                  Send Live Support Reply to Customer Chat
+                                </label>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setTicketReplyDraft(
+                                        generateAgentAssistSuggestion({
+                                          ticket: req,
+                                          settings,
+                                          lang: 'bn',
+                                        })
+                                      )
+                                    }
+                                    className="inline-flex items-center gap-1 rounded border border-[rgba(180,123,43,0.4)] bg-[#FFFDF9] px-2 py-0.5 text-[10.5px] font-medium text-[#8A5A17] hover:bg-[#F2ECE1]"
+                                  >
+                                    <Wand2 className="h-3 w-3" />
+                                    <span>AI Draft (বাংলা)</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setTicketReplyDraft(
+                                        generateAgentAssistSuggestion({
+                                          ticket: req,
+                                          settings,
+                                          lang: 'en',
+                                        })
+                                      )
+                                    }
+                                    className="inline-flex items-center gap-1 rounded border border-[rgba(180,123,43,0.4)] bg-[#FFFDF9] px-2 py-0.5 text-[10.5px] font-medium text-[#8A5A17] hover:bg-[#F2ECE1]"
+                                  >
+                                    <Wand2 className="h-3 w-3" />
+                                    <span>AI Draft (EN)</span>
+                                  </button>
+                                </div>
+                              </div>
+                              <textarea
+                                rows={2}
+                                value={ticketReplyDraft}
+                                onChange={(e) => setTicketReplyDraft(e.target.value)}
+                                placeholder="Write a live reply or insert an AI Draft for review before sending..."
+                                className="w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base sm:text-xs"
+                              />
+                              <button
+                                type="button"
+                                disabled={isBusy || !ticketReplyDraft.trim()}
+                                onClick={() => handleSendAgentReply(req)}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-[#B47B2B] px-3 py-1.5 text-[11px] font-medium text-[#FFFDF9] hover:bg-[#99651E] disabled:opacity-50"
+                              >
+                                <Send className="h-3 w-3" />
+                                <span>Send Live Agent Reply</span>
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Ticket Triage Notes, Tags & Resolution */}
+                          <div className="grid grid-cols-1 gap-2 border-t border-[rgba(30,23,16,0.1)] pt-2.5 sm:grid-cols-2">
+                            <div>
+                              <label className="block text-[10px] text-[#635647]">Assigned To</label>
+                              <input
+                                type="text"
+                                value={ticketAssigneeDraft}
+                                onChange={(e) => setTicketAssigneeDraft(e.target.value)}
+                                className="mt-0.5 w-full rounded border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-2.5 py-1 text-base sm:text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="flex items-center gap-1 text-[10px] text-[#635647]">
+                                <Tag className="h-2.5 w-2.5" />
+                                <span>Tags (comma separated)</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={ticketTagsDraft}
+                                onChange={(e) => setTicketTagsDraft(e.target.value)}
+                                placeholder="damaged, replacement_sent"
+                                className="mt-0.5 w-full rounded border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-2.5 py-1 text-base sm:text-xs"
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="block text-[10px] text-[#635647]">Internal Notes</label>
+                              <textarea
+                                rows={2}
+                                value={ticketNoteDraft}
+                                onChange={(e) => setTicketNoteDraft(e.target.value)}
+                                placeholder="Courier verification details, bKash TxnID check result..."
+                                className="mt-0.5 w-full rounded border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-2.5 py-1 text-base sm:text-xs"
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="block text-[10px] text-[#635647]">
+                                Resolution Reason (shown in audit summary)
+                              </label>
+                              <input
+                                type="text"
+                                value={ticketResReasonDraft}
+                                onChange={(e) => setTicketResReasonDraft(e.target.value)}
+                                placeholder="Replacement jar dispatched / payment verified..."
+                                className="mt-0.5 w-full rounded border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-2.5 py-1 text-base sm:text-xs"
+                              />
+                            </div>
+                            <div className="flex flex-wrap gap-2 sm:col-span-2">
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => handleUpdateTicket(req, { saveTriageFields: true })}
+                                className="rounded-lg bg-[#1E1710] px-3 py-1.5 text-[11px] font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50"
+                              >
+                                Save Triage Details
+                              </button>
+                              {req.status !== 'resolved' && (
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() =>
+                                    handleUpdateTicket(req, {
+                                      status: 'resolved',
+                                      saveTriageFields: true,
+                                    })
+                                  }
+                                  className="rounded-lg bg-emerald-800 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-emerald-900 disabled:opacity-50"
+                                >
+                                  Save &amp; Resolve (Auto-Resume AI)
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               {supportRequests.length === 0 && (
                 <p className="text-xs text-[#635647]">No customer handover requests submitted yet.</p>
               )}

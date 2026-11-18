@@ -85,11 +85,17 @@
         "status": { "type": "string", "enum": ["pending", "confirmed", "processing", "shipped", "delivered", "cancelled"] },
         "estimatedDelivery": { "type": "string", "maxLength": 80 },
         "webhookStatus": { "type": "string", "maxLength": 80 },
+        "courierPartner": { "type": "string", "enum": ["steadfast", "pathao", "redx", "manual"] },
+        "consignmentId": { "type": "string", "maxLength": 80 },
+        "courierTrackingUrl": { "type": "string", "maxLength": 300 },
+        "dispatchedAtIso": { "type": "string", "maxLength": 48 },
         "riskScore": { "type": "number" },
         "riskSignals": { "type": "array" },
         "reviewStatus": { "type": "string", "enum": ["none", "manual_review", "approved", "rejected"] },
         "duplicateWarning": { "type": "string", "maxLength": 240 },
         "codVerificationStatus": { "type": "string", "enum": ["not_required", "not_configured", "pending", "verified"] },
+        "sourceChannel": { "type": "string", "enum": ["web", "messenger", "instagram", "whatsapp", "email", "sms"] },
+        "attributedSessionId": { "type": "string", "maxLength": 64 },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -142,6 +148,10 @@
         "status": { "type": "string", "enum": ["pending", "confirmed", "processing", "shipped", "delivered", "cancelled"] },
         "reviewStatus": { "type": "string", "enum": ["none", "manual_review", "approved", "rejected"] },
         "estimatedDelivery": { "type": "string", "maxLength": 80 },
+        "courierPartner": { "type": "string", "enum": ["steadfast", "pathao", "redx", "manual"] },
+        "consignmentId": { "type": "string", "maxLength": 80 },
+        "courierTrackingUrl": { "type": "string", "maxLength": 300 },
+        "dispatchedAtIso": { "type": "string", "maxLength": 48 },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": [
@@ -268,6 +278,9 @@
         "closeHourBst": { "type": "number" },
         "closedDays": { "type": "string", "maxLength": 80 },
         "supportAvailabilityNote": { "type": "string", "maxLength": 300 },
+        "humanSupportEnabled": { "type": "boolean" },
+        "slaStandardMinutes": { "type": "number" },
+        "slaUrgentMinutes": { "type": "number" },
         "deliveryPolicy": { "type": "string", "maxLength": 1200 },
         "returnPolicy": { "type": "string", "maxLength": 1200 },
         "replacementPolicy": { "type": "string", "maxLength": 1200 },
@@ -390,6 +403,7 @@
         "confidence": { "type": "number" },
         "feedback": { "type": "string", "enum": ["", "up", "down"] },
         "feedbackReason": { "type": "string", "maxLength": 60 },
+        "channel": { "type": "string", "enum": ["web", "messenger", "instagram", "whatsapp", "email", "sms"] },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": [
@@ -412,14 +426,36 @@
     },
     "ChatbotSupportRequest": {
       "title": "ChatbotSupportRequest",
-      "description": "Customer-consented human customer support handover request.",
+      "description": "Customer-consented human customer support handover request with SLA metadata, private evidence references, and inbox triage state.",
       "type": "object",
       "properties": {
+        "ticketNumber": { "type": "string", "maxLength": 32 },
         "sessionId": { "type": "string", "minLength": 4, "maxLength": 64 },
         "customerName": { "type": "string", "minLength": 2, "maxLength": 100 },
         "phone": { "type": "string", "pattern": "^01[3-9][0-9]{8}$", "maxLength": 11 },
+        "orderNumber": { "type": "string", "maxLength": 20 },
+        "category": { "type": "string", "enum": ["damaged_jar", "payment_dispute", "late_delivery", "refund_return", "bulk_order", "general"] },
+        "priority": { "type": "string", "enum": ["standard", "urgent"] },
         "issueSummary": { "type": "string", "minLength": 4, "maxLength": 500 },
-        "status": { "type": "string", "enum": ["open", "contacted", "resolved"] },
+        "contextSummary": { "type": "string", "maxLength": 1000 },
+        "transcriptExcerpt": { "type": "string", "maxLength": 2000 },
+        "consentGranted": { "type": "boolean" },
+        "evidenceIds": { "type": "array" },
+        "paymentStatusSnapshot": { "type": "string", "maxLength": 40 },
+        "orderStatusSnapshot": { "type": "string", "maxLength": 40 },
+        "slaMinutes": { "type": "number" },
+        "slaDueAtIso": { "type": "string", "maxLength": 48 },
+        "slaWindowLabelEn": { "type": "string", "maxLength": 240 },
+        "slaWindowLabelBn": { "type": "string", "maxLength": 300 },
+        "assignedTo": { "type": "string", "maxLength": 120 },
+        "tags": { "type": "array" },
+        "resolutionReason": { "type": "string", "maxLength": 240 },
+        "internalNotes": { "type": "string", "maxLength": 1000 },
+        "firstRespondedAtIso": { "type": "string", "maxLength": 48 },
+        "resolvedAtIso": { "type": "string", "maxLength": 48 },
+        "channel": { "type": "string", "enum": ["web", "messenger", "instagram", "whatsapp", "email", "sms"] },
+        "externalThreadId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["open", "pending", "contacted", "waiting_for_customer", "escalated", "resolved"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -506,6 +542,13 @@
         "currentIntent": { "type": "string", "maxLength": 60 },
         "orderDraftId": { "type": "string", "maxLength": 96 },
         "turnCount": { "type": "number" },
+        "aiPaused": { "type": "boolean" },
+        "activeTicketId": { "type": "string", "maxLength": 96 },
+        "assignedAgentName": { "type": "string", "maxLength": 80 },
+        "agentReplies": { "type": "array" },
+        "channel": { "type": "string", "enum": ["web", "messenger", "instagram", "whatsapp", "email", "sms"] },
+        "externalUserId": { "type": "string", "maxLength": 128 },
+        "linkedPhone": { "type": "string", "maxLength": 15 },
         "lastTurnAt": { "type": "string", "format": "date-time" }
       },
       "required": ["sessionId", "language", "lockedLang", "scriptPreference", "consent", "currentIntent", "orderDraftId", "turnCount", "lastTurnAt"]
@@ -575,7 +618,7 @@
       "type": "object",
       "properties": {
         "orderNumber": { "type": "string", "pattern": "^DG-[0-9]{4,8}$", "maxLength": 16 },
-        "action": { "type": "string", "enum": ["created", "address_updated", "cancelled", "review_approved", "review_rejected", "status_updated", "cod_verification"] },
+        "action": { "type": "string", "enum": ["created", "address_updated", "cancelled", "review_approved", "review_rejected", "status_updated", "cod_verification", "courier_updated"] },
         "actorType": { "type": "string", "enum": ["customer", "admin", "system"] },
         "summary": { "type": "string", "minLength": 3, "maxLength": 300 },
         "previousStatus": { "type": "string", "maxLength": 40 },
@@ -586,6 +629,102 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["orderNumber", "action", "actorType", "summary", "createdAt"]
+    },
+    "SupportEvidence": {
+      "title": "SupportEvidence",
+      "description": "Private customer-uploaded damage claim or payment dispute image stored securely for Admin-only inspection.",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "orderNumber": { "type": "string", "maxLength": 20 },
+        "mimeType": { "type": "string", "enum": ["image/jpeg", "image/png", "image/webp"] },
+        "filename": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "sizeBytes": { "type": "number" },
+        "dataBase64": { "type": "string", "maxLength": 720000 },
+        "purpose": { "type": "string", "enum": ["damage_claim", "payment_dispute", "general"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sessionId", "mimeType", "filename", "sizeBytes", "dataBase64", "purpose", "createdAt"]
+    },
+    "SupportAgentReply": {
+      "title": "SupportAgentReply",
+      "description": "Immutable Admin agent reply record linked to a support ticket and customer chat session.",
+      "type": "object",
+      "properties": {
+        "ticketId": { "type": "string", "minLength": 4, "maxLength": 96 },
+        "sessionId": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "agentEmail": { "type": "string", "maxLength": 160 },
+        "agentName": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "createdAtIso": { "type": "string", "maxLength": 48 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ticketId", "sessionId", "agentEmail", "agentName", "text", "createdAtIso", "createdAt"]
+    },
+    "OrderReviewClaim": {
+      "title": "OrderReviewClaim",
+      "description": "Zero-PII lock enforcing at most one verified purchase review per delivered orderNumber.",
+      "type": "object",
+      "properties": {
+        "orderNumber": { "type": "string", "pattern": "^DG-[0-9]{4,8}$", "maxLength": 16 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderNumber", "createdAt"]
+    },
+    "RefillReminder": {
+      "title": "RefillReminder",
+      "description": "Customer opt-in post-delivery ghee refill reminder schedule keyed by {orderNumber}_{phone}.",
+      "type": "object",
+      "properties": {
+        "orderNumber": { "type": "string", "pattern": "^DG-[0-9]{4,8}$", "maxLength": 16 },
+        "phone": { "type": "string", "pattern": "^01[3-9][0-9]{8}$", "maxLength": 11 },
+        "customerName": { "type": "string", "maxLength": 100 },
+        "weight": { "type": "string", "enum": ["250g", "500g", "1kg"] },
+        "intervalDays": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "paused", "opted_out"] },
+        "consentGranted": { "type": "boolean" },
+        "nextReminderAtIso": { "type": "string", "maxLength": 48 },
+        "lastNotifiedAtIso": { "type": "string", "maxLength": 48 },
+        "reminderCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderNumber", "phone", "intervalDays", "status", "consentGranted", "nextReminderAtIso", "createdAt", "updatedAt"]
+    },
+    "ChannelWebhookEvent": {
+      "title": "ChannelWebhookEvent",
+      "description": "Idempotent immutable webhook delivery lock preventing duplicate Messenger, Instagram, and WhatsApp webhook processing.",
+      "type": "object",
+      "properties": {
+        "channel": { "type": "string", "enum": ["messenger", "instagram", "whatsapp"] },
+        "eventId": { "type": "string", "minLength": 2, "maxLength": 128 },
+        "senderId": { "type": "string", "minLength": 2, "maxLength": 128 },
+        "verifiedPhone": { "type": "string", "maxLength": 15 },
+        "status": { "type": "string", "enum": ["processed", "duplicate", "rejected"] },
+        "createdAtIso": { "type": "string", "maxLength": 48 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["channel", "eventId", "senderId", "status", "createdAtIso", "createdAt"]
+    },
+    "MarketingConsent": {
+      "title": "MarketingConsent",
+      "description": "Customer opt-in consent and instant unsubscribe suppression record keyed by verified Bangladesh phone number.",
+      "type": "object",
+      "properties": {
+        "phone": { "type": "string", "pattern": "^01[3-9][0-9]{8}$", "maxLength": 11 },
+        "customerName": { "type": "string", "maxLength": 100 },
+        "channel": { "type": "string", "enum": ["web", "messenger", "instagram", "whatsapp", "email", "sms"] },
+        "optIn": { "type": "boolean" },
+        "unsubscribed": { "type": "boolean" },
+        "source": { "type": "string", "enum": ["checkout", "chat", "track_order", "whatsapp", "admin"] },
+        "quietHoursRespect": { "type": "boolean" },
+        "consentTimestampIso": { "type": "string", "maxLength": 48 },
+        "lastCampaignAtIso": { "type": "string", "maxLength": 48 },
+        "campaignCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["phone", "channel", "optIn", "unsubscribed", "source", "quietHoursRespect", "consentTimestampIso", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -684,6 +823,30 @@
     "/order_audit_logs/{logId}": {
       "schema": { "$ref": "#/entities/OrderAuditLog" },
       "description": "Immutable append-only audit log entries linked to orders readable by Admin."
+    },
+    "/support_evidence/{evidenceId}": {
+      "schema": { "$ref": "#/entities/SupportEvidence" },
+      "description": "Private customer-uploaded evidence images readable only by verified Admin."
+    },
+    "/support_agent_replies/{replyId}": {
+      "schema": { "$ref": "#/entities/SupportAgentReply" },
+      "description": "Immutable human support replies sent from Admin inbox into customer chat sessions."
+    },
+    "/order_review_claims/{orderNumber}": {
+      "schema": { "$ref": "#/entities/OrderReviewClaim" },
+      "description": "Single-claim atomic lock ensuring at most one verified review per delivered orderNumber."
+    },
+    "/refill_reminders/{reminderId}": {
+      "schema": { "$ref": "#/entities/RefillReminder" },
+      "description": "Customer opt-in post-delivery refill reminders keyed by {orderNumber}_{phone}."
+    },
+    "/channel_webhook_events/{eventId}": {
+      "schema": { "$ref": "#/entities/ChannelWebhookEvent" },
+      "description": "Immutable idempotent webhook event ledger for Messenger, Instagram, and WhatsApp Cloud."
+    },
+    "/marketing_consents/{phoneKey}": {
+      "schema": { "$ref": "#/entities/MarketingConsent" },
+      "description": "Customer marketing opt-in and unsubscribe suppression registry keyed by Bangladesh phone."
     }
   }
 }

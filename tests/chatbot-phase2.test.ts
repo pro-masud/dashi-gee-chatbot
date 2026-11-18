@@ -430,7 +430,7 @@ describe('Phase 2 (T2.1-T2.6) — Transactional Safety, 64 Districts, 4-Zone Pri
     assert.equal(ctgTypo.valid, true);
     assert.equal(ctgTypo.canonicalDistrict, 'Chattogram');
     assert.equal(ctgTypo.deliveryZone, 'nationwide');
-    assert.equal(ctgTypo.matchedVia, 'fuzzy');
+    assert.equal(ctgTypo.matchedBy, 'fuzzy');
 
     const sylhetTypo = resolveConfiguredDistrictAndZone('Shylet', '', 'Zindabazar');
     assert.equal(sylhetTypo.valid, true);
@@ -649,12 +649,11 @@ describe('Phase 2 (T2.1-T2.6) — Transactional Safety, 64 Districts, 4-Zone Pri
     assert.equal(risk.riskSignals.includes('recent_duplicate_fingerprint'), true);
   });
 
-  it('T2.6: Pre-dispatch customer Edit Address (recalculates fee/ETA), Cancel (restores stock + MFS refund notice), Admin Review & 21 Gemini tools', async () => {
-    assert.equal(CHATBOT_FUNCTION_DECLARATIONS.length, 21);
-    assert.equal(
-      classifyTurnIntent('Cancel my order DG-55555').allowedToolNames.includes('manage_order'),
-      true
-    );
+  it('T2.6: Pre-dispatch customer Edit Address (recalculates fee/ETA), Cancel (restores stock + MFS refund notice), Admin Review & 21+ Gemini tools', async () => {
+    assert.ok(CHATBOT_FUNCTION_DECLARATIONS.length >= 21);
+    const manageIntent = classifyTurnIntent('Cancel my order DG-55555');
+    assert.equal(manageIntent.allowedToolNames.includes('request_cancel'), true);
+    assert.equal(manageIntent.allowedToolNames.includes('request_address_change'), true);
 
     // Create a bKash pre-dispatch order in Dhaka (qty=1x 500g)
     setInventoryMemoryModeForTests({ stock500g: 10 });

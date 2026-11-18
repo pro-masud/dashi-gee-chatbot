@@ -6,6 +6,8 @@ import {
   upsertServerOrderDraft,
 } from '../../../../src/lib/chatbot/firestoreRest';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const sessionId = stripUnsafeHtml(searchParams.get('sessionId') || '', 64);

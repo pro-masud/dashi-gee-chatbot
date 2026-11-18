@@ -103,6 +103,7 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
   });
   const [cart, setCart] = useState<CartJarItem[]>([]);
   const [lastConfirmedOrder, setLastConfirmedOrder] = useState<OrderRecord | null>(null);
+  const [settingsReady, setSettingsReady] = useState<boolean>(false);
 
   const bn = lang === 'bn';
 
@@ -193,6 +194,8 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
         setQrCodeUrl(qrData);
       } catch {
         // Fallback defaults remain active cleanly
+      } finally {
+        setSettingsReady(true);
       }
     })();
 
@@ -201,6 +204,43 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
       currency: 'BDT',
     });
   }, []);
+
+  // Support one-click Reorder URL (`/?reorder=250g:N,500g:N,1kg:N`) clamped to live jar stock
+  useEffect(() => {
+    if (!hydratedStorage || !settingsReady || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const rawReorder = params.get('reorder');
+    if (!rawReorder) return;
+
+    const stockByWeight: Record<WeightKey, number> = {
+      '250g': Math.max(0, Math.round(settings.stock250g)),
+      '500g': Math.max(0, Math.round(settings.stock500g)),
+      '1kg': Math.max(0, Math.round(settings.stock1kg)),
+    };
+
+    const nextCart: CartJarItem[] = [];
+    for (const part of rawReorder.split(',')) {
+      const [wRaw, qRaw] = part.split(':');
+      const w = wRaw?.trim() as WeightKey;
+      const requested = Math.round(Number(qRaw || 0));
+      if ((w === '250g' || w === '500g' || w === '1kg') && requested > 0) {
+        const clamped = Math.min(requested, stockByWeight[w]);
+        if (clamped > 0 && !nextCart.some((c) => c.weight === w)) {
+          nextCart.push({ weight: w, qty: clamped });
+        }
+      }
+    }
+
+    if (nextCart.length > 0) {
+      setCart(nextCart);
+      setDrawerOpen(true);
+    }
+
+    params.delete('reorder');
+    const qs = params.toString();
+    const cleanedUrl = `${pathname}${qs ? `?${qs}` : ''}`;
+    window.history.replaceState({}, '', cleanedUrl);
+  }, [hydratedStorage, settingsReady, settings, pathname]);
 
   // Sticky Header transparency -> warm linen transition
   useEffect(() => {

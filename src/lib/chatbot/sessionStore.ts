@@ -15,7 +15,7 @@ import {
   normalizeVariantQuantities,
   resolveConfiguredDistrictAndZone,
 } from './orderToken';
-import type { ChatSessionDoc, OrderDraftDoc, TurnIntent } from './types';
+import type { ChannelSource, ChatSessionDoc, OrderDraftDoc, TurnIntent } from './types';
 
 export interface ExtractedOrderSlots {
   weight?: WeightKey;
@@ -335,7 +335,7 @@ export function getNextOrderSlotQuestion(
         : `How many ${draft.weight || ''} jars would you like for your order? (1 to 10)`;
     case 'customerName':
       return lang === 'bn'
-        ? 'শুধুমাত্র ডেলিভারি ও যাচাইয়ের জন্য আপনার পূর্ণ নামটি বলবেন কি?'
+        ? 'আপনার অর্ডারটির ডেলিভারি ও যাচাইয়ের জন্য আপনার পূর্ণ নামটি বলবেন কি?'
         : 'May I have your full name for delivery verification?';
     case 'phone':
       return lang === 'bn'
@@ -580,6 +580,9 @@ export function buildInitialSessionDoc(
     scriptPreference: 'bn_script' | 'banglish_roman' | 'en';
     intent: TurnIntent | string;
     orderDraftId?: string;
+    channel?: ChannelSource;
+    externalUserId?: string;
+    linkedPhone?: string;
   }
 ): ChatSessionDoc {
   const lockedLang = opts.explicitSwitchRequested || prev?.lockedLang || '';
@@ -592,5 +595,12 @@ export function buildInitialSessionDoc(
     currentIntent: opts.intent,
     orderDraftId: opts.orderDraftId || prev?.orderDraftId || '',
     turnCount: (prev?.turnCount || 0) + 1,
+    aiPaused: Boolean(prev?.aiPaused),
+    activeTicketId: prev?.activeTicketId || '',
+    assignedAgentName: prev?.assignedAgentName || '',
+    agentReplies: Array.isArray(prev?.agentReplies) ? prev.agentReplies.slice(-25) : [],
+    channel: opts.channel || prev?.channel || 'web',
+    externalUserId: opts.externalUserId || prev?.externalUserId || '',
+    linkedPhone: opts.linkedPhone || prev?.linkedPhone || '',
   };
 }

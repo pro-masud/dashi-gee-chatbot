@@ -149,12 +149,12 @@ function detectUnansweredHeuristic(reply: string, fallbackBn: string, fallbackEn
   );
 }
 
-async function generateWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+async function generateWithTimeout<T>(promise: Promise<T> | T, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error('Gemini request timeout exceeded'));
     }, timeoutMs);
-    promise
+    Promise.resolve(promise)
       .then((res) => {
         clearTimeout(timer);
         resolve(res);
@@ -290,6 +290,7 @@ export async function POST(request: Request) {
 
   const mode = reqData.mode;
   const uiLang = reqData.uiLang;
+  const channel = reqData.channel;
   const sessionId =
     stripUnsafeHtml(reqData.sessionId || 'sess_anon', 64) || 'sess_anon';
 
@@ -408,6 +409,63 @@ export async function POST(request: Request) {
     scriptPreference,
   } = langResolution;
 
+  if (mode === 'published' && sessionState.session?.aiPaused) {
+    const agentLabel = sessionState.session.assignedAgentName || 'Deshi Gee Support';
+    const ticketRef = sessionState.session.activeTicketId
+      ? ` (${sessionState.session.activeTicketId})`
+      : '';
+    const pausedReply =
+      replyLang === 'bn'
+        ? `আপনার এই চ্যাটে বর্তমানে আমাদের মানব সাপোর্ট প্রতিনিধি (${agentLabel})${ticketRef} সরাসরি যুক্ত আছেন এবং AI অ্যাসিস্ট্যান্ট সাময়িকভাবে বিরতিতে আছে। আপনার বার্তাটি পৌঁছে গেছে—কিছুক্ষণের মধ্যেই এজেন্ট এখানে উত্তর দেবেন।`
+        : `A live human support agent (${agentLabel})${ticketRef} is currently handling your conversation and the AI assistant is paused. Your message has been received—our agent will reply right here shortly.`;
+
+    const pausedSessionDoc = buildInitialSessionDoc(sessionId, sessionState.session, {
+      replyLang,
+      explicitSwitchRequested,
+      scriptPreference,
+      intent: 'human_agent_active',
+      orderDraftId: sessionState.draft?.draftId,
+      channel,
+    });
+
+    const [logId] = await Promise.all([
+      createServerChatLog({
+        sessionId,
+        channel,
+        lang: detectedInputLang,
+        userMessage: lastUserMessage,
+        assistantReply: pausedReply,
+        intent: 'human_agent_active',
+        isUnanswered: false,
+        isError: false,
+        handoverRequested: true,
+        latencyMs: Date.now() - startedAt,
+        promptTokens: 0,
+        outputTokens: 0,
+        estimatedCostUsd: 0,
+        errorCode: '',
+        isTestPlayground,
+        path: 'fallback',
+        model: 'human-agent-pause-guard',
+        confidence: 1,
+      }),
+      saveSessionAndDraft({ session: pausedSessionDoc, draft: sessionState.draft }),
+    ]);
+
+    return ndjsonReply(
+      {
+        text: pausedReply,
+        actions: buildContactActions(settings, replyLang),
+        logId,
+        lockedLang: pausedSessionDoc.lockedLang,
+        intent: 'human_agent_active',
+        path: 'fallback',
+        model: 'human-agent-pause-guard',
+      },
+      rateCheck.setCookieHeader
+    );
+  }
+
   const dailyCostCapUsd = getOptionalDailyCostCapUsd();
   const costCapReached =
     dailyCostCapUsd !== null && (costLedger.totalUsd >= dailyCostCapUsd || costLedger.capHit);
@@ -442,6 +500,7 @@ export async function POST(request: Request) {
 
     const logId = await createServerChatLog({
       sessionId,
+      channel,
       lang: detectedInputLang,
       userMessage: lastUserMessage,
       assistantReply: capMsg,
@@ -485,6 +544,7 @@ export async function POST(request: Request) {
 
     const logId = await createServerChatLog({
       sessionId,
+      channel,
       lang: detectedInputLang,
       userMessage: '[REDACTED_SENSITIVE_INPUT]',
       assistantReply: shieldReply,
@@ -526,6 +586,7 @@ export async function POST(request: Request) {
 
     const logId = await createServerChatLog({
       sessionId,
+      channel,
       lang: detectedInputLang,
       userMessage: lastUserMessage,
       assistantReply: injectionReply,
@@ -574,11 +635,13 @@ export async function POST(request: Request) {
       scriptPreference,
       intent: 'order',
       orderDraftId: sessionState.draft?.draftId,
+      channel,
     });
 
     const [logId] = await Promise.all([
       createServerChatLog({
         sessionId,
+        channel,
         lang: detectedInputLang,
         userMessage: lastUserMessage,
         assistantReply: guardReply,
@@ -648,11 +711,13 @@ export async function POST(request: Request) {
       scriptPreference,
       intent: 'off_topic_refusal',
       orderDraftId: sessionState.draft?.draftId,
+      channel,
     });
 
     const [logId] = await Promise.all([
       createServerChatLog({
         sessionId,
+        channel,
         lang: detectedInputLang,
         userMessage: lastUserMessage,
         assistantReply: domainReply,
@@ -785,6 +850,7 @@ export async function POST(request: Request) {
       config,
       verifiedMonetaryAmounts: Array.from(runtimeCtx.verifiedMonetaryAmounts),
       verifiedOrderTrackingStatus: runtimeCtx.verifiedOrderTrackingStatus,
+      verifiedPaymentStatus: runtimeCtx.verifiedPaymentStatus,
       hasPreparedOrderSummary: Boolean(runtimeCtx.collectedOrderSummary),
       customerPhoneInTurn: runtimeCtx.customerPhoneInTurn,
       isMixedQuestion: domainCheck.mixedNoticeNeeded,
@@ -876,6 +942,7 @@ export async function POST(request: Request) {
       scriptPreference,
       intent: safeFallback.intent,
       orderDraftId: activeDraft?.draftId,
+      channel,
     });
 
     const diagnostics: ChatDiagnosticsMeta = {
@@ -900,6 +967,7 @@ export async function POST(request: Request) {
     const [logId] = await Promise.all([
       createServerChatLog({
         sessionId,
+        channel,
         lang: detectedInputLang,
         userMessage: lastUserMessage,
         assistantReply: safeFallback.replyText,
@@ -997,29 +1065,40 @@ export async function POST(request: Request) {
     if (toolName === 'prepare_order_summary' && result.ready) {
       preparedSummaryResult = result;
       if (runtimeCtx.collectedOrderSummary) {
+        const summary = runtimeCtx.collectedOrderSummary;
+        const validWeight =
+          summary.weight === '250g' || summary.weight === '500g' || summary.weight === '1kg'
+            ? summary.weight
+            : undefined;
+        const validPayment =
+          summary.paymentMethod === 'cod' ||
+          summary.paymentMethod === 'bkash' ||
+          summary.paymentMethod === 'nagad'
+            ? summary.paymentMethod
+            : undefined;
         if (!activeDraft) {
           activeDraft = {
             draftId: sessionState.session?.orderDraftId || `draft_${sessionId}`,
             sessionId,
-            weight: runtimeCtx.collectedOrderSummary.weight,
-            qty: runtimeCtx.collectedOrderSummary.qty,
-            qty250g: runtimeCtx.collectedOrderSummary.qty250g,
-            qty500g: runtimeCtx.collectedOrderSummary.qty500g,
-            qty1kg: runtimeCtx.collectedOrderSummary.qty1kg,
-            customerName: runtimeCtx.collectedOrderSummary.customerName,
-            phone: runtimeCtx.collectedOrderSummary.phone,
-            district: runtimeCtx.collectedOrderSummary.district,
-            area: runtimeCtx.collectedOrderSummary.area,
-            address: runtimeCtx.collectedOrderSummary.address,
-            paymentMethod: runtimeCtx.collectedOrderSummary.paymentMethod,
-            couponCode: runtimeCtx.collectedOrderSummary.couponCode,
+            weight: validWeight,
+            qty: summary.qty,
+            qty250g: summary.qty250g,
+            qty500g: summary.qty500g,
+            qty1kg: summary.qty1kg,
+            customerName: summary.customerName,
+            phone: summary.phone,
+            district: summary.district,
+            area: summary.area,
+            address: summary.address,
+            paymentMethod: validPayment,
+            couponCode: summary.couponCode,
             state: 'awaiting_confirmation',
-            priceQuoteVersion: runtimeCtx.priceQuoteVersion,
+            priceQuoteVersion: runtimeCtx.priceQuoteVersion ?? 1,
             expiresAt: Date.now() + 30 * 60 * 1000,
-            lastSummary: runtimeCtx.collectedOrderSummary,
+            lastSummary: summary,
           };
         } else {
-          activeDraft.lastSummary = runtimeCtx.collectedOrderSummary;
+          activeDraft.lastSummary = summary;
           activeDraft.state = 'awaiting_confirmation';
         }
       }
@@ -1243,55 +1322,93 @@ export async function POST(request: Request) {
           controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'delta', text: chunk })}\n`));
         };
 
+        const streamT0 = Date.now();
+        let streamElapsedRecorded = false;
         try {
-          const streamT0 = Date.now();
+          const remainingMs = requestDeadlineAt - Date.now();
+          if (remainingMs < 1000) {
+            throw new Error('Request deadline exceeded');
+          }
+          const streamTimeoutMs = Math.min(
+            CHATBOT_BUILD_CONFIG.GEMINI_TIMEOUT_MS,
+            Math.max(1200, remainingMs)
+          );
+          const streamDeadlineAt = Date.now() + streamTimeoutMs;
+          const streamController = new AbortController();
+          const streamTimer = setTimeout(() => {
+            streamController.abort();
+          }, streamTimeoutMs);
+
+          const isPureGreeting = intentClass.intent === 'greeting';
           const configPayload = buildGeminiGenerateConfig({
             model: activeModelUsed,
             systemInstruction,
-            functionDeclarations: scopedDeclarations,
+            functionDeclarations: isPureGreeting ? undefined : scopedDeclarations,
             maxOutputTokens: getConfiguredMaxOutputTokens(),
-            lowThinkingMode: false,
+            lowThinkingMode: isPureGreeting,
             disableTools: false,
+            abortSignal: streamController.signal,
           });
 
-          const asyncStream = await ai.models.generateContentStream({
-            model: activeModelUsed,
-            contents,
-            config: configPayload,
-          });
-
-          for await (const chunk of asyncStream) {
-            totalPromptTokens = chunk.usageMetadata?.promptTokenCount || totalPromptTokens;
-            totalOutputTokens = chunk.usageMetadata?.candidatesTokenCount || totalOutputTokens;
-
-            const blockReason = String(
-              (chunk as { promptFeedback?: { blockReason?: string } }).promptFeedback?.blockReason || ''
+          try {
+            const asyncStream = await generateWithTimeout(
+              ai!.models.generateContentStream({
+                model: activeModelUsed,
+                contents,
+                config: configPayload,
+              }),
+              streamTimeoutMs
             );
-            const fReason = String(chunk.candidates?.[0]?.finishReason || '');
-            if (fReason) streamFinishReason = fReason;
-            if (blockReason || SAFETY_BLOCK_FINISH_REASONS.has(fReason)) {
-              streamSafetyBlocked = true;
-              break;
-            }
-            if (chunk.functionCalls && chunk.functionCalls.length > 0) {
-              sawToolCall = true;
-              break;
-            }
-            const partText = chunk.text || '';
-            if (partText) {
-              accumulated += partText;
-              if (!heldDueToRisk && STREAM_HOLD_BACK_RX.test(accumulated)) {
-                heldDueToRisk = true;
+
+            const iterator = asyncStream[Symbol.asyncIterator]();
+            while (true) {
+              const iterRemaining = Math.min(
+                streamDeadlineAt - Date.now(),
+                requestDeadlineAt - Date.now()
+              );
+              if (iterRemaining <= 0) {
+                streamController.abort();
+                throw new Error('Gemini request timeout exceeded');
               }
-              if (!heldDueToRisk && flushedLen < accumulated.length) {
-                const delta = accumulated.slice(flushedLen);
-                flushedLen = accumulated.length;
-                streamedRealTokens = true;
-                flushDelta(delta);
+              const step = await generateWithTimeout(iterator.next(), iterRemaining);
+              if (step.done) break;
+              const chunk = step.value;
+
+              totalPromptTokens = chunk.usageMetadata?.promptTokenCount || totalPromptTokens;
+              totalOutputTokens = chunk.usageMetadata?.candidatesTokenCount || totalOutputTokens;
+
+              const blockReason = String(
+                (chunk as { promptFeedback?: { blockReason?: string } }).promptFeedback?.blockReason || ''
+              );
+              const fReason = String(chunk.candidates?.[0]?.finishReason || '');
+              if (fReason) streamFinishReason = fReason;
+              if (blockReason || SAFETY_BLOCK_FINISH_REASONS.has(fReason)) {
+                streamSafetyBlocked = true;
+                break;
+              }
+              if (chunk.functionCalls && chunk.functionCalls.length > 0) {
+                sawToolCall = true;
+                break;
+              }
+              const partText = chunk.text || '';
+              if (partText) {
+                accumulated += partText;
+                if (!heldDueToRisk && STREAM_HOLD_BACK_RX.test(accumulated)) {
+                  heldDueToRisk = true;
+                }
+                if (!heldDueToRisk && flushedLen < accumulated.length) {
+                  const delta = accumulated.slice(flushedLen);
+                  flushedLen = accumulated.length;
+                  streamedRealTokens = true;
+                  flushDelta(delta);
+                }
               }
             }
+          } finally {
+            clearTimeout(streamTimer);
           }
           modelMs += Date.now() - streamT0;
+          streamElapsedRecorded = true;
           lastFinishReason = streamFinishReason || lastFinishReason;
 
           if (sawToolCall || streamSafetyBlocked || !accumulated.trim()) {
@@ -1347,12 +1464,48 @@ export async function POST(request: Request) {
             }
           }
         } catch (err) {
-          if (flushedLen === 0) {
+          if (!streamElapsedRecorded) {
+            modelMs += Date.now() - streamT0;
+          }
+          const classified = classifyGeminiError(err);
+          let recoveredByFailover = false;
+
+          if (
+            flushedLen === 0 &&
+            classified.shouldFailover &&
+            activeModelUsed !== fallbackModelName &&
+            fallbackModelCheck.supported &&
+            requestDeadlineAt - Date.now() >= 1500
+          ) {
+            try {
+              failoverReason = classified.code;
+              activeModelUsed = fallbackModelName;
+              const failoverRes = await invokeModelAttempt(
+                fallbackModelName,
+                contents,
+                systemInstruction,
+                { lowThinkingMode: true, disableTools: intentClass.intent === 'greeting' }
+              );
+              totalPromptTokens += failoverRes.usageMetadata?.promptTokenCount || 0;
+              totalOutputTokens += failoverRes.usageMetadata?.candidatesTokenCount || 0;
+              const failoverText = (failoverRes.text || '').trim();
+              const failoverGuard = failoverText ? validateUnifiedReply(failoverText) : null;
+              if (failoverText && failoverGuard?.passed) {
+                finalReply = failoverText;
+                lastFinishReason =
+                  String(failoverRes.candidates?.[0]?.finishReason || '') || lastFinishReason;
+                recoveredByFailover = true;
+              }
+            } catch {
+              // Fall through to deterministic storefront fallback below
+            }
+          }
+
+          if (!recoveredByFailover && flushedLen === 0) {
             activePath = 'fallback';
             activeModelUsed = 'live-fallback-engine';
             isError = true;
             isUnanswered = true;
-            const classified = classifyGeminiError(err);
             const safeFallback = runValidatedFallback(classified.code, true);
             finalReply = safeFallback.replyText;
             errorCode = safeFallback.errorCode || classified.code;
@@ -1381,6 +1534,7 @@ export async function POST(request: Request) {
           scriptPreference,
           intent: runtimeCtx.detectedIntent,
           orderDraftId: activeDraft?.draftId,
+          channel,
         });
 
         const [, logId] = await Promise.all([
@@ -1392,6 +1546,7 @@ export async function POST(request: Request) {
           }),
           createServerChatLog({
             sessionId,
+            channel,
             lang: detectedInputLang,
             userMessage: lastUserMessage,
             assistantReply: finalReply,
@@ -1614,6 +1769,7 @@ export async function POST(request: Request) {
     scriptPreference,
     intent: runtimeCtx.detectedIntent,
     orderDraftId: activeDraft?.draftId,
+    channel,
   });
 
   const [, logId] = await Promise.all([
@@ -1625,6 +1781,7 @@ export async function POST(request: Request) {
     }),
     createServerChatLog({
       sessionId,
+      channel,
       lang: detectedInputLang,
       userMessage: lastUserMessage,
       assistantReply: finalReply,

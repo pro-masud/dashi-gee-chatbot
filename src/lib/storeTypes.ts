@@ -20,6 +20,10 @@ export type PaymentStatus =
 
 export type OrderRiskReviewStatus = 'none' | 'manual_review' | 'approved' | 'rejected';
 
+export type CourierPartner = 'steadfast' | 'pathao' | 'redx' | 'manual';
+
+export type ChannelSource = 'web' | 'messenger' | 'instagram' | 'whatsapp' | 'email' | 'sms';
+
 export interface StoreSettingsDoc {
   productNameEn: string;
   productNameBn: string;
@@ -125,11 +129,17 @@ export interface OrderRecord {
   status: OrderStatus;
   estimatedDelivery: string;
   webhookStatus: string;
+  courierPartner?: CourierPartner;
+  consignmentId?: string;
+  courierTrackingUrl?: string;
+  dispatchedAtIso?: string;
   riskScore?: number;
   riskSignals?: string[];
   reviewStatus?: OrderRiskReviewStatus;
   duplicateWarning?: string;
   codVerificationStatus?: 'not_required' | 'not_configured' | 'pending' | 'verified';
+  sourceChannel?: ChannelSource;
+  attributedSessionId?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -154,6 +164,10 @@ export interface TrackingRecord {
   status: OrderStatus;
   reviewStatus?: OrderRiskReviewStatus;
   estimatedDelivery: string;
+  courierPartner?: CourierPartner;
+  consignmentId?: string;
+  courierTrackingUrl?: string;
+  dispatchedAtIso?: string;
   updatedAt?: unknown;
 }
 
@@ -167,7 +181,8 @@ export interface OrderAuditLogRecord {
     | 'review_approved'
     | 'review_rejected'
     | 'status_updated'
-    | 'cod_verification';
+    | 'cod_verification'
+    | 'courier_updated';
   actorType: 'customer' | 'admin' | 'system';
   summary: string;
   previousStatus?: string;

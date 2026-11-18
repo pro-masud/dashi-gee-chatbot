@@ -302,5 +302,169 @@ describe('T0.15 Firestore Security Rules — Dirty Dozen Adversarial Verificatio
     assert.ok(specText.includes('14. **Pre-Dispatch Customer Lock & Audit Immutability**'));
     assert.ok(specText.includes('15. **Zero-PII Duplicate Fingerprint Isolation**'));
   });
+
+  it('Phase 3 Rules & Blueprint Sync: enforces private support_evidence, Admin triage lock, AI-pause tamper protection, atomic delivered order_review_claims & refill_reminders', () => {
+    // 1. support_evidence: public create validated, zero public read, admin-only get/list/update/delete
+    const evBlock = extractMatchBlock('/support_evidence/{evidenceId}');
+    const evFn = extractFunctionBody('isValidSupportEvidence');
+    assert.match(evBlock, /allow get: if isValidId\(evidenceId\) && isAdmin\(\);/);
+    assert.match(evBlock, /allow list: if isAdmin\(\);/);
+    assert.match(evBlock, /allow create: if isValidId\(evidenceId\) && isValidSupportEvidence\(incoming\(\)\);/);
+    assert.match(evBlock, /allow update, delete: if isValidId\(evidenceId\) && isAdmin\(\);/);
+    assert.match(evFn, /'image\/jpeg', 'image\/png', 'image\/webp'/);
+
+    // 2. support_agent_replies: admin-only read/write
+    const replyBlock = extractMatchBlock('/support_agent_replies/{replyId}');
+    assert.match(replyBlock, /allow get, list: if isAdmin\(\);/);
+    assert.match(replyBlock, /allow create: if isValidId\(replyId\) && isAdmin\(\) && isValidSupportAgentReply\(incoming\(\)\);/);
+
+    // 3. chat_sessions: visitor cannot set or tamper with aiPaused / activeTicketId / assignedAgentName / agentReplies
+    const sessBlock = extractMatchBlock('/chat_sessions/{sessionId}');
+    assert.match(sessBlock, /!incoming\(\)\.diff\(existing\(\)\)\.affectedKeys\(\)\.hasAny\(\['aiPaused', 'activeTicketId', 'assignedAgentName', 'agentReplies'\]\)/);
+
+    // 4. chatbot_support_requests: visitor create enforces status=='open', optional Phase 3 triage locked to admin
+    const supBlock = extractMatchBlock('/chatbot_support_requests/{reqId}');
+    assert.match(supBlock, /incoming\(\)\.status == 'open'/);
+    assert.match(supBlock, /!\('assignedTo' in incoming\(\)\)/);
+    assert.match(supBlock, /!\('internalNotes' in incoming\(\)\)/);
+    assert.match(supBlock, /allow get, list: if isAdmin\(\);/);
+
+    // 5. order_review_claims + reviews verifiedPurchase delivered binding
+    const claimBlock = extractMatchBlock('/order_review_claims/{orderNumber}');
+    assert.match(claimBlock, /existsAfter\(\/databases\/\$\(database\)\/documents\/reviews\/\$\('rev_' \+ orderNumber\)\)/);
+    assert.match(claimBlock, /get\(\/databases\/\$\(database\)\/documents\/orders\/\$\(orderNumber\)\)\.data\.status == 'delivered'/);
+
+    const revBlock = extractMatchBlock('/reviews/{reviewId}');
+    assert.match(revBlock, /existsAfter\(\/databases\/\$\(database\)\/documents\/order_review_claims\//);
+
+    // 6. refill_reminders: keyed lookup only, admin-only list
+    const refillBlock = extractMatchBlock('/refill_reminders/{reminderId}');
+    assert.match(refillBlock, /allow get: if isValidId\(reminderId\);/);
+    assert.match(refillBlock, /allow list: if isAdmin\(\);/);
+    assert.match(refillBlock, /allow create: if isValidId\(reminderId\)/);
+
+    // 7. Blueprint & Spec sync
+    for (const entity of ['SupportEvidence', 'SupportAgentReply', 'OrderReviewClaim', 'RefillReminder']) {
+      assert.ok(blueprint.entities[entity], `Missing blueprint entity ${entity}`);
+    }
+    for (const colPath of [
+      '/support_evidence/{evidenceId}',
+      '/support_agent_replies/{replyId}',
+      '/order_review_claims/{orderNumber}',
+      '/refill_reminders/{reminderId}',
+    ]) {
+      assert.ok(blueprint.firestore[colPath], `Missing blueprint path ${colPath}`);
+    }
+    assert.ok(specText.includes('16. **Private Evidence Isolation**'));
+    assert.ok(specText.includes('17. **Human Handover Pause & Audit Trail**'));
+    assert.ok(specText.includes('18. **Verified Delivered Review Claim Integrity & Opt-In Reminders**'));
+  });
+
+  it('Phase 4 Rules & Blueprint Sync: validates optional courier consignment fields, https tracking URLs, courier_updated audit log, and refill dispatch counters', () => {
+    const validOrderFn = extractFunctionBody('isValidOrder');
+    const validTrackingFn = extractFunctionBody('isValidOrderTracking');
+
+    for (const fnBody of [validOrderFn, validTrackingFn]) {
+      for (const field of ['courierPartner', 'consignmentId', 'courierTrackingUrl', 'dispatchedAtIso']) {
+        assert.equal(fnBody.split('hasOnly(')[0].includes(`'${field}'`), false);
+        assert.equal(fnBody.split('hasOnly(')[1].includes(`'${field}'`), true);
+      }
+      assert.match(fnBody, /'steadfast', 'pathao', 'redx', 'manual'/);
+      assert.match(fnBody, /matches\('\^https:\/\/\.\*'\)/);
+    }
+
+    const ordersBlock = extractMatchBlock('/orders/{orderId}');
+    const trackingBlock = extractMatchBlock('/order_tracking/{lookupId}');
+    assert.match(ordersBlock, /'courierPartner', 'consignmentId', 'courierTrackingUrl', 'dispatchedAtIso', 'updatedAt'/);
+    assert.match(trackingBlock, /'courierPartner', 'consignmentId', 'courierTrackingUrl', 'dispatchedAtIso', 'updatedAt'/);
+
+    const auditFn = extractFunctionBody('isValidOrderAuditLog');
+    assert.match(auditFn, /'courier_updated'/);
+
+    const refillFn = extractFunctionBody('isValidRefillReminder');
+    for (const field of ['lastNotifiedAtIso', 'reminderCount']) {
+      assert.equal(refillFn.split('hasOnly(')[0].includes(`'${field}'`), false);
+      assert.equal(refillFn.split('hasOnly(')[1].includes(`'${field}'`), true);
+    }
+
+    const refillBlock = extractMatchBlock('/refill_reminders/{reminderId}');
+    assert.doesNotMatch(
+      refillBlock.split('affectedKeys().hasOnly(')[1] || '',
+      /reminderCount|lastNotifiedAtIso/,
+      'Customers must not self-update reminderCount or lastNotifiedAtIso'
+    );
+
+    assert.ok(blueprint.entities.Order.properties.courierPartner);
+    assert.ok(blueprint.entities.OrderTracking.properties.consignmentId);
+    const auditActionProp = blueprint.entities.OrderAuditLog.properties.action as { enum?: string[] };
+    assert.ok(auditActionProp.enum?.includes('courier_updated'));
+    assert.ok(blueprint.entities.RefillReminder.properties.lastNotifiedAtIso);
+    assert.ok(blueprint.entities.RefillReminder.properties.reminderCount);
+    assert.ok(specText.includes('19. **Courier Consignment Integrity & Refill Dispatch Governance**'));
+  });
+
+  it('Phase 5 Rules & Blueprint Sync: enforces immutable channel_webhook_events, customer-protected marketing_consents, external session phone lock, and attribution fields', () => {
+    // 1. channel_webhook_events: immutable ledger & admin-only read/list
+    const webhookBlock = extractMatchBlock('/channel_webhook_events/{eventId}');
+    const webhookFn = extractFunctionBody('isValidChannelWebhookEvent');
+    assert.match(webhookBlock, /allow get, list: if isAdmin\(\);/);
+    assert.match(webhookBlock, /allow create: if isValidId\(eventId\) && isValidChannelWebhookEvent\(incoming\(\)\);/);
+    assert.match(webhookBlock, /allow update, delete: if false;/);
+    assert.match(webhookFn, /'messenger', 'instagram', 'whatsapp'/);
+    assert.match(webhookFn, /'processed', 'duplicate', 'rejected'/);
+
+    // 2. marketing_consents: phoneKey==phone, admin-only list, customer blocked from spoofing campaignCount/lastCampaignAtIso
+    const consentBlock = extractMatchBlock('/marketing_consents/{phoneKey}');
+    const consentFn = extractFunctionBody('isValidMarketingConsent');
+    assert.match(consentBlock, /allow get: if isValidId\(phoneKey\);/);
+    assert.match(consentBlock, /allow list: if isAdmin\(\);/);
+    assert.match(consentBlock, /phoneKey == incoming\(\)\.phone/);
+    assert.match(consentBlock, /!\('lastCampaignAtIso' in incoming\(\)\)/);
+    assert.doesNotMatch(
+      consentBlock.split('affectedKeys().hasOnly(')[1] || '',
+      /campaignCount|lastCampaignAtIso/,
+      'Customers must not self-update campaignCount or lastCampaignAtIso'
+    );
+    assert.match(consentFn, /data\.phone\.matches\('\^01\[3-9\]\[0-9\]\{8\}\$'\)/);
+
+    // 3. chat_sessions: external identity + visitor linkedPhone immutability once set
+    const sessFn = extractFunctionBody('isValidChatSession');
+    const sessBlock = extractMatchBlock('/chat_sessions/{sessionId}');
+    for (const field of ['channel', 'externalUserId', 'linkedPhone']) {
+      assert.equal(sessFn.split('hasOnly(')[0].includes(`'${field}'`), false);
+      assert.equal(sessFn.split('hasOnly(')[1].includes(`'${field}'`), true);
+    }
+    assert.match(sessBlock, /!\('linkedPhone' in existing\(\)\) \|\| existing\(\)\.linkedPhone == '' \|\| incoming\(\)\.linkedPhone == existing\(\)\.linkedPhone/);
+
+    // 4. Optional attribution & channel fields across Order, ChatbotLog, ChatbotSupportRequest
+    const validOrderFn = extractFunctionBody('isValidOrder');
+    for (const field of ['sourceChannel', 'attributedSessionId']) {
+      assert.equal(validOrderFn.split('hasOnly(')[0].includes(`'${field}'`), false);
+      assert.equal(validOrderFn.split('hasOnly(')[1].includes(`'${field}'`), true);
+    }
+
+    const logFn = extractFunctionBody('isValidChatbotLog');
+    assert.equal(logFn.split('hasOnly(')[0].includes("'channel'"), false);
+    assert.equal(logFn.split('hasOnly(')[1].includes("'channel'"), true);
+
+    const supFn = extractFunctionBody('isValidSupportRequest');
+    for (const field of ['channel', 'externalThreadId']) {
+      assert.equal(supFn.split('hasOnly(')[0].includes(`'${field}'`), false);
+      assert.equal(supFn.split('hasOnly(')[1].includes(`'${field}'`), true);
+    }
+
+    // 5. Blueprint & Spec sync
+    assert.ok(blueprint.entities.ChannelWebhookEvent);
+    assert.ok(blueprint.entities.MarketingConsent);
+    assert.ok(blueprint.firestore['/channel_webhook_events/{eventId}']);
+    assert.ok(blueprint.firestore['/marketing_consents/{phoneKey}']);
+    assert.ok(blueprint.entities.Order.properties.sourceChannel);
+    assert.ok(blueprint.entities.Order.properties.attributedSessionId);
+    assert.ok(blueprint.entities.ChatSession.properties.linkedPhone);
+    assert.ok(specText.includes('20. **Omnichannel Webhook Replay/Idempotency & Marketing Consent/Suppression**'));
+    assert.ok(specText.includes('14. **Webhook Event Tampering or Marketing Campaign Counter Spoofing**'));
+  });
 });
+
+
 

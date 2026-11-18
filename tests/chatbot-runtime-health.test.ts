@@ -129,7 +129,7 @@ describe('T0.1 Gemini runtime configuration & health diagnostics', () => {
     assert.equal(body.checks.primaryModel.reachable, 'no');
     assert.equal(body.checks.primaryModel.supportsTools, true);
     assert.equal(body.checks.sdk.compatible, true);
-    assert.equal(body.checks.sdk.functionDeclarationsCount, 21);
+    assert.equal(body.checks.sdk.functionDeclarationsCount, 26);
   });
 
   it('GET /api/health reports healthy Gemini reachability and never leaks key/secret values', async () => {
@@ -304,5 +304,117 @@ describe('T0.1 Gemini runtime configuration & health diagnostics', () => {
     assert.equal(capturedLogs.length, 1);
     assert.equal(capturedLogs[0].path, 'fallback');
     assert.equal(capturedLogs[0].errorCode, 'gemini_timeout');
+  });
+
+  it('POST /api/chat streaming greeting attaches abortSignal, omits unnecessary tools, and logs clean status=ok telemetry', async () => {
+    process.env.GEMINI_API_KEY = 'AIzaSyTestSecretKeyValue1234567890';
+    process.env.GEMINI_MODEL = 'gemini-4-hydrogen';
+    const capturedInfoLines: string[] = [];
+    const origInfo = console.info;
+    console.info = (...args: unknown[]) => {
+      capturedInfoLines.push(args.map((a) => String(a)).join(' '));
+      origInfo(...args);
+    };
+
+    let sawAbortSignal = false;
+    let sawToolsOnGreeting = false;
+    try {
+      setGeminiClientFactoryForTests(() => ({
+        models: {
+          generateContentStream: async ({ config }: { config?: { abortSignal?: AbortSignal; tools?: unknown[] } }) => {
+            sawAbortSignal = Boolean(config?.abortSignal);
+            sawToolsOnGreeting = Boolean(config?.tools && config.tools.length > 0);
+            async function* gen() {
+              yield {
+                text: 'Assalamu Alaikum! Welcome to Deshi Gee. How can I help you today?',
+                usageMetadata: { promptTokenCount: 410, candidatesTokenCount: 16 },
+                candidates: [{ finishReason: 'STOP' }],
+              };
+            }
+            return gen();
+          },
+        },
+      }) as unknown as GoogleGenAI);
+
+      const req = new Request('http://localhost:3000/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+        },
+        body: JSON.stringify({
+          mode: 'published',
+          uiLang: 'en',
+          stream: true,
+          sessionId: 'test_sess_stream_greet_01',
+          messages: [{ role: 'user', text: 'hi' }],
+        }),
+      });
+
+      const res = await chatPost(req);
+      assert.equal(res.status, 200);
+      const { text, meta } = await parseNdjsonResponse(res);
+      assert.ok(text.includes('Deshi Gee'));
+      assert.equal(meta?.path, 'gemini');
+      assert.equal(sawAbortSignal, true);
+      assert.equal(sawToolsOnGreeting, false);
+
+      const turnLine = capturedInfoLines.find((line) => line.includes('"event":"chatbot_turn"'));
+      assert.ok(turnLine);
+      assert.equal(turnLine.includes('"status":"ok"'), true);
+      assert.equal(/error/i.test(turnLine), false);
+    } finally {
+      console.info = origInfo;
+    }
+  });
+
+  it('POST /api/chat streaming fails over cleanly to fallback model when primary stream times out before flushing', async () => {
+    process.env.GEMINI_API_KEY = 'AIzaSyTestSecretKeyValue1234567890';
+    process.env.GEMINI_MODEL = 'gemini-4-hydrogen';
+    process.env.GEMINI_FALLBACK_MODEL = 'gemini-3.1-flash-lite';
+
+    const calledModels: string[] = [];
+    setGeminiClientFactoryForTests(() => ({
+      models: {
+        generateContentStream: async ({ model }: { model: string }) => {
+          calledModels.push(`stream:${model}`);
+          throw new Error('Gemini request timeout exceeded');
+        },
+        generateContent: async ({ model }: { model: string }) => {
+          calledModels.push(`generate:${model}`);
+          return {
+            text: 'Welcome to Deshi Gee! Our artisanal Pabna bilona cow ghee is ready in 250g, 500g, and 1kg sealed glass jars.',
+            usageMetadata: { promptTokenCount: 200, candidatesTokenCount: 24 },
+            candidates: [{ finishReason: 'STOP' }],
+          };
+        },
+      },
+    }) as unknown as GoogleGenAI);
+
+    const req = new Request('http://localhost:3000/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-requested-with': 'DeshiGeeStorefront',
+      },
+      body: JSON.stringify({
+        mode: 'published',
+        uiLang: 'en',
+        stream: true,
+        sessionId: 'test_sess_stream_failover_01',
+        messages: [{ role: 'user', text: 'hello' }],
+      }),
+    });
+
+    const res = await chatPost(req);
+    assert.equal(res.status, 200);
+    const { text, meta } = await parseNdjsonResponse(res);
+    assert.ok(text.includes('Deshi Gee'));
+    assert.equal(meta?.path, 'gemini');
+    assert.equal(meta?.model, 'gemini-3.1-flash-lite');
+    assert.deepEqual(calledModels, [
+      'stream:gemini-4-hydrogen',
+      'generate:gemini-3.1-flash-lite',
+    ]);
   });
 });

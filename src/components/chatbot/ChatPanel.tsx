@@ -10,7 +10,11 @@ import {
   useState,
 } from 'react';
 import {
+  Headset,
+  ImagePlus,
   Loader2,
+  Mic,
+  MicOff,
   Minimize2,
   RotateCcw,
   Send,
@@ -20,6 +24,7 @@ import {
 import { CHATBOT_BUILD_CONFIG } from '../../lib/chatbot/build-config';
 import type {
   ChatActionItem,
+  ChatAgentReplyItem,
   ChatDiagnosticsMeta,
   ChatMessageItem,
   ChatbotConfigDoc,
@@ -59,6 +64,55 @@ function getOrCreateSessionId(): string {
   }
 }
 
+interface BrowserSpeechRecognitionEvent {
+  results?: ArrayLike<ArrayLike<{ transcript?: string }>>;
+}
+
+interface BrowserSpeechRecognition {
+  lang: string;
+  interimResults: boolean;
+  maxAlternatives: number;
+  continuous: boolean;
+  onresult: ((ev: BrowserSpeechRecognitionEvent) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+async function compressEvidenceFileToDataUrl(file: File): Promise<string> {
+  const rawUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Could not read image file'));
+    reader.readAsDataURL(file);
+  });
+
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('Invalid image file'));
+    el.src = rawUrl;
+  });
+
+  const maxSide = 1100;
+  const scale = Math.min(1, maxSide / Math.max(img.width || 1, img.height || 1));
+  const targetW = Math.max(1, Math.round((img.width || 800) * scale));
+  const targetH = Math.max(1, Math.round((img.height || 800) * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = targetW;
+  canvas.height = targetH;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return rawUrl;
+  ctx.drawImage(img, 0, 0, targetW, targetH);
+
+  let dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+  if (dataUrl.length > 680_000) {
+    dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+  }
+  return dataUrl;
+}
+
 export interface ChatPanelProps {
   chatbotConfig: ChatbotConfigDoc;
   lang: Lang;
@@ -87,10 +141,63 @@ export function ChatPanel({
   const [resumedDraft, setResumedDraft] = useState<OrderDraftDoc | null>(null);
   const [confirmingOrderMsgId, setConfirmingOrderMsgId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState('dg_init');
+  const [aiPaused, setAiPaused] = useState(false);
+  const [activeTicketId, setActiveTicketId] = useState('');
+  const [assignedAgentName, setAssignedAgentName] = useState('');
+  const [pendingEvidence, setPendingEvidence] = useState<{
+    evidenceId: string;
+    filename: string;
+  } | null>(null);
+  const [uploadingEvidence, setUploadingEvidence] = useState(false);
+  const [evidenceError, setEvidenceError] = useState('');
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const scrollEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
 
   const bn = lang === 'bn';
+
+  const applySessionSnapshot = (data: {
+    session?: {
+      lockedLang?: 'bn' | 'en' | '';
+      aiPaused?: boolean;
+      activeTicketId?: string;
+      assignedAgentName?: string;
+      agentReplies?: ChatAgentReplyItem[];
+    } | null;
+    orderDraft?: OrderDraftDoc | null;
+  }) => {
+    if (data.session?.lockedLang === 'bn' || data.session?.lockedLang === 'en') {
+      setLang(data.session.lockedLang);
+    }
+    setAiPaused(Boolean(data.session?.aiPaused));
+    setActiveTicketId(data.session?.activeTicketId || '');
+    setAssignedAgentName(data.session?.assignedAgentName || '');
+
+    const replies = data.session?.agentReplies;
+    if (Array.isArray(replies) && replies.length > 0) {
+      setMessages((prev) => {
+        const existingIds = new Set(prev.map((m) => m.id));
+        const additions: ChatMessageItem[] = [];
+        for (const r of replies) {
+          const msgId = `agent_${r.id}`;
+          if (!existingIds.has(msgId)) {
+            additions.push({
+              id: msgId,
+              role: 'assistant',
+              text: r.text,
+              timestamp: createTimeLabel(),
+              isAgentReply: true,
+              agentName: r.agentName || 'Deshi Gee Support',
+            });
+          }
+        }
+        return additions.length > 0 ? [...prev, ...additions] : prev;
+      });
+    }
+  };
 
   useEffect(() => {
     const activeId = getOrCreateSessionId();
@@ -112,13 +219,17 @@ export function ChatPanel({
       .then((res) => (res.ok ? res.json() : null))
       .then(
         (data: {
-          session?: { lockedLang?: 'bn' | 'en' | '' } | null;
+          session?: {
+            lockedLang?: 'bn' | 'en' | '';
+            aiPaused?: boolean;
+            activeTicketId?: string;
+            assignedAgentName?: string;
+            agentReplies?: ChatAgentReplyItem[];
+          } | null;
           orderDraft?: OrderDraftDoc | null;
         } | null) => {
           if (cancelled || !data) return;
-          if (data.session?.lockedLang === 'bn' || data.session?.lockedLang === 'en') {
-            setLang(data.session.lockedLang);
-          }
+          applySessionSnapshot(data);
           if (
             data.orderDraft &&
             data.orderDraft.state !== 'confirmed' &&
@@ -138,6 +249,26 @@ export function ChatPanel({
       cancelled = true;
     };
   }, [setLang]);
+
+  useEffect(() => {
+    if (!open || minimized || sessionId === 'dg_init' || messages.length === 0) return;
+    let active = true;
+    const poll = () => {
+      fetch(`/api/chat/session?sessionId=${encodeURIComponent(sessionId)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (active && data) {
+            applySessionSnapshot(data);
+          }
+        })
+        .catch(() => {});
+    };
+    const timer = setInterval(poll, 6000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [open, minimized, sessionId, messages.length]);
 
   useEffect(() => {
     if (messages.length === 0) return;
@@ -182,6 +313,77 @@ export function ChatPanel({
     };
   }, [open, minimized]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const win = window as unknown as {
+      SpeechRecognition?: new () => BrowserSpeechRecognition;
+      webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+    };
+    if (win.SpeechRecognition || win.webkitSpeechRecognition) {
+      setSpeechSupported(true);
+    }
+    return () => {
+      try {
+        recognitionRef.current?.stop();
+      } catch {
+        // ignore cleanup error
+      }
+      recognitionRef.current = null;
+    };
+  }, []);
+
+  const toggleVoiceDictation = () => {
+    if (typeof window === 'undefined' || !speechSupported) return;
+    if (isListening && recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore stop errors
+      }
+      setIsListening(false);
+      return;
+    }
+
+    const win = window as unknown as {
+      SpeechRecognition?: new () => BrowserSpeechRecognition;
+      webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+    };
+    const SpeechCtor = win.SpeechRecognition || win.webkitSpeechRecognition;
+    if (!SpeechCtor) return;
+
+    try {
+      const recognition = new SpeechCtor();
+      recognition.lang = lang === 'bn' ? 'bn-BD' : 'en-US';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+      recognition.continuous = false;
+      recognition.onresult = (ev) => {
+        const transcript = String(ev.results?.[0]?.[0]?.transcript || '').trim();
+        if (transcript) {
+          setInput((prev) => {
+            const combined = prev.trim() ? `${prev.trim()} ${transcript}` : transcript;
+            return combined.slice(0, CHATBOT_BUILD_CONFIG.MAX_MESSAGE_CHARS);
+          });
+          setTimeout(() => inputRef.current?.focus(), 50);
+        }
+      };
+      recognition.onerror = () => {
+        setIsListening(false);
+        recognitionRef.current = null;
+      };
+      recognition.onend = () => {
+        setIsListening(false);
+        recognitionRef.current = null;
+      };
+      recognitionRef.current = recognition;
+      setIsListening(true);
+      recognition.start();
+    } catch {
+      setIsListening(false);
+      recognitionRef.current = null;
+    }
+  };
+
   const welcomeMessage = bn
     ? chatbotConfig.welcomeMessageBn
     : chatbotConfig.welcomeMessageEn;
@@ -203,10 +405,62 @@ export function ChatPanel({
     return null;
   }
 
+  const handleEvidenceFileSelected = async (file?: File | null) => {
+    if (!file || uploadingEvidence) return;
+    setEvidenceError('');
+    setUploadingEvidence(true);
+    try {
+      const dataUrl = await compressEvidenceFileToDataUrl(file);
+      const res = await fetch('/api/support/evidence', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+        },
+        body: JSON.stringify({
+          dataUrl,
+          filename: file.name || 'evidence.jpg',
+          sessionId,
+          purpose: 'general',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok || !data.evidenceId) {
+        throw new Error(
+          data.error ||
+            (bn ? 'ছবি আপলোড করা যায়নি।' : 'Could not upload photo evidence.')
+        );
+      }
+      setPendingEvidence({
+        evidenceId: String(data.evidenceId),
+        filename: String(data.filename || file.name || 'photo.jpg'),
+      });
+    } catch (err) {
+      setEvidenceError(
+        err instanceof Error
+          ? err.message
+          : bn
+            ? 'ছবি আপলোড ব্যর্থ হয়েছে।'
+            : 'Evidence upload failed.'
+      );
+    } finally {
+      setUploadingEvidence(false);
+    }
+  };
+
   const sendMessage = async (rawText: string, replaceFromRetry = false) => {
-    const trimmed = rawText.trim().slice(0, CHATBOT_BUILD_CONFIG.MAX_MESSAGE_CHARS);
+    const attachmentSuffix =
+      !replaceFromRetry && pendingEvidence
+        ? `\n[Evidence ID: ${pendingEvidence.evidenceId}]`
+        : '';
+    const combinedRaw = `${rawText.trim()}${attachmentSuffix}`.trim();
+    const trimmed = combinedRaw.slice(0, CHATBOT_BUILD_CONFIG.MAX_MESSAGE_CHARS);
     if (!trimmed || awaitingReply || confirmingOrderMsgId) return;
 
+    if (!replaceFromRetry && pendingEvidence) {
+      setPendingEvidence(null);
+    }
+    setEvidenceError('');
     setResumedDraft(null);
     let activeSessionId = sessionId;
     const needsRollover =
@@ -419,6 +673,7 @@ export function ChatPanel({
         body: JSON.stringify({
           confirmationToken: summary.confirmationToken,
           sessionId,
+          sourceChannel: 'web',
           uiLang: lang,
           website: '',
         }),
@@ -615,6 +870,10 @@ export function ChatPanel({
     setMessages([]);
     setRolloverNotice(false);
     setResumedDraft(null);
+    setAiPaused(false);
+    setActiveTicketId('');
+    setAssignedAgentName('');
+    setPendingEvidence(null);
     const fresh = `dg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     setSessionId(fresh);
     try {
@@ -819,9 +1078,109 @@ export function ChatPanel({
         <div ref={scrollEndRef} />
       </div>
 
+      {/* Human Agent Ownership Banner */}
+      {aiPaused && (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-[11px] font-medium text-emerald-950">
+          <div className="flex items-center gap-2 min-w-0">
+            <Headset className="h-3.5 w-3.5 shrink-0 text-emerald-800" />
+            <span className="truncate">
+              {bn
+                ? `মানব প্রতিনিধি (${assignedAgentName || 'Deshi Gee Support'}) সাপোর্ট দিচ্ছেন · AI বিরতিতে`
+                : `Human agent (${assignedAgentName || 'Deshi Gee Support'}) active · AI paused`}
+            </span>
+          </div>
+          {activeTicketId && (
+            <span className="shrink-0 font-mono text-[10px] font-semibold text-emerald-800">
+              {activeTicketId}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Input Composer */}
       <div className="shrink-0 border-t border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] px-3 pt-2.5 pb-[max(0.65rem,env(safe-area-inset-bottom))]">
+        {(pendingEvidence || evidenceError) && (
+          <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-[rgba(180,123,43,0.3)] bg-[#F2ECE1]/75 px-2.5 py-1.5 text-[11px]">
+            {evidenceError ? (
+              <span className="text-red-700">{evidenceError}</span>
+            ) : (
+              <span className="truncate font-medium text-[#1E1710]">
+                {bn ? 'ছবি সংযুক্ত:' : 'Attached:'}{' '}
+                <span className="font-mono text-[#8A5A17]">{pendingEvidence?.filename}</span>
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setPendingEvidence(null);
+                setEvidenceError('');
+              }}
+              aria-label={bn ? 'ছবি সরান' : 'Remove attachment'}
+              className="shrink-0 text-[#635647] hover:text-[#1E1710]"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
         <div className="flex items-end gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              handleEvidenceFileSelected(f);
+              e.target.value = '';
+            }}
+          />
+          <button
+            type="button"
+            disabled={uploadingEvidence || awaitingReply}
+            onClick={() => fileInputRef.current?.click()}
+            title={bn ? 'জার/পেমেন্ট ছবি সংযুক্ত করুন' : 'Attach damaged jar or payment photo'}
+            aria-label={bn ? 'ছবি সংযুক্ত করুন' : 'Attach photo'}
+            className="inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] text-[#635647] transition-colors hover:border-[#B47B2B] hover:text-[#1E1710] disabled:opacity-45"
+          >
+            {uploadingEvidence ? (
+              <Loader2 className="h-4 w-4 animate-spin text-[#B47B2B]" />
+            ) : (
+              <ImagePlus className="h-4 w-4" />
+            )}
+          </button>
+          {speechSupported && (
+            <button
+              type="button"
+              disabled={awaitingReply}
+              onClick={toggleVoiceDictation}
+              title={
+                isListening
+                  ? bn
+                    ? 'ভয়েস ইনপুট বন্ধ করুন'
+                    : 'Stop voice dictation'
+                  : bn
+                    ? 'বাংলা বা ইংরেজিতে ভয়েসে লিখুন'
+                    : 'Speak in Bangla or English'
+              }
+              aria-label={
+                isListening
+                  ? bn
+                    ? 'ভয়েস ইনপুট বন্ধ করুন'
+                    : 'Stop voice dictation'
+                  : bn
+                    ? 'ভয়েস ইনপুট শুরু করুন'
+                    : 'Start voice dictation'
+              }
+              className={`inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-xl border transition-colors disabled:opacity-45 ${
+                isListening
+                  ? 'border-red-500 bg-red-50 text-red-700'
+                  : 'border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] text-[#635647] hover:border-[#B47B2B] hover:text-[#1E1710]'
+              }`}
+            >
+              {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            </button>
+          )}
           <textarea
             ref={inputRef}
             rows={1}
@@ -841,11 +1200,11 @@ export function ChatPanel({
           <button
             type="button"
             disabled={
-              !input.trim() ||
+              (!input.trim() && !pendingEvidence) ||
               awaitingReply ||
               Boolean(confirmingOrderMsgId)
             }
-            onClick={() => sendMessage(input)}
+            onClick={() => sendMessage(input || (bn ? 'ছবি সংযুক্ত করেছি' : 'Attached evidence photo'))}
             aria-label={bn ? 'মেসেজ পাঠান' : 'Send message'}
             className="inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-xl bg-[#B47B2B] text-[#FFFDF9] transition-colors hover:bg-[#9D6820] disabled:cursor-not-allowed disabled:opacity-45"
           >

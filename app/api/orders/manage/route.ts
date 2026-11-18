@@ -42,7 +42,8 @@ export async function POST(request: Request) {
   const isAdminOp =
     action === 'admin_review_approve' ||
     action === 'admin_review_reject' ||
-    action === 'admin_cancel';
+    action === 'admin_cancel' ||
+    action === 'admin_update_courier';
 
   if (isAdminOp) {
     const authHeader = request.headers.get('authorization');
@@ -52,9 +53,18 @@ export async function POST(request: Request) {
     }
     const idToken = authHeader ? authHeader.slice(7).trim() : '';
     const result = await manageServerOrder({
-      action: action as 'admin_review_approve' | 'admin_review_reject' | 'admin_cancel',
+      action: action as
+        | 'admin_review_approve'
+        | 'admin_review_reject'
+        | 'admin_cancel'
+        | 'admin_update_courier',
       orderNumber,
       reason,
+      courierPartner: body.courierPartner,
+      consignmentId: typeof body.consignmentId === 'string' ? body.consignmentId : undefined,
+      courierTrackingUrl:
+        typeof body.courierTrackingUrl === 'string' ? body.courierTrackingUrl : undefined,
+      markShipped: typeof body.markShipped === 'boolean' ? body.markShipped : undefined,
       adminIdToken: idToken,
       actorEmail: admin.email,
     });

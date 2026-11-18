@@ -218,10 +218,8 @@ export function generateLiveFallbackReply(params: {
 
   // 4. Greetings & Courtesy
   if (
-    /(assalamu|salam|সালাম|হ্যালো|হাই|hello|hi|hey|কেমন আছেন|valo|bhalo)/i.test(clean) &&
-    !clean.includes('দাম') &&
-    !clean.includes('অর্ডার') &&
-    !clean.includes('ডেলিভারি')
+    /(\b(?:assalamu|salam|hello|hi|hey|valo|bhalo)\b|সালাম|হ্যালো|হাই|কেমন আছেন)/i.test(clean) &&
+    !/(dam|daam|price|cost|koto|order|delivery|track|দাম|অর্ডার|ডেলিভারি)/i.test(clean)
   ) {
     addOrderAction();
     addWhatsAppAction();
@@ -428,6 +426,65 @@ export function generateLiveFallbackReply(params: {
       intent: 'policy',
       actions,
       suggestedReplies: buildContextualSuggestedReplies('tracking', replyLang, params.activeDraft),
+      factsVersion: facts.factsVersion,
+    };
+  }
+
+  // 12b. Payment Dispute / Manual Verification
+  if (
+    /(pending_verification|unverified|double\s*charged|deducted|money\s*cut|payment\s*(issue|problem|dispute|failed|not\s*verified)|টাকা\s*কেটে|ভেরিফাই\s*হয়নি|ভেরিফাই\s*হয়নি|পেমেন্ট\s*(সমস্যা|যাচাই|ডিসপিউট))/i.test(
+      clean
+    )
+  ) {
+    addTrackAction();
+    addPhoneAction();
+    addWhatsAppAction();
+    return {
+      replyText: isBn
+        ? `bKash ও Nagad পেমেন্ট আমাদের টিম ম্যানুয়ালি যাচাই করে নিশ্চিত করে (তাই ট্রানজেকশন ম্যাচ হওয়ার আগ পর্যন্ত "Pending Verification" দেখাতে পারে)। আপনার Order ID (যেমন DG-10421) ও চেকআউট নম্বর দিলে এখনই অবস্থা দেখতে পারবেন, অথবা /track পেজে ট্রানজেকশন স্ক্রিনশট দিয়ে পেমেন্ট ডিসপিউট টিকিট খুলুন। কখনোই PIN বা OTP দেবেন না।`
+        : `bKash and Nagad transfers are reconciled manually by our team (they remain Pending Verification until matched). Share your Order ID (e.g. DG-10421) and checkout phone number to check status, or open a Payment Dispute ticket with your transfer screenshot on Track Order. Never share your PIN or OTP.`,
+      intent: 'payment_dispute',
+      actions,
+      suggestedReplies: buildContextualSuggestedReplies('payment_dispute', replyLang, params.activeDraft),
+      factsVersion: facts.factsVersion,
+    };
+  }
+
+  // 12c. Late Delivery Follow-up
+  if (
+    /(late\s*delivery|delay|delayed|not\s*delivered|haven'?t\s*received|still\s*not\s*received|overdue|এখনো\s*পাইনি|দেরি|আসেনি|দেরী)/i.test(
+      clean
+    )
+  ) {
+    addTrackAction();
+    addPhoneAction();
+    addWhatsAppAction();
+    return {
+      replyText: isBn
+        ? `ডেলিভারিতে দেরি হওয়ার জন্য আন্তরিকভাবে দুঃখিত। আপনার Order ID (যেমন DG-10421) এবং চেকআউটের ১১ সংখ্যার মোবাইল নম্বর দিন, আমি ডেলিভারি টাইমলাইন পরীক্ষা করে প্রয়োজনে জরুরি (Urgent) ফলো-আপ টিকিট খুলে দেব অথবা /track পেজ ব্যবহার করুন।`
+        : `We apologize for any delivery delay. Please share your Order ID (e.g. DG-10421) and checkout phone number so I can inspect the delivery timeline and open an Urgent Late Delivery follow-up ticket if overdue, or check via Track Order below.`,
+      intent: 'late_delivery',
+      actions,
+      suggestedReplies: buildContextualSuggestedReplies('late_delivery', replyLang, params.activeDraft),
+      factsVersion: facts.factsVersion,
+    };
+  }
+
+  // 12d. One-Click Reorder & Refill Reminder
+  if (
+    /(reorder|order\s*again|buy\s*again|same\s*as\s*last|refill\s*reminder|আবার\s*অর্ডার|রিঅর্ডার|আগের\s*মত|আগের\s*মতো|রিফিল\s*রিমাইন্ডার)/i.test(
+      clean
+    )
+  ) {
+    addTrackAction();
+    addOrderAction();
+    return {
+      replyText: isBn
+        ? `আগের মতোই সহজে রিঅর্ডার করতে বা রিফিল রিমাইন্ডার সেট করতে আপনার আগের Order ID (যেমন DG-10421) এবং চেকআউট মোবাইল নম্বর দিন—আমি লাইভ স্টক ও বর্তমান মূল্য যাচাই করে ওয়ান-ক্লিক রিঅর্ডার লিংক তৈরি করে দেব।`
+        : `To prepare a one-click reorder from your previous order or set an opt-in refill reminder, please share your previous Order ID (e.g. DG-10421) and checkout phone number.`,
+      intent: 'reorder',
+      actions,
+      suggestedReplies: buildContextualSuggestedReplies('reorder', replyLang, params.activeDraft),
       factsVersion: facts.factsVersion,
     };
   }

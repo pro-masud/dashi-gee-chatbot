@@ -60,6 +60,32 @@ const structuredData = {
         highPrice: '2480',
         offerCount: '3',
         availability: 'https://schema.org/InStock',
+        offers: [
+          {
+            '@type': 'Offer',
+            name: 'Deshi Gee 250g Sealed Glass Jar',
+            sku: 'DG-250G',
+            price: '680',
+            priceCurrency: 'BDT',
+            availability: 'https://schema.org/InStock',
+          },
+          {
+            '@type': 'Offer',
+            name: 'Deshi Gee 500g Sealed Glass Jar',
+            sku: 'DG-500G',
+            price: '1290',
+            priceCurrency: 'BDT',
+            availability: 'https://schema.org/InStock',
+          },
+          {
+            '@type': 'Offer',
+            name: 'Deshi Gee 1kg Sealed Glass Jar',
+            sku: 'DG-1KG',
+            price: '2480',
+            priceCurrency: 'BDT',
+            availability: 'https://schema.org/InStock',
+          },
+        ],
       },
     },
     {

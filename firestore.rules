@@ -117,8 +117,10 @@ service cloud.firestore {
           'unitPriceBdt', 'subtotalBdt', 'deliveryFeeBdt', 'discountBdt',
           'totalBdt', 'couponCode', 'paymentMethod', 'paymentStatus',
           'txnId', 'paymentProofData', 'status', 'estimatedDelivery',
-          'webhookStatus', 'riskScore', 'riskSignals', 'reviewStatus',
-          'duplicateWarning', 'codVerificationStatus', 'createdAt', 'updatedAt'
+          'webhookStatus', 'courierPartner', 'consignmentId', 'courierTrackingUrl',
+          'dispatchedAtIso', 'riskScore', 'riskSignals', 'reviewStatus',
+          'duplicateWarning', 'codVerificationStatus', 'sourceChannel',
+          'attributedSessionId', 'createdAt', 'updatedAt'
         ])
         && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
         && data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 100
@@ -148,11 +150,17 @@ service cloud.firestore {
         && data.status in ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled']
         && data.estimatedDelivery is string && data.estimatedDelivery.size() <= 80
         && data.webhookStatus is string && data.webhookStatus.size() <= 80
+        && (!('courierPartner' in data) || data.courierPartner in ['steadfast', 'pathao', 'redx', 'manual'])
+        && (!('consignmentId' in data) || (data.consignmentId is string && data.consignmentId.size() <= 80))
+        && (!('courierTrackingUrl' in data) || (data.courierTrackingUrl is string && data.courierTrackingUrl.size() <= 300 && (data.courierTrackingUrl == '' || data.courierTrackingUrl.matches('^https://.*'))))
+        && (!('dispatchedAtIso' in data) || (data.dispatchedAtIso is string && data.dispatchedAtIso.size() <= 48))
         && (!('riskScore' in data) || (data.riskScore is number && data.riskScore >= 0 && data.riskScore <= 100))
         && (!('riskSignals' in data) || (data.riskSignals is list && data.riskSignals.size() <= 12 && (data.riskSignals.size() == 0 || data.riskSignals[0] is string)))
         && (!('reviewStatus' in data) || data.reviewStatus in ['none', 'manual_review', 'approved', 'rejected'])
         && (!('duplicateWarning' in data) || (data.duplicateWarning is string && data.duplicateWarning.size() <= 240))
         && (!('codVerificationStatus' in data) || data.codVerificationStatus in ['not_required', 'not_configured', 'pending', 'verified'])
+        && (!('sourceChannel' in data) || data.sourceChannel in ['web', 'messenger', 'instagram', 'whatsapp', 'email', 'sms'])
+        && (!('attributedSessionId' in data) || (data.attributedSessionId is string && data.attributedSessionId.size() <= 64))
         && data.updatedAt == request.time;
     }
 
@@ -189,7 +197,8 @@ service cloud.firestore {
           'orderNumber', 'weight', 'qty', 'qty250g', 'qty500g', 'qty1kg',
           'itemsSummary', 'subtotalBdt', 'deliveryFeeBdt', 'discountBdt',
           'couponCode', 'deliveryZone', 'district', 'totalBdt', 'paymentMethod',
-          'paymentStatus', 'status', 'reviewStatus', 'estimatedDelivery', 'updatedAt'
+          'paymentStatus', 'status', 'reviewStatus', 'estimatedDelivery',
+          'courierPartner', 'consignmentId', 'courierTrackingUrl', 'dispatchedAtIso', 'updatedAt'
         ])
         && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
         && data.weight in ['250g', '500g', '1kg']
@@ -210,6 +219,10 @@ service cloud.firestore {
         && data.status in ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled']
         && (!('reviewStatus' in data) || data.reviewStatus in ['none', 'manual_review', 'approved', 'rejected'])
         && data.estimatedDelivery is string && data.estimatedDelivery.size() <= 80
+        && (!('courierPartner' in data) || data.courierPartner in ['steadfast', 'pathao', 'redx', 'manual'])
+        && (!('consignmentId' in data) || (data.consignmentId is string && data.consignmentId.size() <= 80))
+        && (!('courierTrackingUrl' in data) || (data.courierTrackingUrl is string && data.courierTrackingUrl.size() <= 300 && (data.courierTrackingUrl == '' || data.courierTrackingUrl.matches('^https://.*'))))
+        && (!('dispatchedAtIso' in data) || (data.dispatchedAtIso is string && data.dispatchedAtIso.size() <= 48))
         && data.updatedAt == request.time;
     }
 
@@ -307,7 +320,8 @@ service cloud.firestore {
           'approvedClaims', 'blockedClaims', 'approvedClaimsMeta', 'claimAuditHistory',
           'currentOffers', 'district', 'city', 'googleMapsUrl',
           'directionsUrl', 'businessHours', 'openHourBst', 'closeHourBst',
-          'closedDays', 'supportAvailabilityNote', 'deliveryPolicy', 'returnPolicy',
+          'closedDays', 'supportAvailabilityNote', 'humanSupportEnabled',
+          'slaStandardMinutes', 'slaUrgentMinutes', 'deliveryPolicy', 'returnPolicy',
           'replacementPolicy', 'otherPaymentInfo', 'supportInstructions',
           'customInstructions', 'responseTone', 'responseLength', 'languageBehavior',
           'synonyms', 'primaryModel', 'fallbackModel',
@@ -350,6 +364,9 @@ service cloud.firestore {
         && data.closeHourBst is number && data.closeHourBst >= 0 && data.closeHourBst <= 23
         && data.closedDays is string && data.closedDays.size() <= 80
         && data.supportAvailabilityNote is string && data.supportAvailabilityNote.size() <= 300
+        && (!('humanSupportEnabled' in data) || data.humanSupportEnabled is bool)
+        && (!('slaStandardMinutes' in data) || (data.slaStandardMinutes is number && data.slaStandardMinutes >= 15 && data.slaStandardMinutes <= 1440))
+        && (!('slaUrgentMinutes' in data) || (data.slaUrgentMinutes is number && data.slaUrgentMinutes >= 5 && data.slaUrgentMinutes <= 720))
         && data.deliveryPolicy is string && data.deliveryPolicy.size() <= 1200
         && data.returnPolicy is string && data.returnPolicy.size() <= 1200
         && data.replacementPolicy is string && data.replacementPolicy.size() <= 1200
@@ -459,7 +476,7 @@ service cloud.firestore {
           'isTestPlayground', 'path', 'model', 'isError', 'finishReason',
           'guardCategory', 'retryCount', 'toolCallCount', 'factsVersion',
           'ragMs', 'modelMs', 'toolMs', 'ragSources', 'confidence',
-          'feedback', 'feedbackReason', 'createdAt'
+          'feedback', 'feedbackReason', 'channel', 'createdAt'
         ])
         && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
         && data.lang in ['bn', 'en', 'banglish']
@@ -489,7 +506,8 @@ service cloud.firestore {
         && (!('ragSources' in data) || (data.ragSources is list && data.ragSources.size() <= 10 && (data.ragSources.size() == 0 || data.ragSources[0] is string)))
         && (!('confidence' in data) || (data.confidence is number && data.confidence >= 0 && data.confidence <= 1))
         && (!('feedback' in data) || data.feedback in ['', 'up', 'down'])
-        && (!('feedbackReason' in data) || (data.feedbackReason is string && data.feedbackReason.size() <= 60));
+        && (!('feedbackReason' in data) || (data.feedbackReason is string && data.feedbackReason.size() <= 60))
+        && (!('channel' in data) || data.channel in ['web', 'messenger', 'instagram', 'whatsapp', 'email', 'sms']);
     }
 
     function isValidSupportRequest(data) {
@@ -499,13 +517,41 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'sessionId', 'customerName', 'phone', 'issueSummary',
-          'status', 'createdAt', 'updatedAt'
+          'status', 'createdAt', 'updatedAt',
+          'ticketNumber', 'orderNumber', 'category', 'priority', 'contextSummary',
+          'transcriptExcerpt', 'consentGranted', 'evidenceIds', 'paymentStatusSnapshot',
+          'orderStatusSnapshot', 'slaMinutes', 'slaDueAtIso', 'slaWindowLabelEn',
+          'slaWindowLabelBn', 'assignedTo', 'tags', 'resolutionReason',
+          'internalNotes', 'firstRespondedAtIso', 'resolvedAtIso',
+          'channel', 'externalThreadId'
         ])
         && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
         && data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 100
         && data.phone is string && data.phone.matches('^01[3-9][0-9]{8}$')
         && data.issueSummary is string && data.issueSummary.size() >= 4 && data.issueSummary.size() <= 500
-        && data.status in ['open', 'contacted', 'resolved']
+        && data.status in ['open', 'pending', 'contacted', 'waiting_for_customer', 'escalated', 'resolved']
+        && (!('ticketNumber' in data) || (data.ticketNumber is string && data.ticketNumber.size() <= 32))
+        && (!('orderNumber' in data) || (data.orderNumber is string && data.orderNumber.size() <= 20))
+        && (!('category' in data) || data.category in ['damaged_jar', 'payment_dispute', 'late_delivery', 'refund_return', 'bulk_order', 'general'])
+        && (!('priority' in data) || data.priority in ['standard', 'urgent'])
+        && (!('contextSummary' in data) || (data.contextSummary is string && data.contextSummary.size() <= 1000))
+        && (!('transcriptExcerpt' in data) || (data.transcriptExcerpt is string && data.transcriptExcerpt.size() <= 2000))
+        && (!('consentGranted' in data) || data.consentGranted is bool)
+        && (!('evidenceIds' in data) || (data.evidenceIds is list && data.evidenceIds.size() <= 6 && (data.evidenceIds.size() == 0 || data.evidenceIds[0] is string)))
+        && (!('paymentStatusSnapshot' in data) || (data.paymentStatusSnapshot is string && data.paymentStatusSnapshot.size() <= 40))
+        && (!('orderStatusSnapshot' in data) || (data.orderStatusSnapshot is string && data.orderStatusSnapshot.size() <= 40))
+        && (!('slaMinutes' in data) || (data.slaMinutes is number && data.slaMinutes >= 5 && data.slaMinutes <= 2880))
+        && (!('slaDueAtIso' in data) || (data.slaDueAtIso is string && data.slaDueAtIso.size() <= 48))
+        && (!('slaWindowLabelEn' in data) || (data.slaWindowLabelEn is string && data.slaWindowLabelEn.size() <= 240))
+        && (!('slaWindowLabelBn' in data) || (data.slaWindowLabelBn is string && data.slaWindowLabelBn.size() <= 300))
+        && (!('assignedTo' in data) || (data.assignedTo is string && data.assignedTo.size() <= 120))
+        && (!('tags' in data) || (data.tags is list && data.tags.size() <= 10 && (data.tags.size() == 0 || data.tags[0] is string)))
+        && (!('resolutionReason' in data) || (data.resolutionReason is string && data.resolutionReason.size() <= 240))
+        && (!('internalNotes' in data) || (data.internalNotes is string && data.internalNotes.size() <= 1000))
+        && (!('firstRespondedAtIso' in data) || (data.firstRespondedAtIso is string && data.firstRespondedAtIso.size() <= 48))
+        && (!('resolvedAtIso' in data) || (data.resolvedAtIso is string && data.resolvedAtIso.size() <= 48))
+        && (!('channel' in data) || data.channel in ['web', 'messenger', 'instagram', 'whatsapp', 'email', 'sms'])
+        && (!('externalThreadId' in data) || (data.externalThreadId is string && data.externalThreadId.size() <= 128))
         && data.updatedAt == request.time;
     }
 
@@ -577,7 +623,9 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'sessionId', 'language', 'lockedLang', 'scriptPreference',
-          'consent', 'currentIntent', 'orderDraftId', 'turnCount', 'lastTurnAt'
+          'consent', 'currentIntent', 'orderDraftId', 'turnCount',
+          'aiPaused', 'activeTicketId', 'assignedAgentName', 'agentReplies',
+          'channel', 'externalUserId', 'linkedPhone', 'lastTurnAt'
         ])
         && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
         && data.language in ['bn', 'en']
@@ -587,6 +635,13 @@ service cloud.firestore {
         && data.currentIntent is string && data.currentIntent.size() <= 60
         && data.orderDraftId is string && data.orderDraftId.size() <= 96
         && data.turnCount is number && data.turnCount >= 0 && data.turnCount <= 1000
+        && (!('aiPaused' in data) || data.aiPaused is bool)
+        && (!('activeTicketId' in data) || (data.activeTicketId is string && data.activeTicketId.size() <= 96))
+        && (!('assignedAgentName' in data) || (data.assignedAgentName is string && data.assignedAgentName.size() <= 80))
+        && (!('agentReplies' in data) || (data.agentReplies is list && data.agentReplies.size() <= 25 && (data.agentReplies.size() == 0 || data.agentReplies[0] is map)))
+        && (!('channel' in data) || data.channel in ['web', 'messenger', 'instagram', 'whatsapp', 'email', 'sms'])
+        && (!('externalUserId' in data) || (data.externalUserId is string && data.externalUserId.size() <= 128))
+        && (!('linkedPhone' in data) || (data.linkedPhone is string && (data.linkedPhone == '' || data.linkedPhone.matches('^01[3-9][0-9]{8}$'))))
         && data.lastTurnAt == request.time;
     }
 
@@ -642,7 +697,7 @@ service cloud.firestore {
           'previousStatus', 'nextStatus', 'previousTotalBdt', 'nextTotalBdt', 'metadata', 'createdAt'
         ])
         && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
-        && data.action in ['created', 'address_updated', 'cancelled', 'review_approved', 'review_rejected', 'status_updated', 'cod_verification']
+        && data.action in ['created', 'address_updated', 'cancelled', 'review_approved', 'review_rejected', 'status_updated', 'cod_verification', 'courier_updated']
         && data.actorType in ['customer', 'admin', 'system']
         && data.summary is string && data.summary.size() >= 3 && data.summary.size() <= 300
         && (!('previousStatus' in data) || (data.previousStatus is string && data.previousStatus.size() <= 40))
@@ -672,6 +727,104 @@ service cloud.firestore {
         && data.intent is string && data.intent.size() <= 60
         && data.resolved is bool
         && data.createdAt == request.time;
+    }
+
+    function isValidSupportEvidence(data) {
+      return data.keys().hasAll([
+          'sessionId', 'mimeType', 'filename', 'sizeBytes', 'dataBase64', 'purpose', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'orderNumber', 'mimeType', 'filename', 'sizeBytes', 'dataBase64', 'purpose', 'createdAt'
+        ])
+        && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
+        && (!('orderNumber' in data) || (data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')))
+        && data.mimeType in ['image/jpeg', 'image/png', 'image/webp']
+        && data.filename is string && data.filename.size() >= 1 && data.filename.size() <= 120
+        && data.sizeBytes is number && data.sizeBytes >= 32 && data.sizeBytes <= 550000
+        && data.dataBase64 is string && data.dataBase64.size() >= 32 && data.dataBase64.size() <= 720000
+        && data.purpose in ['damage_claim', 'payment_dispute', 'general']
+        && data.createdAt == request.time;
+    }
+
+    function isValidSupportAgentReply(data) {
+      return data.keys().hasAll([
+          'ticketId', 'sessionId', 'agentEmail', 'agentName', 'text', 'createdAtIso', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ticketId', 'sessionId', 'agentEmail', 'agentName', 'text', 'createdAtIso', 'createdAt'
+        ])
+        && data.ticketId is string && data.ticketId.size() >= 4 && data.ticketId.size() <= 96
+        && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
+        && data.agentEmail is string && data.agentEmail.size() <= 160
+        && data.agentName is string && data.agentName.size() >= 2 && data.agentName.size() <= 80
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 2000
+        && data.createdAtIso is string && data.createdAtIso.size() <= 48
+        && data.createdAt == request.time;
+    }
+
+    function isValidOrderReviewClaim(data) {
+      return data.keys().hasAll(['orderNumber', 'createdAt'])
+        && data.keys().hasOnly(['orderNumber', 'createdAt'])
+        && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
+        && data.createdAt == request.time;
+    }
+
+    function isValidRefillReminder(data) {
+      return data.keys().hasAll([
+          'orderNumber', 'phone', 'intervalDays', 'status', 'consentGranted',
+          'nextReminderAtIso', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'orderNumber', 'phone', 'customerName', 'weight', 'intervalDays', 'status',
+          'consentGranted', 'nextReminderAtIso', 'lastNotifiedAtIso', 'reminderCount',
+          'createdAt', 'updatedAt'
+        ])
+        && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
+        && data.phone is string && data.phone.matches('^01[3-9][0-9]{8}$')
+        && (!('customerName' in data) || (data.customerName is string && data.customerName.size() <= 100))
+        && (!('weight' in data) || data.weight in ['250g', '500g', '1kg'])
+        && data.intervalDays in [30, 45, 60, 90]
+        && data.status in ['active', 'paused', 'opted_out']
+        && data.consentGranted == true
+        && data.nextReminderAtIso is string && data.nextReminderAtIso.size() <= 48
+        && (!('lastNotifiedAtIso' in data) || (data.lastNotifiedAtIso is string && data.lastNotifiedAtIso.size() <= 48))
+        && (!('reminderCount' in data) || (data.reminderCount is number && data.reminderCount >= 0 && data.reminderCount <= 1000))
+        && data.updatedAt == request.time;
+    }
+
+    function isValidChannelWebhookEvent(data) {
+      return data.keys().hasAll(['channel', 'eventId', 'senderId', 'status', 'createdAtIso', 'createdAt'])
+        && data.keys().hasOnly(['channel', 'eventId', 'senderId', 'verifiedPhone', 'status', 'createdAtIso', 'createdAt'])
+        && data.channel in ['messenger', 'instagram', 'whatsapp']
+        && data.eventId is string && data.eventId.size() >= 2 && data.eventId.size() <= 128
+        && data.senderId is string && data.senderId.size() >= 2 && data.senderId.size() <= 128
+        && (!('verifiedPhone' in data) || (data.verifiedPhone is string && (data.verifiedPhone == '' || data.verifiedPhone.matches('^01[3-9][0-9]{8}$'))))
+        && data.status in ['processed', 'duplicate', 'rejected']
+        && data.createdAtIso is string && data.createdAtIso.size() <= 48
+        && data.createdAt == request.time;
+    }
+
+    function isValidMarketingConsent(data) {
+      return data.keys().hasAll([
+          'phone', 'channel', 'optIn', 'unsubscribed', 'source',
+          'quietHoursRespect', 'consentTimestampIso', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'phone', 'customerName', 'channel', 'optIn', 'unsubscribed', 'source',
+          'quietHoursRespect', 'consentTimestampIso', 'lastCampaignAtIso', 'campaignCount',
+          'createdAt', 'updatedAt'
+        ])
+        && data.phone is string && data.phone.matches('^01[3-9][0-9]{8}$')
+        && (!('customerName' in data) || (data.customerName is string && data.customerName.size() <= 100))
+        && data.channel in ['web', 'messenger', 'instagram', 'whatsapp', 'email', 'sms']
+        && data.optIn is bool
+        && data.unsubscribed is bool
+        && data.source in ['checkout', 'chat', 'track_order', 'whatsapp', 'admin']
+        && data.quietHoursRespect is bool
+        && data.consentTimestampIso is string && data.consentTimestampIso.size() <= 48
+        && (!('lastCampaignAtIso' in data) || (data.lastCampaignAtIso is string && data.lastCampaignAtIso.size() <= 48))
+        && (!('campaignCount' in data) || (data.campaignCount is number && data.campaignCount >= 0 && data.campaignCount <= 1000))
+        && data.updatedAt == request.time;
     }
 
     match /store_settings/{docId} {
@@ -727,7 +880,10 @@ service cloud.firestore {
         && (
           (
             isAdmin()
-            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'webhookStatus', 'reviewStatus', 'updatedAt'])
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'paymentStatus', 'webhookStatus', 'reviewStatus',
+              'courierPartner', 'consignmentId', 'courierTrackingUrl', 'dispatchedAtIso', 'updatedAt'
+            ])
           )
           || (
             existing().status in ['pending', 'confirmed']
@@ -763,7 +919,10 @@ service cloud.firestore {
         && (
           (
             isAdmin()
-            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'estimatedDelivery', 'reviewStatus', 'updatedAt'])
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'paymentStatus', 'estimatedDelivery', 'reviewStatus',
+              'courierPartner', 'consignmentId', 'courierTrackingUrl', 'dispatchedAtIso', 'updatedAt'
+            ])
           )
           || (
             existing().status in ['pending', 'confirmed']
@@ -789,7 +948,15 @@ service cloud.firestore {
         && incoming().createdAt == request.time
         && incoming().status == 'pending'
         && incoming().helpfulCount == 0
-        && incoming().verifiedPurchase == false;
+        && (
+          incoming().verifiedPurchase == false
+          || (
+            incoming().verifiedPurchase == true
+            && incoming().orderNumber.matches('^DG-[0-9]{4,8}$')
+            && reviewId == 'rev_' + incoming().orderNumber
+            && existsAfter(/databases/$(database)/documents/order_review_claims/$(incoming().orderNumber))
+          )
+        );
       allow update: if isValidId(reviewId)
         && isValidReview(incoming())
         && incoming().createdAt == existing().createdAt
@@ -873,12 +1040,20 @@ service cloud.firestore {
       allow create: if isValidId(reqId)
         && isValidSupportRequest(incoming())
         && incoming().createdAt == request.time
-        && incoming().status == 'open';
+        && incoming().status == 'open'
+        && !('assignedTo' in incoming())
+        && !('internalNotes' in incoming())
+        && !('resolvedAtIso' in incoming())
+        && !('firstRespondedAtIso' in incoming())
+        && !('resolutionReason' in incoming());
       allow update: if isValidId(reqId)
         && isAdmin()
         && isValidSupportRequest(incoming())
         && incoming().createdAt == existing().createdAt
-        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'priority', 'assignedTo', 'tags', 'resolutionReason',
+          'internalNotes', 'firstRespondedAtIso', 'resolvedAtIso', 'updatedAt'
+        ]);
       allow delete: if isValidId(reqId) && isAdmin();
     }
 
@@ -938,9 +1113,28 @@ service cloud.firestore {
     match /chat_sessions/{sessionId} {
       allow get: if isValidId(sessionId);
       allow list: if isAdmin();
-      allow create, update: if isValidId(sessionId)
+      allow create: if isValidId(sessionId)
         && isValidChatSession(incoming())
-        && incoming().sessionId == sessionId;
+        && incoming().sessionId == sessionId
+        && (
+          isAdmin()
+          || (
+            (!('aiPaused' in incoming()) || incoming().aiPaused == false)
+            && (!('activeTicketId' in incoming()) || incoming().activeTicketId == '')
+            && (!('assignedAgentName' in incoming()) || incoming().assignedAgentName == '')
+            && (!('agentReplies' in incoming()) || incoming().agentReplies.size() == 0)
+          )
+        );
+      allow update: if isValidId(sessionId)
+        && isValidChatSession(incoming())
+        && incoming().sessionId == sessionId
+        && (
+          isAdmin()
+          || (
+            !incoming().diff(existing()).affectedKeys().hasAny(['aiPaused', 'activeTicketId', 'assignedAgentName', 'agentReplies'])
+            && (!('linkedPhone' in existing()) || existing().linkedPhone == '' || incoming().linkedPhone == existing().linkedPhone)
+          )
+        );
       allow delete: if isValidId(sessionId) && isAdmin();
     }
 
@@ -985,6 +1179,83 @@ service cloud.firestore {
           || exists(/databases/$(database)/documents/orders/$(incoming().orderNumber))
         );
       allow update, delete: if false;
+    }
+
+    match /support_evidence/{evidenceId} {
+      allow get: if isValidId(evidenceId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(evidenceId) && isValidSupportEvidence(incoming());
+      allow update, delete: if isValidId(evidenceId) && isAdmin();
+    }
+
+    match /support_agent_replies/{replyId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(replyId) && isAdmin() && isValidSupportAgentReply(incoming());
+      allow update, delete: if false;
+    }
+
+    match /order_review_claims/{orderNumber} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(orderNumber)
+        && isValidOrderReviewClaim(incoming())
+        && incoming().orderNumber == orderNumber
+        && get(/databases/$(database)/documents/orders/$(orderNumber)).data.status == 'delivered'
+        && existsAfter(/databases/$(database)/documents/reviews/$('rev_' + orderNumber));
+      allow update, delete: if isValidId(orderNumber) && isAdmin();
+    }
+
+    match /refill_reminders/{reminderId} {
+      allow get: if isValidId(reminderId);
+      allow list: if isAdmin();
+      allow create: if isValidId(reminderId)
+        && isValidRefillReminder(incoming())
+        && incoming().createdAt == request.time
+        && reminderId == incoming().orderNumber + '_' + incoming().phone
+        && exists(/databases/$(database)/documents/order_tracking/$(reminderId));
+      allow update: if isValidId(reminderId)
+        && isValidRefillReminder(incoming())
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin()
+          || (
+            reminderId == existing().orderNumber + '_' + existing().phone
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'intervalDays', 'status', 'nextReminderAtIso', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(reminderId) && isAdmin();
+    }
+
+    match /channel_webhook_events/{eventId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(eventId) && isValidChannelWebhookEvent(incoming());
+      allow update, delete: if false;
+    }
+
+    match /marketing_consents/{phoneKey} {
+      allow get: if isValidId(phoneKey);
+      allow list: if isAdmin();
+      allow create: if isValidId(phoneKey)
+        && isValidMarketingConsent(incoming())
+        && incoming().createdAt == request.time
+        && phoneKey == incoming().phone
+        && (!('campaignCount' in incoming()) || incoming().campaignCount == 0)
+        && !('lastCampaignAtIso' in incoming());
+      allow update: if isValidId(phoneKey)
+        && isValidMarketingConsent(incoming())
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin()
+          || (
+            phoneKey == existing().phone
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'optIn', 'unsubscribed', 'quietHoursRespect', 'channel',
+              'source', 'consentTimestampIso', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(phoneKey) && isAdmin();
     }
   }
 }

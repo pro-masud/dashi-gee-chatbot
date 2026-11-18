@@ -9,6 +9,7 @@ import {
   Copy,
   Edit3,
   ExternalLink,
+  Headset,
   Loader2,
   MapPin,
   MessageCircle,
@@ -17,6 +18,7 @@ import {
   PackageCheck,
   Phone,
   RotateCcw,
+  ShoppingBag,
   Sparkles,
   ThumbsDown,
   ThumbsUp,
@@ -173,6 +175,10 @@ export function ChatMessageBubble({
         ) : (
           <Copy className="h-3.5 w-3.5" />
         );
+      case 'reorder':
+        return <ShoppingBag className="h-3.5 w-3.5" />;
+      case 'open_url':
+        return <Truck className="h-3.5 w-3.5" />;
       default:
         return <PackageCheck className="h-3.5 w-3.5" />;
     }
@@ -199,13 +205,30 @@ export function ChatMessageBubble({
             ? 'rounded-br-sm bg-[#1E1710] text-[#FAF7F2]'
             : msg.isError
               ? 'rounded-bl-sm border border-red-300 bg-red-50/90 text-[#1E1710]'
-              : 'rounded-bl-sm border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] text-[#1E1710]'
+              : msg.isAgentReply
+                ? 'rounded-bl-sm border border-emerald-300 bg-emerald-50/75 text-[#1E1710]'
+                : 'rounded-bl-sm border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] text-[#1E1710]'
         }`}
       >
         {!isUser && (
-          <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[#8A5A17]">
-            <Sparkles className="h-3 w-3" />
-            <span>{bn ? 'দেশী ঘি অ্যাসিস্ট্যান্ট' : 'Deshi Gee Assistant'}</span>
+          <div
+            className={`mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider ${
+              msg.isAgentReply ? 'text-emerald-800' : 'text-[#8A5A17]'
+            }`}
+          >
+            {msg.isAgentReply ? (
+              <>
+                <Headset className="h-3 w-3" />
+                <span>
+                  {msg.agentName || (bn ? 'হিউম্যান সাপোর্ট এজেন্ট' : 'Human Support Agent')}
+                </span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-3 w-3" />
+                <span>{bn ? 'দেশী ঘি অ্যাসিস্ট্যান্ট' : 'Deshi Gee Assistant'}</span>
+              </>
+            )}
           </div>
         )}
 
@@ -294,6 +317,37 @@ export function ChatMessageBubble({
                 <strong className="text-[#1E1710]">{bn ? 'সম্ভাব্য ডেলিভারি:' : 'ETA:'}</strong>{' '}
                 {msg.trackingCard.estimatedDelivery}
               </p>
+              {(msg.trackingCard.courierPartner || msg.trackingCard.consignmentId) && (
+                <p>
+                  <strong className="text-[#1E1710]">{bn ? 'কুরিয়ার:' : 'Courier:'}</strong>{' '}
+                  <span className="font-mono uppercase text-[#1E1710]">
+                    {msg.trackingCard.courierPartner || 'courier'}
+                  </span>
+                  {msg.trackingCard.consignmentId && (
+                    <>
+                      {' · '}
+                      <span className="font-mono text-[#1E1710]">
+                        {msg.trackingCard.consignmentId}
+                      </span>
+                    </>
+                  )}
+                </p>
+              )}
+              {msg.trackingCard.courierTrackingUrl &&
+                /^https:\/\/[^\s]+$/i.test(msg.trackingCard.courierTrackingUrl) && (
+                  <p className="pt-0.5">
+                    <a
+                      href={msg.trackingCard.courierTrackingUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 font-medium text-[#8A5A17] underline underline-offset-2 hover:text-[#1E1710]"
+                    >
+                      <Truck className="h-3 w-3" />
+                      <span>{bn ? 'কুরিয়ার ট্র্যাকিং দেখুন' : 'Track on Courier'}</span>
+                      <ExternalLink className="h-2.5 w-2.5" />
+                    </a>
+                  </p>
+                )}
             </div>
             <div className="mt-3 grid grid-cols-5 gap-1">
               {TRACKING_STEPS.map((step, idx) => {
@@ -595,6 +649,18 @@ export function ChatMessageBubble({
                     {renderActionIcon(action.type)}
                     <span>{bn ? action.labelBn : action.labelEn}</span>
                   </button>
+                );
+              }
+              if (action.type === 'reorder' && action.href) {
+                return (
+                  <a
+                    key={`${action.type}_${idx}`}
+                    href={action.href}
+                    className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-[#1E1710] px-3 py-1 text-[11px] font-medium text-[#FAF7F2] hover:bg-[#35291E]"
+                  >
+                    {renderActionIcon(action.type)}
+                    <span>{bn ? action.labelBn : action.labelEn}</span>
+                  </a>
                 );
               }
               return (
