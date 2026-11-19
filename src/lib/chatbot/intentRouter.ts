@@ -161,12 +161,13 @@ export function classifyTurnIntent(
     };
   }
 
-  // 3. Human Support Handover
+  // 3. Human Support Handover & Contact / Office Location
   if (
-    /(human|real agent|agent|call me|talk to someone|contact|phone|whatsapp|হোয়াটসঅ্যাপ|ফোন|মানুষ|সাপোর্ট|কথা বলতে চাই)/i.test(
+    /(human|real agent|agent|call me|talk to someone|contact|phone|whatsapp|address|location|office|google\s*map|directions|where\s*(are|is)\s*(you|your)|হোয়াটসঅ্যাপ|হোয়াটসঅ্যাপ|ফোন|মানুষ|সাপোর্ট|কথা বলতে চাই|ঠিকানা|লোকেশন|অফিস|যোগাযোগ|ম্যাপ)/i.test(
       clean
     ) &&
-    !/\b(price|dam|daam|order)\b/i.test(clean)
+    !/\b(price|dam|daam|order)\b/i.test(clean) &&
+    !/(অর্ডার|ঠিকানা\s*পরিবর্তন|ঠিকানা\s*বদল)/i.test(clean)
   ) {
     return {
       intent: 'human_help',

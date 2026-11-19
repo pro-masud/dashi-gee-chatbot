@@ -697,7 +697,7 @@ service cloud.firestore {
           'previousStatus', 'nextStatus', 'previousTotalBdt', 'nextTotalBdt', 'metadata', 'createdAt'
         ])
         && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
-        && data.action in ['created', 'address_updated', 'cancelled', 'review_approved', 'review_rejected', 'status_updated', 'cod_verification', 'courier_updated']
+        && data.action in ['created', 'address_updated', 'cancelled', 'review_approved', 'review_rejected', 'status_updated', 'cod_verification', 'courier_updated', 'payment_gateway_verified', 'courier_webhook_synced']
         && data.actorType in ['customer', 'admin', 'system']
         && data.summary is string && data.summary.size() >= 3 && data.summary.size() <= 300
         && (!('previousStatus' in data) || (data.previousStatus is string && data.previousStatus.size() <= 40))
@@ -825,6 +825,26 @@ service cloud.firestore {
         && (!('lastCampaignAtIso' in data) || (data.lastCampaignAtIso is string && data.lastCampaignAtIso.size() <= 48))
         && (!('campaignCount' in data) || (data.campaignCount is number && data.campaignCount >= 0 && data.campaignCount <= 1000))
         && data.updatedAt == request.time;
+    }
+
+    function isValidPaymentGatewayEvent(data) {
+      return data.keys().hasAll([
+          'provider', 'eventType', 'orderNumber', 'externalRef',
+          'rawStatus', 'verified', 'createdAtIso', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'provider', 'eventType', 'orderNumber', 'externalRef',
+          'amountBdt', 'rawStatus', 'verified', 'createdAtIso', 'createdAt'
+        ])
+        && data.provider in ['sslcommerz', 'bkash', 'steadfast', 'pathao', 'redx']
+        && data.eventType in ['payment_verified', 'payment_failed', 'payment_cancelled', 'courier_status']
+        && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
+        && data.externalRef is string && data.externalRef.size() >= 2 && data.externalRef.size() <= 128
+        && (!('amountBdt' in data) || (data.amountBdt is number && data.amountBdt >= 0 && data.amountBdt <= 500000))
+        && data.rawStatus is string && data.rawStatus.size() >= 1 && data.rawStatus.size() <= 64
+        && data.verified is bool
+        && data.createdAtIso is string && data.createdAtIso.size() <= 48
+        && data.createdAt == request.time;
     }
 
     match /store_settings/{docId} {
@@ -1110,38 +1130,21 @@ service cloud.firestore {
       allow delete: if isValidId(chunkId) && isAdmin();
     }
 
+    // S0-02: Server-only session & draft storage (zero anonymous/client direct read or write).
+    // Customer access goes strictly through /api/chat/session with signed HttpOnly cookie ownership.
     match /chat_sessions/{sessionId} {
-      allow get: if isValidId(sessionId);
-      allow list: if isAdmin();
-      allow create: if isValidId(sessionId)
+      allow get, list: if isAdmin();
+      allow create, update: if isValidId(sessionId)
+        && isAdmin()
         && isValidChatSession(incoming())
-        && incoming().sessionId == sessionId
-        && (
-          isAdmin()
-          || (
-            (!('aiPaused' in incoming()) || incoming().aiPaused == false)
-            && (!('activeTicketId' in incoming()) || incoming().activeTicketId == '')
-            && (!('assignedAgentName' in incoming()) || incoming().assignedAgentName == '')
-            && (!('agentReplies' in incoming()) || incoming().agentReplies.size() == 0)
-          )
-        );
-      allow update: if isValidId(sessionId)
-        && isValidChatSession(incoming())
-        && incoming().sessionId == sessionId
-        && (
-          isAdmin()
-          || (
-            !incoming().diff(existing()).affectedKeys().hasAny(['aiPaused', 'activeTicketId', 'assignedAgentName', 'agentReplies'])
-            && (!('linkedPhone' in existing()) || existing().linkedPhone == '' || incoming().linkedPhone == existing().linkedPhone)
-          )
-        );
+        && incoming().sessionId == sessionId;
       allow delete: if isValidId(sessionId) && isAdmin();
     }
 
     match /order_drafts/{draftId} {
-      allow get: if isValidId(draftId);
-      allow list: if isAdmin();
+      allow get, list: if isAdmin();
       allow create, update: if isValidId(draftId)
+        && isAdmin()
         && isValidOrderDraft(incoming())
         && incoming().draftId == draftId;
       allow delete: if isValidId(draftId) && isAdmin();
@@ -1204,26 +1207,18 @@ service cloud.firestore {
       allow update, delete: if isValidId(orderNumber) && isAdmin();
     }
 
+    // S0-03: Server-only refill reminder & marketing consent records (zero anonymous/client read or write).
     match /refill_reminders/{reminderId} {
-      allow get: if isValidId(reminderId);
-      allow list: if isAdmin();
+      allow get, list: if isAdmin();
       allow create: if isValidId(reminderId)
+        && isAdmin()
         && isValidRefillReminder(incoming())
         && incoming().createdAt == request.time
-        && reminderId == incoming().orderNumber + '_' + incoming().phone
-        && exists(/databases/$(database)/documents/order_tracking/$(reminderId));
+        && reminderId == incoming().orderNumber + '_' + incoming().phone;
       allow update: if isValidId(reminderId)
+        && isAdmin()
         && isValidRefillReminder(incoming())
-        && incoming().createdAt == existing().createdAt
-        && (
-          isAdmin()
-          || (
-            reminderId == existing().orderNumber + '_' + existing().phone
-            && incoming().diff(existing()).affectedKeys().hasOnly([
-              'intervalDays', 'status', 'nextReminderAtIso', 'updatedAt'
-            ])
-          )
-        );
+        && incoming().createdAt == existing().createdAt;
       allow delete: if isValidId(reminderId) && isAdmin();
     }
 
@@ -1234,28 +1229,25 @@ service cloud.firestore {
     }
 
     match /marketing_consents/{phoneKey} {
-      allow get: if isValidId(phoneKey);
-      allow list: if isAdmin();
+      allow get, list: if isAdmin();
       allow create: if isValidId(phoneKey)
+        && isAdmin()
         && isValidMarketingConsent(incoming())
         && incoming().createdAt == request.time
-        && phoneKey == incoming().phone
-        && (!('campaignCount' in incoming()) || incoming().campaignCount == 0)
-        && !('lastCampaignAtIso' in incoming());
+        && phoneKey == incoming().phone;
       allow update: if isValidId(phoneKey)
+        && isAdmin()
         && isValidMarketingConsent(incoming())
-        && incoming().createdAt == existing().createdAt
-        && (
-          isAdmin()
-          || (
-            phoneKey == existing().phone
-            && incoming().diff(existing()).affectedKeys().hasOnly([
-              'optIn', 'unsubscribed', 'quietHoursRespect', 'channel',
-              'source', 'consentTimestampIso', 'updatedAt'
-            ])
-          )
-        );
+        && incoming().createdAt == existing().createdAt;
       allow delete: if isValidId(phoneKey) && isAdmin();
+    }
+
+    match /payment_gateway_events/{eventId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(eventId)
+        && isValidPaymentGatewayEvent(incoming())
+        && exists(/databases/$(database)/documents/orders/$(incoming().orderNumber));
+      allow update, delete: if false;
     }
   }
 }

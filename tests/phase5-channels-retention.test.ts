@@ -22,9 +22,11 @@ import {
   setAdminAuthOverrideForTests,
   setChannelMemoryModeForTests,
   setOrderStorageMemoryModeForTests,
+  setRateLimitMemoryModeForTests,
   setSessionDraftMemoryModeForTests,
 } from '../src/lib/chatbot/firestoreRest';
 import { saveSessionAndDraft } from '../src/lib/chatbot/sessionStore';
+import { createSignedUnsubscribeToken } from '../src/lib/chatbot/sessionAuth';
 import { tryCreateSignedOrderToken } from '../src/lib/chatbot/orderToken';
 import {
   DEFAULT_CHATBOT_CONFIG,
@@ -52,6 +54,7 @@ describe('Phase 5 — Omnichannel Webhooks, Consent Retention, SEO, Dictation, A
     setOrderStorageMemoryModeForTests(true);
     setChannelMemoryModeForTests(true);
     setSessionDraftMemoryModeForTests(true);
+    setRateLimitMemoryModeForTests(true);
     setAdminAuthOverrideForTests(async (authHeader) => {
       if (authHeader === 'Bearer admin-valid-token') {
         return { ok: true, email: 'admin@deshigee.com', uid: 'admin-1' };
@@ -72,6 +75,7 @@ describe('Phase 5 — Omnichannel Webhooks, Consent Retention, SEO, Dictation, A
     setOrderStorageMemoryModeForTests(false);
     setChannelMemoryModeForTests(false);
     setSessionDraftMemoryModeForTests(false);
+    setRateLimitMemoryModeForTests(false);
     setAdminAuthOverrideForTests(null);
 
     if (PREV_META_VERIFY === undefined) delete process.env.META_VERIFY_TOKEN;
@@ -379,7 +383,7 @@ describe('Phase 5 — Omnichannel Webhooks, Consent Retention, SEO, Dictation, A
       },
     });
 
-    // Customer opts in 501 and unsubscribes 502 via storefront API
+    // Customer opts in 501 and unsubscribes 502 via storefront API with signed phone ownership tokens (S0-03)
     const optInRes = await retentionPost(
       new Request('http://localhost/api/retention/campaigns', {
         method: 'POST',
@@ -390,6 +394,7 @@ describe('Phase 5 — Omnichannel Webhooks, Consent Retention, SEO, Dictation, A
         body: JSON.stringify({
           action: 'consent',
           phone: '01811000501',
+          consentToken: createSignedUnsubscribeToken('01811000501'),
           customerName: 'Nadia Rahman',
           channel: 'whatsapp',
           source: 'chat',
@@ -408,6 +413,7 @@ describe('Phase 5 — Omnichannel Webhooks, Consent Retention, SEO, Dictation, A
         body: JSON.stringify({
           action: 'unsubscribe',
           phone: '01811000502',
+          unsubscribeToken: createSignedUnsubscribeToken('01811000502'),
           channel: 'whatsapp',
           source: 'track_order',
         }),
@@ -513,7 +519,7 @@ describe('Phase 5 — Omnichannel Webhooks, Consent Retention, SEO, Dictation, A
 
   it('T5.4/T5.5/T5.6: Computes 6-stage deduplicated funnel & channel attribution, persists sourceChannel on /api/order, and generates grounded Agent-Assist drafts', async () => {
     // 1. Place order via /api/order with explicit sourceChannel='messenger'
-    const token = tryCreateSignedOrderToken({
+    const tokenResult = tryCreateSignedOrderToken({
       sessionId: 'ch_msg_attribution_01',
       draft: {
         weight: '500g',
@@ -530,7 +536,6 @@ describe('Phase 5 — Omnichannel Webhooks, Consent Retention, SEO, Dictation, A
         txnId: '',
         couponCode: '',
         note: 'Afternoon delivery preferred',
-        priceQuoteVersion: 1,
         deliveryZone: 'dhaka',
       },
       pricing: {
@@ -543,7 +548,10 @@ describe('Phase 5 — Omnichannel Webhooks, Consent Retention, SEO, Dictation, A
         discountBdt: 0,
         totalBdt: DEFAULT_STORE_SETTINGS.price500g + DEFAULT_STORE_SETTINGS.insideDhakaFee,
       },
-    }).token!;
+    });
+    assert.equal(tokenResult.ok, true);
+    if (!tokenResult.ok) throw new Error('Expected signed token');
+    const token = tokenResult.token;
 
     const orderRes = await orderPost(
       new Request('http://localhost/api/order', {

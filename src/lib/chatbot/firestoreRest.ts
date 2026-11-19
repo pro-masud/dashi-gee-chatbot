@@ -14,6 +14,11 @@ import {
 } from '../storeTypes';
 import { dispatchWebhookWithRetry, notificationLogs } from '../serverState';
 import {
+  getMessagingGatewayReadiness,
+  sendDirectEmail,
+  sendDirectSms,
+} from '../integrations/messagingGateway';
+import {
   assessAddressCompleteness,
   resolveConfiguredDistrictAndZone,
   resolveZoneDeliveryFeeAndEta,
@@ -24,6 +29,7 @@ import {
   evaluateRetentionEligibility,
   identifyAbandonedDraftCandidates,
   isWithinDhakaQuietHours,
+  type AbandonedDraftCandidate,
 } from './channelEngine';
 import {
   DEFAULT_CHATBOT_CONFIG,
@@ -2339,7 +2345,7 @@ export async function createServerChatLog(entry: ServerChatLogInput): Promise<st
     telemetryLog.failureCode = payload.errorCode || 'unknown';
   }
   if (payload.isError) {
-    console.error(JSON.stringify(telemetryLog));
+    console.warn(JSON.stringify(telemetryLog));
   } else {
     console.info(JSON.stringify(telemetryLog));
   }
@@ -3846,9 +3852,11 @@ export async function dispatchDueRefillReminders(options?: {
     }
 
     let deliveryStatus: 'dispatched' | 'logged_no_webhook' | 'failed' = 'logged_no_webhook';
-    let detail = 'No webhook URL configured; schedule advanced.';
+    let detail = 'No webhook or direct SMS/Email gateway configured; schedule advanced.';
+    const directReadiness = getMessagingGatewayReadiness();
+    const smsText = `Assalamu Alaikum ${r.customerName || 'Customer'}, Deshi Gee (${r.weight || '500g'}) refill reminder! Order fresh Pabna bilona ghee anytime at ${process.env.NEXT_PUBLIC_SITE_URL || 'https://deshigee.com'}/?reorder=${encodeURIComponent(`${r.weight || '500g'}:1`)}`;
 
-    if (webhookTargets.length > 0) {
+    if (webhookTargets.length > 0 || directReadiness.anyDirectSms || directReadiness.anyDirectEmail) {
       const payload = {
         event: 'refill_reminder_due',
         orderNumber: r.orderNumber,
@@ -3859,11 +3867,23 @@ export async function dispatchDueRefillReminders(options?: {
         reminderCount: nextCount,
         reorderUrl: `/?reorder=${encodeURIComponent(`${r.weight || '500g'}:1`)}`,
       };
-      const results = await Promise.all(
-        webhookTargets.map((target) =>
-          dispatchWebhookWithRetry(target.url as string, `refill_${target.channel}`, payload, 1)
-        )
+      const tasks = webhookTargets.map((target) =>
+        dispatchWebhookWithRetry(target.url as string, `refill_${target.channel}`, payload, 1)
       );
+      if (directReadiness.anyDirectSms && r.phone) {
+        tasks.push(sendDirectSms({ toPhone: r.phone, message: smsText, orderNumber: r.orderNumber }));
+      }
+      if (directReadiness.anyDirectEmail && process.env.OWNER_NOTIFICATION_EMAIL) {
+        tasks.push(
+          sendDirectEmail({
+            toEmail: process.env.OWNER_NOTIFICATION_EMAIL,
+            subject: `Deshi Gee Refill Reminder Due — ${r.orderNumber}`,
+            text: `${smsText}\nCustomer Phone: ${r.phone}\nInterval: ${r.intervalDays} days`,
+            orderNumber: r.orderNumber,
+          })
+        );
+      }
+      const results = await Promise.all(tasks);
       for (const res of results) {
         notificationLogs.unshift(res);
         if (notificationLogs.length > 50) notificationLogs.pop();
@@ -3871,7 +3891,7 @@ export async function dispatchDueRefillReminders(options?: {
       const anySent = results.some((res) => res.status === 'sent');
       if (anySent) {
         deliveryStatus = 'dispatched';
-        detail = 'Webhook notification delivered';
+        detail = 'Notification delivered via configured channel(s)';
       } else {
         deliveryStatus = 'failed';
         detail = results.map((res) => `${res.channel}: ${res.detail}`).join('; ');
@@ -4507,6 +4527,7 @@ export async function dispatchConsentRetentionCampaign(options: {
 
   for (const target of targetList) {
     const subscriber: MarketingConsentDoc = target.subscriber || {
+      id: target.phone,
       phone: target.phone,
       customerName: target.customerName,
       channel,
@@ -4580,6 +4601,7 @@ export async function dispatchConsentRetentionCampaign(options: {
 
     let status: 'dispatched' | 'logged_no_channel_token' | 'failed' = 'logged_no_channel_token';
     let detail = `Channel delivery webhook/token for ${channel} not configured; recorded in dispatch preview.`;
+    const directMessaging = getMessagingGatewayReadiness();
 
     if (webhookUrl) {
       const dispatchRes = await dispatchWebhookWithRetry(
@@ -4606,6 +4628,39 @@ export async function dispatchConsentRetentionCampaign(options: {
       } else {
         status = 'failed';
         detail = dispatchRes.detail;
+      }
+    } else if (channel === 'sms' && directMessaging.anyDirectSms) {
+      const smsRes = await sendDirectSms({
+        toPhone: target.phone,
+        message: target.messageBn || target.messageEn,
+      });
+      notificationLogs.unshift(smsRes);
+      if (notificationLogs.length > 50) notificationLogs.pop();
+      if (smsRes.status === 'sent') {
+        status = 'dispatched';
+        detail = smsRes.detail;
+      } else {
+        status = 'failed';
+        detail = smsRes.detail;
+      }
+    } else if (
+      channel === 'email' &&
+      directMessaging.anyDirectEmail &&
+      process.env.OWNER_NOTIFICATION_EMAIL
+    ) {
+      const emailRes = await sendDirectEmail({
+        toEmail: process.env.OWNER_NOTIFICATION_EMAIL,
+        subject: `Deshi Gee Retention (${options.segment}) — ${target.customerName}`,
+        text: `${target.messageBn}\n\n${target.messageEn}\nPhone: ${target.phone}`,
+      });
+      notificationLogs.unshift(emailRes);
+      if (notificationLogs.length > 50) notificationLogs.pop();
+      if (emailRes.status === 'sent') {
+        status = 'dispatched';
+        detail = emailRes.detail;
+      } else {
+        status = 'failed';
+        detail = emailRes.detail;
       }
     }
 
@@ -4700,3 +4755,325 @@ export async function dispatchConsentRetentionCampaign(options: {
     items,
   };
 }
+
+export async function fetchServerOrderForAdmin(
+  orderNumber: string,
+  adminIdToken: string
+): Promise<OrderRecord | null> {
+  const cleanOrder = String(orderNumber || '').trim().toUpperCase();
+  if (!/^DG-\d{4,8}$/.test(cleanOrder)) return null;
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeOrderMemoryState?.enabled
+  ) {
+    return globalFirestoreTestHooks.__deshiGeeOrderMemoryState.orders.get(cleanOrder) || null;
+  }
+
+  try {
+    const res = await fetch(
+      `${BASE_DOC_URL}/orders/${encodeURIComponent(cleanOrder)}?key=${encodeURIComponent(API_KEY)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${adminIdToken}`,
+        },
+        cache: 'no-store',
+      }
+    );
+    if (!res.ok) return null;
+    const raw = (await res.json()) as { fields?: Record<string, FsValue> };
+    if (!raw.fields) return null;
+    return decodeFsFields(raw.fields) as unknown as OrderRecord;
+  } catch {
+    return null;
+  }
+}
+
+export interface PaymentGatewayEventInput {
+  eventId: string;
+  provider: 'sslcommerz' | 'bkash' | 'steadfast' | 'pathao' | 'redx';
+  eventType: 'payment_verified' | 'payment_failed' | 'payment_cancelled' | 'courier_status';
+  orderNumber: string;
+  externalRef: string;
+  amountBdt?: number;
+  rawStatus: string;
+  verified: boolean;
+  auditAction?: 'payment_gateway_verified' | 'courier_webhook_synced';
+  auditSummary?: string;
+}
+
+const memoryGatewayEvents = new Map<string, PaymentGatewayEventInput>();
+
+export function clearMemoryGatewayEventsForTests(): void {
+  if (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') {
+    memoryGatewayEvents.clear();
+  }
+}
+
+export async function recordPaymentGatewayEvent(
+  input: PaymentGatewayEventInput
+): Promise<{ ok: boolean; duplicate?: boolean; error?: string }> {
+  const safeId = input.eventId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 110);
+  const nowIso = new Date().toISOString();
+  const isTestMem =
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeOrderMemoryState?.enabled;
+
+  if (isTestMem) {
+    if (memoryGatewayEvents.has(safeId)) {
+      return { ok: true, duplicate: true };
+    }
+    memoryGatewayEvents.set(safeId, input);
+    if (input.auditAction && input.auditSummary) {
+      globalFirestoreTestHooks.__deshiGeeOrderMemoryState?.auditLogs.push({
+        id: `audit_${safeId}`,
+        orderNumber: input.orderNumber,
+        action: input.auditAction as OrderAuditLogRecord['action'],
+        actorType: 'system',
+        summary: input.auditSummary.slice(0, 300),
+        createdAt: nowIso,
+      });
+    }
+    return { ok: true, duplicate: false };
+  }
+
+  try {
+    const writes: unknown[] = [
+      {
+        currentDocument: { exists: false },
+        update: {
+          name: docName('payment_gateway_events', safeId),
+          fields: encodeFsFields({
+            provider: input.provider,
+            eventType: input.eventType,
+            orderNumber: input.orderNumber,
+            externalRef: input.externalRef.slice(0, 128),
+            ...(typeof input.amountBdt === 'number' ? { amountBdt: input.amountBdt } : {}),
+            rawStatus: input.rawStatus.slice(0, 64),
+            verified: input.verified,
+            createdAtIso: nowIso,
+          }),
+        },
+        updateTransforms: [{ fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' }],
+      },
+    ];
+
+    if (input.auditAction && input.auditSummary) {
+      const logId = `gw_${Date.now()}_${safeId.slice(0, 24)}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+      writes.push({
+        currentDocument: { exists: false },
+        update: {
+          name: docName('order_audit_logs', logId),
+          fields: encodeFsFields({
+            orderNumber: input.orderNumber,
+            action: input.auditAction,
+            actorType: 'system',
+            summary: input.auditSummary.slice(0, 300),
+            metadata: {
+              provider: input.provider,
+              externalRef: input.externalRef.slice(0, 80),
+              rawStatus: input.rawStatus.slice(0, 40),
+            },
+          }),
+        },
+        updateTransforms: [{ fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' }],
+      });
+    }
+
+    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ writes }),
+      cache: 'no-store',
+    });
+
+    if (res.status === 409 || res.status === 412) {
+      return { ok: true, duplicate: true };
+    }
+    if (!res.ok) {
+      return { ok: false, error: `Firestore gateway event commit failed (${res.status}).` };
+    }
+    return { ok: true, duplicate: false };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Failed to record gateway event.',
+    };
+  }
+}
+
+/**
+ * Authoritative server-side order lookup for payment validation.
+ * NEVER trusts client-supplied amounts. Returns null if no server order/tracking record exists.
+ */
+export async function fetchServerOrderForPaymentValidation(
+  orderNumber: string,
+  phone?: string
+): Promise<{
+  orderNumber: string;
+  totalBdt: number;
+  phone?: string;
+  status: string;
+  paymentStatus: string;
+} | null> {
+  const cleanOrder = String(orderNumber || '').trim().toUpperCase();
+  if (!/^DG-\d{4,8}$/.test(cleanOrder)) return null;
+  const cleanPhone = String(phone || '').replace(/[\s-]/g, '');
+
+  const isTestMem =
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeOrderMemoryState?.enabled;
+
+  if (isTestMem) {
+    const mem = globalFirestoreTestHooks.__deshiGeeOrderMemoryState!;
+    const order = mem.orders.get(cleanOrder);
+    if (order && Number.isFinite(order.totalBdt) && order.totalBdt > 0) {
+      return {
+        orderNumber: cleanOrder,
+        totalBdt: order.totalBdt,
+        phone: order.phone,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+      };
+    }
+    if (cleanPhone) {
+      const tr = mem.tracking.get(`${cleanOrder}_${cleanPhone}`);
+      if (tr && Number.isFinite(tr.totalBdt) && tr.totalBdt > 0) {
+        return {
+          orderNumber: cleanOrder,
+          totalBdt: tr.totalBdt,
+          phone: cleanPhone,
+          status: tr.status,
+          paymentStatus: tr.paymentStatus,
+        };
+      }
+    }
+    for (const [key, tr] of mem.tracking.entries()) {
+      if (tr.orderNumber === cleanOrder && Number.isFinite(tr.totalBdt) && tr.totalBdt > 0) {
+        const suffixPhone = key.includes('_') ? key.split('_').slice(1).join('_') : undefined;
+        return {
+          orderNumber: cleanOrder,
+          totalBdt: tr.totalBdt,
+          phone: suffixPhone,
+          status: tr.status,
+          paymentStatus: tr.paymentStatus,
+        };
+      }
+    }
+    return null;
+  }
+
+  if (/^01[3-9][0-9]{8}$/.test(cleanPhone)) {
+    const tr = await fetchServerOrderTracking(cleanOrder, cleanPhone);
+    if (tr && Number.isFinite(tr.totalBdt) && tr.totalBdt > 0) {
+      return {
+        orderNumber: cleanOrder,
+        totalBdt: tr.totalBdt,
+        phone: cleanPhone,
+        status: tr.status,
+        paymentStatus: tr.paymentStatus,
+      };
+    }
+  }
+
+  // Fallback to server order document if phone wasn't passed on gateway IPN
+  const orderData = await fetchFsGet(`orders/${encodeURIComponent(cleanOrder)}`);
+  if (orderData && typeof orderData.totalBdt === 'number' && orderData.totalBdt > 0) {
+    return {
+      orderNumber: cleanOrder,
+      totalBdt: orderData.totalBdt,
+      phone: typeof orderData.phone === 'string' ? orderData.phone : undefined,
+      status: String(orderData.status || 'pending'),
+      paymentStatus: String(orderData.paymentStatus || 'pending'),
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Updates order + tracking paymentStatus to 'verified' ONLY after server-side gateway validation.
+ */
+export async function markServerOrderPaymentVerified(input: {
+  orderNumber: string;
+  phone?: string;
+  transactionId: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const cleanOrder = String(input.orderNumber || '').trim().toUpperCase();
+  const cleanTxn = String(input.transactionId || '').trim().slice(0, 80);
+  const cleanPhone = String(input.phone || '').replace(/[\s-]/g, '');
+  if (!/^DG-\d{4,8}$/.test(cleanOrder) || !cleanTxn) {
+    return { ok: false, error: 'Invalid orderNumber or transactionId.' };
+  }
+
+  const isTestMem =
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeOrderMemoryState?.enabled;
+
+  if (isTestMem) {
+    const mem = globalFirestoreTestHooks.__deshiGeeOrderMemoryState!;
+    const order = mem.orders.get(cleanOrder);
+    if (order) {
+      order.paymentStatus = 'verified';
+      order.txnId = cleanTxn;
+      order.updatedAt = Date.now();
+      mem.orders.set(cleanOrder, order);
+    }
+    for (const [key, tr] of mem.tracking.entries()) {
+      if (tr.orderNumber === cleanOrder) {
+        tr.paymentStatus = 'verified';
+        tr.updatedAt = Date.now();
+        mem.tracking.set(key, tr);
+      }
+    }
+    return { ok: true };
+  }
+
+  try {
+    const writes: unknown[] = [
+      {
+        update: {
+          name: docName('orders', cleanOrder),
+          fields: encodeFsFields({
+            paymentStatus: 'verified',
+            txnId: cleanTxn,
+          }),
+        },
+        updateMask: { fieldPaths: ['paymentStatus', 'txnId'] },
+        updateTransforms: [{ fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' }],
+        currentDocument: { exists: true },
+      },
+    ];
+
+    if (/^01[3-9][0-9]{8}$/.test(cleanPhone)) {
+      writes.push({
+        update: {
+          name: docName('order_tracking', `${cleanOrder}_${cleanPhone}`),
+          fields: encodeFsFields({
+            paymentStatus: 'verified',
+          }),
+        },
+        updateMask: { fieldPaths: ['paymentStatus'] },
+        updateTransforms: [{ fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' }],
+        currentDocument: { exists: true },
+      });
+    }
+
+    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ writes }),
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      return { ok: false, error: `Firestore payment status update failed (${res.status}).` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Failed to update order payment status.',
+    };
+  }
+}
+

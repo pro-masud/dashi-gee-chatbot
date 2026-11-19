@@ -1,13 +1,17 @@
 import { isWithinDhakaQuietHours } from '../../../../src/lib/chatbot/channelEngine';
 import {
+  checkAndIncrementFirestoreRateLimit,
   dispatchConsentRetentionCampaign,
   fetchAdminMarketingConsents,
   fetchServerChatbotConfig,
+  fetchServerOrderTracking,
   upsertMarketingConsent,
   verifyServerAdminToken,
 } from '../../../../src/lib/chatbot/firestoreRest';
 import { isValidBangladeshPhone, normalizeBangladeshPhone } from '../../../../src/lib/chatbot/orderToken';
+import { extractClientIp, hashIdentifier } from '../../../../src/lib/chatbot/rateLimit';
 import { sanitizeChannelSource } from '../../../../src/lib/chatbot/schema';
+import { verifySignedUnsubscribeToken } from '../../../../src/lib/chatbot/sessionAuth';
 import type { MarketingConsentDoc } from '../../../../src/lib/chatbot/types';
 
 function isAuthorizedCronOrAdmin(authHeader: string | null): boolean {
@@ -68,7 +72,22 @@ export async function POST(request: Request) {
   const action = String(body.action || 'dispatch').trim();
 
   if (action === 'consent' || action === 'unsubscribe') {
-    if (request.headers.get('x-requested-with') !== 'DeshiGeeStorefront') {
+    const ipHash = hashIdentifier(`ret_consent_ip:${extractClientIp(request)}`);
+    const rl = await checkAndIncrementFirestoreRateLimit(`ret_consent_min_${ipHash}`, 20, 60_000);
+    if (!rl.allowed) {
+      return Response.json(
+        { ok: false, error: 'Too many requests. Please try again later.' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(Math.max(15, rl.retryAfterSec)) },
+        }
+      );
+    }
+
+    const authHeader = request.headers.get('authorization');
+    const adminCheck = authHeader ? await verifyServerAdminToken(authHeader) : { ok: false };
+
+    if (!adminCheck.ok && request.headers.get('x-requested-with') !== 'DeshiGeeStorefront') {
       return Response.json(
         { ok: false, error: 'Invalid storefront origin header.' },
         { status: 403 }
@@ -80,6 +99,37 @@ export async function POST(request: Request) {
       return Response.json(
         { ok: false, error: 'Valid 11-digit Bangladesh mobile number (01XXXXXXXXX) is required.' },
         { status: 400 }
+      );
+    }
+
+    // S0-03: Require phone ownership proof unless called by a verified Admin.
+    // Proof must be either a valid signed unsubscribe/consent token bound to `phone`
+    // OR an existing Order ID + matching checkout phone verified server-side.
+    let ownershipVerified = adminCheck.ok;
+    if (!ownershipVerified) {
+      const signedToken = String(body.unsubscribeToken || body.consentToken || '').trim();
+      if (signedToken && verifySignedUnsubscribeToken(signedToken, phone)) {
+        ownershipVerified = true;
+      }
+    }
+    if (!ownershipVerified) {
+      const orderNumber = String(body.orderNumber || '').trim().toUpperCase();
+      if (/^DG-\d{4,8}$/.test(orderNumber)) {
+        const tracking = await fetchServerOrderTracking(orderNumber, phone);
+        if (tracking) {
+          ownershipVerified = true;
+        }
+      }
+    }
+
+    if (!ownershipVerified) {
+      return Response.json(
+        {
+          ok: false,
+          error:
+            'Phone ownership verification failed. Provide a matching Order ID + phone or a valid signed token.',
+        },
+        { status: 403, headers: { 'Cache-Control': 'no-store' } }
       );
     }
 

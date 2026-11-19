@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { POST as chatPost } from '../app/api/chat/route';
 import { GET as chatSessionGet } from '../app/api/chat/session/route';
+import { SESSION_COOKIE_NAME, signSessionCookieValue } from '../src/lib/chatbot/sessionAuth';
 import { POST as adminInboxPost } from '../app/api/chatbot/admin/route';
 import { POST as refillReminderPost, GET as refillReminderGet } from '../app/api/orders/refill-reminder/route';
 import { POST as reorderPost } from '../app/api/orders/reorder/route';
@@ -526,8 +527,11 @@ describe('Phase 3 (T3.1-T3.3) — Post-Purchase Support, Evidence Privacy, BST S
     );
     assert.equal(replyRes.status, 200);
 
+    const handoverCookie = `${SESSION_COOKIE_NAME}=${encodeURIComponent(signSessionCookieValue('sess_handover_1'))}`;
     const pollRes = await chatSessionGet(
-      new Request('http://localhost/api/chat/session?sessionId=sess_handover_1')
+      new Request('http://localhost/api/chat/session?sessionId=sess_handover_1', {
+        headers: { Cookie: handoverCookie },
+      })
     );
     assert.equal(pollRes.status, 200);
     const pollData = (await pollRes.json()) as {
@@ -557,7 +561,9 @@ describe('Phase 3 (T3.1-T3.3) — Post-Purchase Support, Evidence Privacy, BST S
     assert.equal(resolveRes.status, 200);
 
     const pollAfterResolve = await chatSessionGet(
-      new Request('http://localhost/api/chat/session?sessionId=sess_handover_1')
+      new Request('http://localhost/api/chat/session?sessionId=sess_handover_1', {
+        headers: { Cookie: handoverCookie },
+      })
     );
     const afterResolveJson = (await pollAfterResolve.json()) as { session: { aiPaused: boolean } };
     assert.equal(afterResolveJson.session.aiPaused, false);

@@ -618,7 +618,7 @@
       "type": "object",
       "properties": {
         "orderNumber": { "type": "string", "pattern": "^DG-[0-9]{4,8}$", "maxLength": 16 },
-        "action": { "type": "string", "enum": ["created", "address_updated", "cancelled", "review_approved", "review_rejected", "status_updated", "cod_verification", "courier_updated"] },
+        "action": { "type": "string", "enum": ["created", "address_updated", "cancelled", "review_approved", "review_rejected", "status_updated", "cod_verification", "courier_updated", "payment_gateway_verified", "courier_webhook_synced"] },
         "actorType": { "type": "string", "enum": ["customer", "admin", "system"] },
         "summary": { "type": "string", "minLength": 3, "maxLength": 300 },
         "previousStatus": { "type": "string", "maxLength": 40 },
@@ -725,6 +725,23 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["phone", "channel", "optIn", "unsubscribed", "source", "quietHoursRespect", "consentTimestampIso", "createdAt", "updatedAt"]
+    },
+    "PaymentGatewayEvent": {
+      "title": "PaymentGatewayEvent",
+      "description": "Immutable idempotent record for server-verified SSLCommerz, bKash, and courier webhook events.",
+      "type": "object",
+      "properties": {
+        "provider": { "type": "string", "enum": ["sslcommerz", "bkash", "steadfast", "pathao", "redx"] },
+        "eventType": { "type": "string", "enum": ["payment_verified", "payment_failed", "payment_cancelled", "courier_status"] },
+        "orderNumber": { "type": "string", "pattern": "^DG-[0-9]{4,8}$", "maxLength": 16 },
+        "externalRef": { "type": "string", "minLength": 2, "maxLength": 128 },
+        "amountBdt": { "type": "number" },
+        "rawStatus": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "verified": { "type": "boolean" },
+        "createdAtIso": { "type": "string", "maxLength": 48 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["provider", "eventType", "orderNumber", "externalRef", "rawStatus", "verified", "createdAtIso", "createdAt"]
     }
   },
   "firestore": {
@@ -847,6 +864,10 @@
     "/marketing_consents/{phoneKey}": {
       "schema": { "$ref": "#/entities/MarketingConsent" },
       "description": "Customer marketing opt-in and unsubscribe suppression registry keyed by Bangladesh phone."
+    },
+    "/payment_gateway_events/{eventId}": {
+      "schema": { "$ref": "#/entities/PaymentGatewayEvent" },
+      "description": "Immutable idempotent event ledger for SSLCommerz/bKash payment verification and live courier webhook sync."
     }
   }
 }

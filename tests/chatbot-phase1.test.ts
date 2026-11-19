@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import type { GoogleGenAI } from '@google/genai';
 import { POST as chatPost } from '../app/api/chat/route';
 import { DELETE as sessionDelete, GET as sessionGet } from '../app/api/chat/session/route';
+import { SESSION_COOKIE_NAME, signSessionCookieValue } from '../src/lib/chatbot/sessionAuth';
 import { POST as feedbackPost } from '../app/api/chatbot/feedback/route';
 import { POST as parseDocPost } from '../app/api/chatbot/parse-doc/route';
 import { classifyDomainRequest } from '../src/lib/chatbot/domain-guard';
@@ -549,9 +550,12 @@ describe('Phase 1 — Hybrid RAG, Session Slots, Intent Router, Guards, Streamin
     assert.equal(t1.status, 200);
     assert.equal(t1.meta?.lockedLang, 'en');
 
-    // GET /api/chat/session verifies persisted session & active draft
+    // GET /api/chat/session verifies persisted session & active draft (with signed HttpOnly session cookie)
+    const phase1Cookie = `${SESSION_COOKIE_NAME}=${encodeURIComponent(signSessionCookieValue('sess_phase1_flow'))}`;
     const getRes = await sessionGet(
-      new Request('http://localhost:3000/api/chat/session?sessionId=sess_phase1_flow')
+      new Request('http://localhost:3000/api/chat/session?sessionId=sess_phase1_flow', {
+        headers: { Cookie: phase1Cookie },
+      })
     );
     assert.equal(getRes.status, 200);
     const sessData = (await getRes.json()) as {
@@ -614,16 +618,21 @@ describe('Phase 1 — Hybrid RAG, Session Slots, Intent Router, Guards, Streamin
     assert.equal(recordedFeedback.length, 1);
     assert.equal(recordedFeedback[0].reason, 'unclear');
 
-    // DELETE /api/chat/session cancels active draft
+    // DELETE /api/chat/session cancels active draft (with signed HttpOnly session cookie)
     const delRes = await sessionDelete(
       new Request('http://localhost:3000/api/chat/session?sessionId=sess_phase1_flow', {
         method: 'DELETE',
-        headers: { 'x-requested-with': 'DeshiGeeStorefront' },
+        headers: {
+          'x-requested-with': 'DeshiGeeStorefront',
+          Cookie: phase1Cookie,
+        },
       })
     );
     assert.equal(delRes.status, 200);
     const getAfter = await sessionGet(
-      new Request('http://localhost:3000/api/chat/session?sessionId=sess_phase1_flow')
+      new Request('http://localhost:3000/api/chat/session?sessionId=sess_phase1_flow', {
+        headers: { Cookie: phase1Cookie },
+      })
     );
     const afterJson = (await getAfter.json()) as { orderDraft: unknown };
     assert.equal(afterJson.orderDraft, null);

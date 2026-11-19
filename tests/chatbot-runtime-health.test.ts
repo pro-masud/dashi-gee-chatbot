@@ -417,4 +417,85 @@ describe('T0.1 Gemini runtime configuration & health diagnostics', () => {
       'generate:gemini-3.1-flash-lite',
     ]);
   });
+
+  it('classifyGeminiError checks timeouts before numeric status codes and POST /api/chat fails over cleanly on round 1 after tool calls', async () => {
+    const { classifyGeminiError } = await import('../src/lib/gemini/client');
+    const { classifyTurnIntent } = await import('../src/lib/chatbot/intentRouter');
+
+    assert.equal(
+      classifyGeminiError(new Error('Model probe timeout after 4000ms')).code,
+      'gemini_timeout'
+    );
+    assert.equal(
+      classifyGeminiError({ status: 403, message: '403 PERMISSION_DENIED on model' }).shouldFailover,
+      true
+    );
+    assert.equal(
+      classifyGeminiError({ status: 401, message: '401 API_KEY_INVALID' }).shouldFailover,
+      false
+    );
+
+    const contactIntent = classifyTurnIntent('আপনাদের যোগাযোগের ঠিকানা কী?');
+    assert.ok(contactIntent.allowedToolNames.includes('get_business_contact'));
+    assert.ok(contactIntent.allowedToolNames.length <= 4);
+
+    process.env.GEMINI_API_KEY = 'AIzaSyTestSecretKeyValue1234567890';
+    process.env.GEMINI_MODEL = 'gemini-4-hydrogen';
+    process.env.GEMINI_FALLBACK_MODEL = 'gemini-3.1-flash-lite';
+
+    const calls: string[] = [];
+    setGeminiClientFactoryForTests(() => ({
+      models: {
+        generateContent: async ({ model }: { model: string }) => {
+          calls.push(model);
+          if (calls.length === 1) {
+            return {
+              functionCalls: [{ id: 'c1', name: 'get_business_contact', args: {} }],
+              candidates: [
+                {
+                  finishReason: 'STOP',
+                  content: {
+                    role: 'model',
+                    parts: [{ functionCall: { id: 'c1', name: 'get_business_contact', args: {} } }],
+                  },
+                },
+              ],
+              usageMetadata: { promptTokenCount: 900, candidatesTokenCount: 12 },
+            };
+          }
+          if (calls.length === 2 && model === 'gemini-4-hydrogen') {
+            throw new Error('Gemini request timeout exceeded');
+          }
+          return {
+            text: 'আপনি আমাদের পাবনা ও ঢাকা অফিসের ঠিকানা এবং সাপোর্টের জন্য নিচের ফোন ও WhatsApp বাটন ব্যবহার করতে পারেন।',
+            candidates: [{ finishReason: 'STOP' }],
+            usageMetadata: { promptTokenCount: 950, candidatesTokenCount: 30 },
+          };
+        },
+      },
+    }) as unknown as GoogleGenAI);
+
+    const req = new Request('http://localhost:3000/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-requested-with': 'DeshiGeeStorefront',
+      },
+      body: JSON.stringify({
+        mode: 'published',
+        uiLang: 'bn',
+        stream: false,
+        sessionId: 'test_sess_round1_failover',
+        messages: [{ role: 'user', text: 'আপনাদের যোগাযোগের ঠিকানা কী?' }],
+      }),
+    });
+
+    const res = await chatPost(req);
+    assert.equal(res.status, 200);
+    const { text, meta } = await parseNdjsonResponse(res);
+    assert.ok(text.includes('WhatsApp'));
+    assert.equal(meta?.path, 'gemini');
+    assert.equal(meta?.model, 'gemini-3.1-flash-lite');
+    assert.deepEqual(calls, ['gemini-4-hydrogen', 'gemini-4-hydrogen', 'gemini-3.1-flash-lite']);
+  });
 });

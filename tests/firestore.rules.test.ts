@@ -206,15 +206,15 @@ describe('T0.15 Firestore Security Rules — Dirty Dozen Adversarial Verificatio
     assert.match(chunksBlock, /allow create, update: if isValidId\(chunkId\) && isAdmin\(\) && isValidKnowledgeChunk\(incoming\(\)\);/);
     assert.match(chunksBlock, /allow delete: if isValidId\(chunkId\) && isAdmin\(\);/);
 
-    // 4. chat_sessions & order_drafts TTL + draftId binding + admin list
+    // 4. chat_sessions & order_drafts (S0-02): server/admin-only, zero anonymous client read/write
     const sessBlock = extractMatchBlock('/chat_sessions/{sessionId}');
-    assert.match(sessBlock, /allow get: if isValidId\(sessionId\)/);
-    assert.match(sessBlock, /allow list: if isAdmin\(\)/);
+    assert.match(sessBlock, /allow get, list: if isAdmin\(\);/);
+    assert.match(sessBlock, /allow create, update: if isValidId\(sessionId\)\s+&& isAdmin\(\)/);
 
     const draftBlock = extractMatchBlock('/order_drafts/{draftId}');
     const draftFn = extractFunctionBody('isValidOrderDraft');
-    assert.match(draftBlock, /allow get: if isValidId\(draftId\)/);
-    assert.match(draftBlock, /allow list: if isAdmin\(\)/);
+    assert.match(draftBlock, /allow get, list: if isAdmin\(\);/);
+    assert.match(draftBlock, /allow create, update: if isValidId\(draftId\)\s+&& isAdmin\(\)/);
     assert.match(draftBlock, /incoming\(\)\.draftId == draftId/);
     assert.match(draftFn, /data\.expiresAt is number/);
 
@@ -318,9 +318,10 @@ describe('T0.15 Firestore Security Rules — Dirty Dozen Adversarial Verificatio
     assert.match(replyBlock, /allow get, list: if isAdmin\(\);/);
     assert.match(replyBlock, /allow create: if isValidId\(replyId\) && isAdmin\(\) && isValidSupportAgentReply\(incoming\(\)\);/);
 
-    // 3. chat_sessions: visitor cannot set or tamper with aiPaused / activeTicketId / assignedAgentName / agentReplies
+    // 3. chat_sessions (S0-02): zero visitor direct read/write — only verified admin/server can touch session docs
     const sessBlock = extractMatchBlock('/chat_sessions/{sessionId}');
-    assert.match(sessBlock, /!incoming\(\)\.diff\(existing\(\)\)\.affectedKeys\(\)\.hasAny\(\['aiPaused', 'activeTicketId', 'assignedAgentName', 'agentReplies'\]\)/);
+    assert.match(sessBlock, /allow get, list: if isAdmin\(\);/);
+    assert.match(sessBlock, /allow create, update: if isValidId\(sessionId\)\s+&& isAdmin\(\)/);
 
     // 4. chatbot_support_requests: visitor create enforces status=='open', optional Phase 3 triage locked to admin
     const supBlock = extractMatchBlock('/chatbot_support_requests/{reqId}');
@@ -337,11 +338,10 @@ describe('T0.15 Firestore Security Rules — Dirty Dozen Adversarial Verificatio
     const revBlock = extractMatchBlock('/reviews/{reviewId}');
     assert.match(revBlock, /existsAfter\(\/databases\/\$\(database\)\/documents\/order_review_claims\//);
 
-    // 6. refill_reminders: keyed lookup only, admin-only list
+    // 6. refill_reminders (S0-03): server/admin-only, zero anonymous client read/write
     const refillBlock = extractMatchBlock('/refill_reminders/{reminderId}');
-    assert.match(refillBlock, /allow get: if isValidId\(reminderId\);/);
-    assert.match(refillBlock, /allow list: if isAdmin\(\);/);
-    assert.match(refillBlock, /allow create: if isValidId\(reminderId\)/);
+    assert.match(refillBlock, /allow get, list: if isAdmin\(\);/);
+    assert.match(refillBlock, /allow create: if isValidId\(reminderId\)\s+&& isAdmin\(\)/);
 
     // 7. Blueprint & Spec sync
     for (const entity of ['SupportEvidence', 'SupportAgentReply', 'OrderReviewClaim', 'RefillReminder']) {
@@ -413,28 +413,22 @@ describe('T0.15 Firestore Security Rules — Dirty Dozen Adversarial Verificatio
     assert.match(webhookFn, /'messenger', 'instagram', 'whatsapp'/);
     assert.match(webhookFn, /'processed', 'duplicate', 'rejected'/);
 
-    // 2. marketing_consents: phoneKey==phone, admin-only list, customer blocked from spoofing campaignCount/lastCampaignAtIso
+    // 2. marketing_consents (S0-03): server/admin-only, zero anonymous client read/write
     const consentBlock = extractMatchBlock('/marketing_consents/{phoneKey}');
     const consentFn = extractFunctionBody('isValidMarketingConsent');
-    assert.match(consentBlock, /allow get: if isValidId\(phoneKey\);/);
-    assert.match(consentBlock, /allow list: if isAdmin\(\);/);
+    assert.match(consentBlock, /allow get, list: if isAdmin\(\);/);
+    assert.match(consentBlock, /allow create: if isValidId\(phoneKey\)\s+&& isAdmin\(\)/);
     assert.match(consentBlock, /phoneKey == incoming\(\)\.phone/);
-    assert.match(consentBlock, /!\('lastCampaignAtIso' in incoming\(\)\)/);
-    assert.doesNotMatch(
-      consentBlock.split('affectedKeys().hasOnly(')[1] || '',
-      /campaignCount|lastCampaignAtIso/,
-      'Customers must not self-update campaignCount or lastCampaignAtIso'
-    );
     assert.match(consentFn, /data\.phone\.matches\('\^01\[3-9\]\[0-9\]\{8\}\$'\)/);
 
-    // 3. chat_sessions: external identity + visitor linkedPhone immutability once set
+    // 3. chat_sessions (S0-02): external identity fields validated in schema; direct client read/write disabled
     const sessFn = extractFunctionBody('isValidChatSession');
     const sessBlock = extractMatchBlock('/chat_sessions/{sessionId}');
     for (const field of ['channel', 'externalUserId', 'linkedPhone']) {
       assert.equal(sessFn.split('hasOnly(')[0].includes(`'${field}'`), false);
       assert.equal(sessFn.split('hasOnly(')[1].includes(`'${field}'`), true);
     }
-    assert.match(sessBlock, /!\('linkedPhone' in existing\(\)\) \|\| existing\(\)\.linkedPhone == '' \|\| incoming\(\)\.linkedPhone == existing\(\)\.linkedPhone/);
+    assert.match(sessBlock, /allow get, list: if isAdmin\(\);/);
 
     // 4. Optional attribution & channel fields across Order, ChatbotLog, ChatbotSupportRequest
     const validOrderFn = extractFunctionBody('isValidOrder');
@@ -464,7 +458,31 @@ describe('T0.15 Firestore Security Rules — Dirty Dozen Adversarial Verificatio
     assert.ok(specText.includes('20. **Omnichannel Webhook Replay/Idempotency & Marketing Consent/Suppression**'));
     assert.ok(specText.includes('14. **Webhook Event Tampering or Marketing Campaign Counter Spoofing**'));
   });
+
+  it('Phase 6 Rules & Blueprint Sync: enforces immutable payment_gateway_events and payment/courier audit actions', () => {
+    const gwBlock = extractMatchBlock('/payment_gateway_events/{eventId}');
+    const gwFn = extractFunctionBody('isValidPaymentGatewayEvent');
+    assert.match(gwBlock, /allow get, list: if isAdmin\(\);/);
+    assert.match(gwBlock, /allow create: if isValidId\(eventId\)/);
+    assert.match(gwBlock, /exists\(\/databases\/\$\(database\)\/documents\/orders\//);
+    assert.match(gwBlock, /allow update, delete: if false;/);
+    assert.match(gwFn, /'sslcommerz', 'bkash', 'steadfast', 'pathao', 'redx'/);
+    assert.match(gwFn, /'payment_verified', 'payment_failed', 'payment_cancelled', 'courier_status'/);
+
+    const auditFn = extractFunctionBody('isValidOrderAuditLog');
+    assert.match(auditFn, /'payment_gateway_verified'/);
+    assert.match(auditFn, /'courier_webhook_synced'/);
+
+    assert.ok(blueprint.entities.PaymentGatewayEvent);
+    assert.ok(blueprint.firestore['/payment_gateway_events/{eventId}']);
+    const auditActionProp = blueprint.entities.OrderAuditLog.properties.action as { enum?: string[] };
+    assert.ok(auditActionProp.enum?.includes('payment_gateway_verified'));
+    assert.ok(auditActionProp.enum?.includes('courier_webhook_synced'));
+    assert.ok(specText.includes('21. **Payment Gateway & Courier Webhook Event Immutability**'));
+    assert.ok(specText.includes('15. **Payment Gateway Event Tampering or Scrape**'));
+  });
 });
+
 
 
 

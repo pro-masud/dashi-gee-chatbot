@@ -182,7 +182,9 @@ export interface OrderAuditLogRecord {
     | 'review_rejected'
     | 'status_updated'
     | 'cod_verification'
-    | 'courier_updated';
+    | 'courier_updated'
+    | 'payment_gateway_verified'
+    | 'courier_webhook_synced';
   actorType: 'customer' | 'admin' | 'system';
   summary: string;
   previousStatus?: string;

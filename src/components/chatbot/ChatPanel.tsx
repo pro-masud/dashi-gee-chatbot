@@ -152,10 +152,15 @@ export function ChatPanel({
   const [evidenceError, setEvidenceError] = useState('');
   const [speechSupported, setSpeechSupported] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
+  const [loadingAudioMsgId, setLoadingAudioMsgId] = useState<string | null>(null);
+  const [ttsError, setTtsError] = useState('');
   const scrollEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const audioCacheRef = useRef<Map<string, string>>(new Map());
 
   const bn = lang === 'bn';
 
@@ -200,8 +205,6 @@ export function ChatPanel({
   };
 
   useEffect(() => {
-    const activeId = getOrCreateSessionId();
-    setSessionId(activeId);
     try {
       const saved = sessionStorage.getItem(MESSAGES_STORAGE_KEY);
       if (saved) {
@@ -215,10 +218,39 @@ export function ChatPanel({
     }
 
     let cancelled = false;
-    fetch(`/api/chat/session?sessionId=${encodeURIComponent(activeId)}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then(
-        (data: {
+
+    const bootstrapAndRestore = async () => {
+      try {
+        const bootRes = await fetch('/api/chat/session', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-requested-with': 'DeshiGeeStorefront',
+          },
+          body: JSON.stringify({ forceNew: false }),
+        });
+        if (!bootRes.ok) {
+          const fallbackId = getOrCreateSessionId();
+          if (!cancelled) setSessionId(fallbackId);
+          return;
+        }
+        const bootData = (await bootRes.json()) as { ok?: boolean; sessionId?: string };
+        const activeId = bootData.sessionId || getOrCreateSessionId();
+        if (cancelled) return;
+        setSessionId(activeId);
+        try {
+          sessionStorage.setItem(SESSION_STORAGE_KEY, activeId);
+        } catch {
+          // ignore storage failures
+        }
+
+        const res = await fetch(
+          `/api/chat/session?sessionId=${encodeURIComponent(activeId)}`,
+          { credentials: 'same-origin' }
+        );
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as {
           session?: {
             lockedLang?: 'bn' | 'en' | '';
             aiPaused?: boolean;
@@ -227,23 +259,25 @@ export function ChatPanel({
             agentReplies?: ChatAgentReplyItem[];
           } | null;
           orderDraft?: OrderDraftDoc | null;
-        } | null) => {
-          if (cancelled || !data) return;
-          applySessionSnapshot(data);
-          if (
-            data.orderDraft &&
-            data.orderDraft.state !== 'confirmed' &&
-            data.orderDraft.state !== 'cancelled' &&
-            data.orderDraft.state !== 'expired' &&
-            (data.orderDraft.weight || data.orderDraft.phone || data.orderDraft.address)
-          ) {
-            setResumedDraft(data.orderDraft);
-          }
+        } | null;
+        if (cancelled || !data) return;
+        applySessionSnapshot(data);
+        if (
+          data.orderDraft &&
+          data.orderDraft.state !== 'confirmed' &&
+          data.orderDraft.state !== 'cancelled' &&
+          data.orderDraft.state !== 'expired' &&
+          (data.orderDraft.weight || data.orderDraft.phone || data.orderDraft.address)
+        ) {
+          setResumedDraft(data.orderDraft);
         }
-      )
-      .catch(() => {
-        // ignore network errors on mount restore
-      });
+      } catch {
+        const fallbackId = getOrCreateSessionId();
+        if (!cancelled) setSessionId(fallbackId);
+      }
+    };
+
+    void bootstrapAndRestore();
 
     return () => {
       cancelled = true;
@@ -253,20 +287,72 @@ export function ChatPanel({
   useEffect(() => {
     if (!open || minimized || sessionId === 'dg_init' || messages.length === 0) return;
     let active = true;
-    const poll = () => {
-      fetch(`/api/chat/session?sessionId=${encodeURIComponent(sessionId)}`)
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (active && data) {
-            applySessionSnapshot(data);
-          }
-        })
-        .catch(() => {});
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let idleStreak = 0;
+    const MAX_IDLE_POLLS = 20; // stop polling automatically after extended inactivity
+    const BASE_DELAY_MS = 8000;
+    const MAX_DELAY_MS = 45000;
+
+    const scheduleNext = () => {
+      if (!active || idleStreak >= MAX_IDLE_POLLS) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+      const delay = Math.min(MAX_DELAY_MS, BASE_DELAY_MS * Math.pow(1.5, Math.min(idleStreak, 5)));
+      timer = setTimeout(poll, delay);
     };
-    const timer = setInterval(poll, 6000);
+
+    const poll = () => {
+      if (!active) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+      fetch(`/api/chat/session?sessionId=${encodeURIComponent(sessionId)}`, {
+        credentials: 'same-origin',
+      })
+        .then((res) => {
+          if (res.status === 403 || res.status === 429) {
+            idleStreak = Math.min(MAX_IDLE_POLLS, idleStreak + 3);
+            return null;
+          }
+          return res.ok ? res.json() : null;
+        })
+        .then((data) => {
+          if (!active) return;
+          if (data) {
+            const hasActiveAgent = Boolean(data.session?.aiPaused || data.session?.activeTicketId);
+            idleStreak = hasActiveAgent ? 0 : idleStreak + 1;
+            applySessionSnapshot(data);
+          } else {
+            idleStreak += 1;
+          }
+          scheduleNext();
+        })
+        .catch(() => {
+          idleStreak += 2;
+          scheduleNext();
+        });
+    };
+
+    const handleVisibility = () => {
+      if (typeof document === 'undefined') return;
+      if (document.hidden) {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      } else if (active && idleStreak < MAX_IDLE_POLLS) {
+        scheduleNext();
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibility);
+    }
+    scheduleNext();
+
     return () => {
       active = false;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibility);
+      }
     };
   }, [open, minimized, sessionId, messages.length]);
 
@@ -329,8 +415,88 @@ export function ChatPanel({
         // ignore cleanup error
       }
       recognitionRef.current = null;
+      if (audioElRef.current) {
+        audioElRef.current.pause();
+        audioElRef.current = null;
+      }
     };
   }, []);
+
+  const stopAudioPlayback = () => {
+    if (audioElRef.current) {
+      audioElRef.current.pause();
+      audioElRef.current.currentTime = 0;
+      audioElRef.current = null;
+    }
+    setSpeakingMsgId(null);
+  };
+
+  const handleSpeakMessage = async (msgId: string, text: string) => {
+    setTtsError('');
+    if (speakingMsgId === msgId) {
+      stopAudioPlayback();
+      return;
+    }
+    stopAudioPlayback();
+
+    const playDataUrl = (dataUrl: string) => {
+      const audio = new Audio(dataUrl);
+      audioElRef.current = audio;
+      setSpeakingMsgId(msgId);
+      audio.onended = () => {
+        setSpeakingMsgId((cur) => (cur === msgId ? null : cur));
+        if (audioElRef.current === audio) audioElRef.current = null;
+      };
+      audio.onerror = () => {
+        setSpeakingMsgId((cur) => (cur === msgId ? null : cur));
+        setTtsError(bn ? 'অডিও প্লে করা যায়নি।' : 'Audio playback failed.');
+        if (audioElRef.current === audio) audioElRef.current = null;
+      };
+      audio.play().catch(() => {
+        setSpeakingMsgId((cur) => (cur === msgId ? null : cur));
+        setTtsError(bn ? 'ব্রাউজারে অডিও প্লে আটকে গেছে।' : 'Browser blocked audio playback.');
+      });
+    };
+
+    const cached = audioCacheRef.current.get(msgId);
+    if (cached) {
+      playDataUrl(cached);
+      return;
+    }
+
+    setLoadingAudioMsgId(msgId);
+    try {
+      const res = await fetch('/api/chat/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+        },
+        body: JSON.stringify({ text, lang, sessionId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok || !data.audioBase64) {
+        throw new Error(
+          data.error ||
+            (bn ? 'অডিও তৈরি করা যায়নি।' : 'Could not generate voice reply.')
+        );
+      }
+      const mime = String(data.mimeType || 'audio/wav');
+      const dataUrl = `data:${mime};base64,${data.audioBase64}`;
+      audioCacheRef.current.set(msgId, dataUrl);
+      playDataUrl(dataUrl);
+    } catch (err) {
+      setTtsError(
+        err instanceof Error
+          ? err.message
+          : bn
+            ? 'ভয়েস রিপ্লাই চালু করা যায়নি।'
+            : 'Voice reply unavailable.'
+      );
+    } finally {
+      setLoadingAudioMsgId((cur) => (cur === msgId ? null : cur));
+    }
+  };
 
   const toggleVoiceDictation = () => {
     if (typeof window === 'undefined' || !speechSupported) return;
@@ -866,6 +1032,9 @@ export function ChatPanel({
   };
 
   const handleClearChat = () => {
+    stopAudioPlayback();
+    audioCacheRef.current.clear();
+    setTtsError('');
     const prevSession = sessionId;
     setMessages([]);
     setRolloverNotice(false);
@@ -874,24 +1043,47 @@ export function ChatPanel({
     setActiveTicketId('');
     setAssignedAgentName('');
     setPendingEvidence(null);
-    const fresh = `dg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    setSessionId(fresh);
-    try {
-      sessionStorage.setItem(SESSION_STORAGE_KEY, fresh);
-      sessionStorage.removeItem(MESSAGES_STORAGE_KEY);
-    } catch {
-      // ignore
-    }
-    if (prevSession && prevSession !== 'dg_init') {
-      fetch(`/api/chat/session?sessionId=${encodeURIComponent(prevSession)}`, {
-        method: 'DELETE',
-        headers: {
-          'x-requested-with': 'DeshiGeeStorefront',
-        },
-      }).catch(() => {
-        // ignore cleanup error
-      });
-    }
+    const resetSession = async () => {
+      if (prevSession && prevSession !== 'dg_init') {
+        await fetch(`/api/chat/session?sessionId=${encodeURIComponent(prevSession)}`, {
+          method: 'DELETE',
+          credentials: 'same-origin',
+          headers: {
+            'x-requested-with': 'DeshiGeeStorefront',
+          },
+        }).catch(() => {
+          // ignore cleanup error
+        });
+      }
+      try {
+        const bootRes = await fetch('/api/chat/session', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-requested-with': 'DeshiGeeStorefront',
+          },
+          body: JSON.stringify({ forceNew: true }),
+        });
+        if (bootRes.ok) {
+          const data = (await bootRes.json()) as { sessionId?: string };
+          if (data.sessionId) {
+            setSessionId(data.sessionId);
+            sessionStorage.setItem(SESSION_STORAGE_KEY, data.sessionId);
+            sessionStorage.removeItem(MESSAGES_STORAGE_KEY);
+            return;
+          }
+        }
+      } catch {
+        // fallback below
+      }
+      try {
+        sessionStorage.removeItem(MESSAGES_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+    };
+    void resetSession();
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1055,8 +1247,24 @@ export function ChatPanel({
             }
             onSuggestedReply={(q) => sendMessage(q)}
             onSubmitFeedback={handleSubmitFeedback}
+            onSpeakMessage={handleSpeakMessage}
+            speakingMsgId={speakingMsgId}
+            loadingAudioMsgId={loadingAudioMsgId}
           />
         ))}
+
+        {ttsError && (
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-950">
+            <span>{ttsError}</span>
+            <button
+              type="button"
+              onClick={() => setTtsError('')}
+              className="shrink-0 font-semibold text-amber-900 hover:underline"
+            >
+              {bn ? 'বন্ধ' : 'Dismiss'}
+            </button>
+          </div>
+        )}
 
         {rolloverNotice && (
           <div className="rounded-xl border border-[rgba(180,123,43,0.28)] bg-[#F2ECE1]/60 px-3 py-2 text-[11px] text-[#635647]">

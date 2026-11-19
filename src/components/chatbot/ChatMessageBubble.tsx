@@ -20,9 +20,11 @@ import {
   RotateCcw,
   ShoppingBag,
   Sparkles,
+  Square,
   ThumbsDown,
   ThumbsUp,
   Truck,
+  Volume2,
 } from 'lucide-react';
 import { formatBdt } from '../../data/deshiGeeData';
 import type {
@@ -104,6 +106,9 @@ export function ChatMessageBubble({
   onSelectProductVariant,
   onSuggestedReply,
   onSubmitFeedback,
+  onSpeakMessage,
+  speakingMsgId,
+  loadingAudioMsgId,
 }: {
   msg: ChatMessageItem;
   lang: 'en' | 'bn';
@@ -121,6 +126,9 @@ export function ChatMessageBubble({
     rating: 'up' | 'down',
     reason?: FeedbackReason
   ) => Promise<void> | void;
+  onSpeakMessage?: (msgId: string, text: string) => Promise<void> | void;
+  speakingMsgId?: string | null;
+  loadingAudioMsgId?: string | null;
 }) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showSources, setShowSources] = useState(false);
@@ -806,6 +814,42 @@ export function ChatMessageBubble({
                 </>
               )}
             </button>
+            {onSpeakMessage && (
+              <button
+                type="button"
+                onClick={() => onSpeakMessage(msg.id, msg.text)}
+                disabled={loadingAudioMsgId === msg.id}
+                className={`inline-flex min-h-[28px] items-center gap-1 hover:text-[#1E1710] disabled:opacity-60 ${
+                  speakingMsgId === msg.id ? 'font-semibold text-[#8A5A17]' : ''
+                }`}
+                aria-label={
+                  speakingMsgId === msg.id
+                    ? bn
+                      ? 'অডিও বন্ধ করুন'
+                      : 'Stop audio'
+                    : bn
+                      ? 'উত্তর শুনুন'
+                      : 'Listen to reply'
+                }
+              >
+                {loadingAudioMsgId === msg.id ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin text-[#B47B2B]" />
+                    <span>{bn ? 'তৈরি হচ্ছে...' : 'Loading...'}</span>
+                  </>
+                ) : speakingMsgId === msg.id ? (
+                  <>
+                    <Square className="h-3 w-3 fill-current" />
+                    <span>{bn ? 'থামান' : 'Stop'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Volume2 className="h-3 w-3" />
+                    <span>{bn ? 'শুনুন' : 'Listen'}</span>
+                  </>
+                )}
+              </button>
+            )}
             {msg.retryPrompt && onRetry && (
               <button
                 type="button"

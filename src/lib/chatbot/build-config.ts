@@ -31,8 +31,8 @@ export const CHATBOT_BUILD_CONFIG = {
   // Confirmation Token, Draft TTL & Gemini Execution
   CONFIRM_TOKEN_TTL_MS: 10 * 60 * 1000, // 10 minutes
   ORDER_DRAFT_TTL_MS: 30 * 60 * 1000, // 30 minutes persistent order draft
-  GEMINI_TIMEOUT_MS: 8 * 1000, // 8 seconds per provider attempt
-  REQUEST_DEADLINE_MS: 14 * 1000, // 14 seconds hard request budget
+  GEMINI_TIMEOUT_MS: 15 * 1000, // 15 seconds per provider attempt
+  REQUEST_DEADLINE_MS: 28 * 1000, // 28 seconds hard request budget for multi-round tools + failover
   GEMINI_TEMPERATURE: 0.3,
   GEMINI_MAX_OUTPUT_TOKENS: 1800,
   GEMINI_RETRY_MAX_OUTPUT_TOKENS: 2600,

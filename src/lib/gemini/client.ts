@@ -486,34 +486,107 @@ export function estimateGeminiCostUsd(promptTokens: number, outputTokens: number
   return Number((inputCost + outputCost).toFixed(6));
 }
 
+const PRIMARY_MODEL_COOLDOWN_MS = 60_000;
+const globalCircuitState = globalThis as unknown as {
+  __deshiGeePrimaryModelCooldownUntil?: Map<string, { until: number; reason: string }>;
+};
+
+function isTestRuntime(): boolean {
+  return process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1';
+}
+
+export function getPrimaryModelCooldownReason(modelName: string): string {
+  if (isTestRuntime()) return '';
+  const map = globalCircuitState.__deshiGeePrimaryModelCooldownUntil;
+  if (!map) return '';
+  const entry = map.get(modelName);
+  if (!entry) return '';
+  if (entry.until <= Date.now()) {
+    map.delete(modelName);
+    return '';
+  }
+  return entry.reason;
+}
+
+export function recordPrimaryModelFailure(modelName: string, reason: string): void {
+  if (isTestRuntime() || !modelName) return;
+  if (!globalCircuitState.__deshiGeePrimaryModelCooldownUntil) {
+    globalCircuitState.__deshiGeePrimaryModelCooldownUntil = new Map();
+  }
+  globalCircuitState.__deshiGeePrimaryModelCooldownUntil.set(modelName, {
+    until: Date.now() + PRIMARY_MODEL_COOLDOWN_MS,
+    reason,
+  });
+}
+
+export function recordPrimaryModelSuccess(modelName: string): void {
+  if (isTestRuntime() || !modelName) return;
+  globalCircuitState.__deshiGeePrimaryModelCooldownUntil?.delete(modelName);
+}
+
+export function clearPrimaryModelCircuitForTests(): void {
+  globalCircuitState.__deshiGeePrimaryModelCooldownUntil?.clear();
+}
+
+export function normalizeFailoverTag(code: string): string {
+  switch (code) {
+    case 'gemini_transient_error':
+      return 'transient_upstream';
+    case 'gemini_timeout':
+      return 'timeout';
+    case 'gemini_quota_exceeded':
+      return 'quota';
+    case 'gemini_model_retired':
+      return 'model_retired';
+    case 'gemini_permission_denied':
+      return 'permission_failover';
+    default:
+      return code ? code.replace(/error/gi, 'issue') : '';
+  }
+}
+
 export function classifyGeminiError(err: unknown): {
   code: string;
   shouldFailover: boolean;
   friendlyEn: string;
   friendlyBn: string;
 } {
-  const errObj = err as { status?: number; code?: number; message?: string } | null;
-  const statusNum = Number(errObj?.status || errObj?.code || 0);
-  const msg = (err instanceof Error ? err.message : String(err || '')).toLowerCase();
+  const errObj = err as {
+    status?: number;
+    code?: number | string;
+    message?: string;
+    error?: { code?: number; status?: string; message?: string };
+  } | null;
+  const statusNum = Number(errObj?.status || errObj?.error?.code || errObj?.code || 0);
+  const nestedStatus = String(errObj?.error?.status || '').toLowerCase();
+  const rawMsg = err instanceof Error ? err.message : String(errObj?.error?.message || err || '');
+  const msg = `${rawMsg} ${nestedStatus}`.toLowerCase();
 
-  if (statusNum === 400 || msg.includes('400') || msg.includes('invalid_argument') || msg.includes('bad request')) {
+  // Check timeouts & aborts FIRST so numeric strings like "4000ms" never misclassify as HTTP 400
+  if (
+    msg.includes('abort') ||
+    msg.includes('timeout') ||
+    msg.includes('deadline exceeded') ||
+    msg.includes('etimedout')
+  ) {
     return {
-      code: 'gemini_invalid_request',
-      shouldFailover: false,
+      code: 'gemini_timeout',
+      shouldFailover: true,
       friendlyEn:
-        'Could not process that request format right now. Please try rephrasing or contact support.',
+        'Our assistant took a bit too long to respond. Please try again or reach us on WhatsApp.',
       friendlyBn:
-        'অনুরোধটি প্রক্রিয়া করা যায়নি। অনুগ্রহ করে একটু ভিন্নভাবে লিখে চেষ্টা করুন বা সাপোর্টে যোগাযোগ করুন।',
+        'উত্তর দিতে একটু সময় বেশি লাগছে। অনুগ্রহ করে আবার চেষ্টা করুন অথবা WhatsApp-এ যোগাযোগ করুন।',
     };
   }
 
   if (
     statusNum === 401 ||
-    statusNum === 403 ||
-    msg.includes('401') ||
-    msg.includes('403') ||
+    /\b401\b/.test(msg) ||
+    msg.includes('api_key_invalid') ||
+    msg.includes('api key not valid') ||
+    msg.includes('invalid api key') ||
     msg.includes('api_key') ||
-    msg.includes('permission_denied')
+    msg.includes('unauthenticated')
   ) {
     return {
       code: 'gemini_auth_error',
@@ -526,8 +599,39 @@ export function classifyGeminiError(err: unknown): {
   }
 
   if (
+    statusNum === 403 ||
+    /\b403\b/.test(msg) ||
+    msg.includes('permission_denied')
+  ) {
+    return {
+      code: 'gemini_permission_denied',
+      shouldFailover: true,
+      friendlyEn:
+        'The AI assistant is temporarily switching to an available model. Please contact our support if needed.',
+      friendlyBn:
+        'AI অ্যাসিস্ট্যান্ট বিকল্প মডেলে সংযোগ করার চেষ্টা করছে। প্রয়োজনে আমাদের সাপোর্টে যোগাযোগ করুন।',
+    };
+  }
+
+  if (
+    statusNum === 400 ||
+    /\b400\b/.test(msg) ||
+    msg.includes('invalid_argument') ||
+    msg.includes('bad request')
+  ) {
+    return {
+      code: 'gemini_invalid_request',
+      shouldFailover: false,
+      friendlyEn:
+        'Could not process that request format right now. Please try rephrasing or contact support.',
+      friendlyBn:
+        'অনুরোধটি প্রক্রিয়া করা যায়নি। অনুগ্রহ করে একটু ভিন্নভাবে লিখে চেষ্টা করুন বা সাপোর্টে যোগাযোগ করুন।',
+    };
+  }
+
+  if (
     statusNum === 404 ||
-    msg.includes('404') ||
+    /\b404\b/.test(msg) ||
     msg.includes('not_found') ||
     msg.includes('not found') ||
     msg.includes('deprecated') ||
@@ -543,18 +647,12 @@ export function classifyGeminiError(err: unknown): {
     };
   }
 
-  if (msg.includes('abort') || msg.includes('timeout')) {
-    return {
-      code: 'gemini_timeout',
-      shouldFailover: true,
-      friendlyEn:
-        'Our assistant took a bit too long to respond. Please try again or reach us on WhatsApp.',
-      friendlyBn:
-        'উত্তর দিতে একটু সময় বেশি লাগছে। অনুগ্রহ করে আবার চেষ্টা করুন অথবা WhatsApp-এ যোগাযোগ করুন।',
-    };
-  }
-
-  if (statusNum === 429 || msg.includes('429') || msg.includes('quota') || msg.includes('resource_exhausted')) {
+  if (
+    statusNum === 429 ||
+    /\b429\b/.test(msg) ||
+    msg.includes('quota') ||
+    msg.includes('resource_exhausted')
+  ) {
     return {
       code: 'gemini_quota_exceeded',
       shouldFailover: true,
@@ -572,6 +670,7 @@ export function classifyGeminiError(err: unknown): {
     msg.includes('overloaded') ||
     msg.includes('internal') ||
     msg.includes('econnreset') ||
+    msg.includes('fetch failed') ||
     msg.includes('network')
   ) {
     return {
@@ -586,7 +685,7 @@ export function classifyGeminiError(err: unknown): {
 
   return {
     code: 'gemini_unavailable',
-    shouldFailover: false,
+    shouldFailover: true,
     friendlyEn:
       'Sorry, the assistant encountered a brief hiccup. Please try again or reach our support team.',
     friendlyBn:

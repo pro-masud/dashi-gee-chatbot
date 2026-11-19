@@ -94,6 +94,7 @@ export function AdminDashboardView({
   const [courierUrlDraft, setCourierUrlDraft] = useState('');
   const [courierMarkShipped, setCourierMarkShipped] = useState(true);
   const [courierSaving, setCourierSaving] = useState(false);
+  const [courierBooking, setCourierBooking] = useState(false);
   const [courierFeedback, setCourierFeedback] = useState('');
 
   const [refillReminders, setRefillReminders] = useState<RefillReminderDoc[]>([]);
@@ -394,6 +395,57 @@ export function AdminDashboardView({
       setCourierFeedback(err instanceof Error ? err.message : 'Courier update failed.');
     } finally {
       setCourierSaving(false);
+    }
+  };
+
+  const handleAutoBookCourier = async () => {
+    if (!selectedOrder || !user || courierBooking || courierPartnerDraft === 'manual') return;
+    setCourierBooking(true);
+    setCourierFeedback('');
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/courier/book', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          orderNumber: selectedOrder.orderNumber,
+          partner: courierPartnerDraft,
+          markShipped: courierMarkShipped,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        setCourierFeedback(
+          data.error || `Could not auto-book with ${courierPartnerDraft.toUpperCase()} API.`
+        );
+        return;
+      }
+      const nextStatus = (data.nextStatus as OrderStatus) || selectedOrder.status;
+      const updatedFields: Partial<OrderRecord> = {
+        status: nextStatus,
+        courierPartner: data.partner || courierPartnerDraft,
+        consignmentId: data.consignmentId || '',
+        courierTrackingUrl: data.courierTrackingUrl || '',
+        dispatchedAtIso: data.dispatchedAtIso || selectedOrder.dispatchedAtIso,
+      };
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.orderNumber === selectedOrder.orderNumber ? { ...o, ...updatedFields } : o
+        )
+      );
+      setSelectedOrder({ ...selectedOrder, ...updatedFields });
+      if (data.consignmentId) setConsignmentIdDraft(data.consignmentId);
+      if (data.courierTrackingUrl) setCourierUrlDraft(data.courierTrackingUrl);
+      setCourierFeedback(data.messageEn || 'Parcel booked via live courier API.');
+      await loadOrderAuditLogs(selectedOrder.orderNumber);
+    } catch (err) {
+      setCourierFeedback(err instanceof Error ? err.message : 'Live courier booking failed.');
+    } finally {
+      setCourierBooking(false);
     }
   };
 
@@ -990,18 +1042,37 @@ export function AdminDashboardView({
                     {courierFeedback && (
                       <p className="text-[11px] font-medium text-[#8A5A17]">{courierFeedback}</p>
                     )}
-                    <button
-                      type="submit"
-                      disabled={courierSaving}
-                      className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-[#1E1710] px-3 py-1.5 text-[11px] font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50"
-                    >
-                      {courierSaving ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <Truck className="h-3 w-3" />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="submit"
+                        disabled={courierSaving || courierBooking}
+                        className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-[#1E1710] px-3 py-1.5 text-[11px] font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50"
+                      >
+                        {courierSaving ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Truck className="h-3 w-3" />
+                        )}
+                        <span>Save Courier Dispatch</span>
+                      </button>
+                      {courierPartnerDraft !== 'manual' && (
+                        <button
+                          type="button"
+                          disabled={courierBooking || courierSaving}
+                          onClick={handleAutoBookCourier}
+                          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-[#B47B2B] bg-[#FFFDF9] px-3 py-1.5 text-[11px] font-medium text-[#8A5A17] hover:bg-[#F2ECE1] disabled:opacity-50"
+                        >
+                          {courierBooking ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <ExternalLink className="h-3 w-3" />
+                          )}
+                          <span>
+                            Auto-Book {courierPartnerDraft.toUpperCase()} API
+                          </span>
+                        </button>
                       )}
-                      <span>Save Courier Dispatch</span>
-                    </button>
+                    </div>
                   </form>
 
                   {/* Risk Signals & Manual Review Queue Controls */}

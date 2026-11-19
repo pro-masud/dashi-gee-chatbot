@@ -69,10 +69,6 @@ export const CHATBOT_FUNCTION_DECLARATIONS: FunctionDeclaration[] = [
     name: 'get_product_information',
     description:
       'Get verified details about Deshi Gee single product: description, ingredients, taste, aroma, texture, bilona production craft, shelf life, storage, origin, approved claims, and active batch traceability.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {},
-    },
   },
   {
     name: 'get_current_price',
@@ -137,36 +133,20 @@ export const CHATBOT_FUNCTION_DECLARATIONS: FunctionDeclaration[] = [
     name: 'get_business_contact',
     description:
       'Get official phone number, WhatsApp number, email, district/city, full street address, Google Maps link, and Directions link.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {},
-    },
   },
   {
     name: 'get_business_hours',
     description:
       'Get business hours, closed days, and real-time Open/Closed status in Asia/Dhaka (BST).',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {},
-    },
   },
   {
     name: 'get_payment_methods',
     description:
       'Get supported payment methods (Cash on Delivery, bKash, Nagad), receiving account numbers, and rules.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {},
-    },
   },
   {
     name: 'get_return_policy',
     description: 'Get verified return, broken-jar replacement, and refund policy.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {},
-    },
   },
   {
     name: 'get_faq_information',
@@ -394,10 +374,6 @@ export const CHATBOT_FUNCTION_DECLARATIONS: FunctionDeclaration[] = [
     name: 'get_variant_options',
     description:
       'List all 3 Deshi Gee jar options (250g, 500g, 1kg) with live BDT price, per-100g value rate, remaining stock, and free-delivery status.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {},
-    },
   },
   {
     name: 'calculate_cart_quote',

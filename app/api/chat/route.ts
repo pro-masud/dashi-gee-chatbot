@@ -65,7 +65,11 @@ import {
   classifyGeminiError,
   createGeminiClient,
   estimateGeminiCostUsd,
+  getPrimaryModelCooldownReason,
   isGeminiApiKeyConfigured,
+  normalizeFailoverTag,
+  recordPrimaryModelFailure,
+  recordPrimaryModelSuccess,
   resolveConfiguredChatModels,
   validateGeminiModelCapability,
 } from '../../../src/lib/gemini/client';
@@ -1028,9 +1032,18 @@ export async function POST(request: Request) {
   let modelMs = 0;
   let toolMs = 0;
   let lastFinishReason = '';
-  let failoverReason = '';
+  const primaryCooldownReason =
+    primaryModelCheck.supported &&
+    fallbackModelCheck.supported &&
+    primaryModelName !== fallbackModelName
+      ? getPrimaryModelCooldownReason(primaryModelName)
+      : '';
+  let failoverReason = primaryCooldownReason;
   let activePath: ChatbotExecutionPath = 'gemini';
-  let activeModelUsed = primaryModelCheck.supported ? primaryModelName : fallbackModelName;
+  let activeModelUsed =
+    primaryModelCheck.supported && !primaryCooldownReason
+      ? primaryModelName
+      : fallbackModelName;
   let streamedRealTokens = false;
 
   const executedToolCache = new Map<string, Record<string, unknown>>();
@@ -1167,7 +1180,10 @@ export async function POST(request: Request) {
       noVerifiedKnowledgeMatch: ragResult.noVerifiedMatch,
     });
 
-    let activeModel = primaryModelCheck.supported ? primaryModelName : fallbackModelName;
+    let activeModel =
+      primaryModelCheck.supported && !getPrimaryModelCooldownReason(primaryModelName)
+        ? primaryModelName
+        : fallbackModelName;
     activeModelUsed = activeModel;
     const contents: Content[] = effectiveMessages.map((m) => ({
       role: m.role === 'assistant' ? 'model' : 'user',
@@ -1186,22 +1202,35 @@ export async function POST(request: Request) {
           lowThinkingMode: passOpts?.lowThinkingMode,
           disableTools: false,
         });
+        if (activeModel === primaryModelName) {
+          recordPrimaryModelSuccess(primaryModelName);
+        }
       } catch (innerErr) {
         const classified = classifyGeminiError(innerErr);
         const remainingMs = requestDeadlineAt - Date.now();
         if (
           classified.shouldFailover &&
-          round === 0 &&
           activeModel !== fallbackModelName &&
           fallbackModelCheck.supported &&
           remainingMs >= 1500
         ) {
+          recordPrimaryModelFailure(activeModel, classified.code);
           failoverReason = classified.code;
           activeModel = fallbackModelName;
           activeModelUsed = activeModel;
           response = await invokeModelAttempt(activeModel, contents, systemInstruction, {
             maxOutputTokens: passOpts?.maxOutputTokens,
             lowThinkingMode: passOpts?.lowThinkingMode,
+            disableTools: false,
+          });
+        } else if (
+          classified.code === 'gemini_transient_error' &&
+          remainingMs >= 4500
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 350));
+          response = await invokeModelAttempt(activeModel, contents, systemInstruction, {
+            maxOutputTokens: passOpts?.maxOutputTokens,
+            lowThinkingMode: true,
             disableTools: false,
           });
         } else {
@@ -1478,6 +1507,7 @@ export async function POST(request: Request) {
             requestDeadlineAt - Date.now() >= 1500
           ) {
             try {
+              recordPrimaryModelFailure(activeModelUsed, classified.code);
               failoverReason = classified.code;
               activeModelUsed = fallbackModelName;
               const failoverRes = await invokeModelAttempt(
@@ -1843,7 +1873,7 @@ export async function POST(request: Request) {
       totalMs: latencyMs,
       retryCount,
       toolCallCount,
-      failoverReason: failoverReason || null,
+      failoverReason: failoverReason ? normalizeFailoverTag(failoverReason) : null,
       guardCategory: guardCategory || null,
       factsVersion: facts.factsVersion,
     })

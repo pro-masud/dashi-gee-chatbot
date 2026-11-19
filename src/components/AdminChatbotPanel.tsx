@@ -174,6 +174,38 @@ export function AdminChatbotPanel({
   const [newSynKey, setNewSynKey] = useState('');
   const [newSynTerms, setNewSynTerms] = useState('');
 
+  // Read-only Production Integrations Readiness
+  const [integrationReadiness, setIntegrationReadiness] = useState<{
+    payments?: {
+      sslcommerz?: { configured?: boolean; liveMode?: boolean };
+      bkash?: { configured?: boolean; liveMode?: boolean };
+    };
+    couriers?: {
+      steadfast?: boolean;
+      pathao?: boolean;
+      redx?: boolean;
+      webhookSecret?: boolean;
+    };
+    messaging?: {
+      bulksmsbd?: boolean;
+      twilioSms?: boolean;
+      resendEmail?: boolean;
+      ownerWebhook?: boolean;
+    };
+    omnichannel?: {
+      whatsappCloud?: boolean;
+      metaMessengerInstagram?: boolean;
+    };
+    ai?: {
+      geminiTtsReady?: boolean;
+      ttsModel?: string;
+    };
+    security?: {
+      orderTokenSecretStrong?: boolean;
+      cronSecretConfigured?: boolean;
+    };
+  } | null>(null);
+
   // FAQ Form
   const [faqSearch, setFaqSearch] = useState('');
   const [faqDraft, setFaqDraft] = useState<ChatbotFaqDoc>({
@@ -324,7 +356,7 @@ export function AdminChatbotPanel({
       const adminHealthUrl = forceHealthRefresh
         ? '/api/chatbot/admin?refresh=1'
         : '/api/chatbot/admin';
-      const [notifRes, adminRes, ticketRes, attrRes, retRes] = await Promise.all([
+      const [notifRes, adminRes, ticketRes, attrRes, retRes, intRes] = await Promise.all([
         fetch('/api/notifications/status').catch(() => null),
         token
           ? fetch(adminHealthUrl, {
@@ -351,6 +383,7 @@ export function AdminChatbotPanel({
               headers: { Authorization: `Bearer ${token}` },
             }).catch(() => null)
           : Promise.resolve(null),
+        fetch('/api/integrations/status').catch(() => null),
       ]);
       if (notifRes?.ok) {
         setNotificationStatus(await notifRes.json());
@@ -385,6 +418,12 @@ export function AdminChatbotPanel({
               ? retData.abandonedCandidates
               : [],
           });
+        }
+      }
+      if (intRes?.ok) {
+        const intData = await intRes.json().catch(() => null);
+        if (intData?.ok) {
+          setIntegrationReadiness(intData);
         }
       }
     } catch (err) {
@@ -1943,6 +1982,84 @@ export function AdminChatbotPanel({
                   <p className="mt-1 text-[11px] text-[#635647]">Checking notification dispatch logs...</p>
                 )}
               </div>
+
+              {/* Read-Only Production Integrations Readiness Matrix */}
+              {integrationReadiness && (
+                <div className="mt-2 rounded-xl border border-[rgba(30,23,16,0.1)] bg-[#FAF7F2] p-3">
+                  <p className="font-semibold text-[#1E1710]">
+                    Production Integrations Readiness (Read-Only Env Status)
+                  </p>
+                  <div className="mt-2 grid grid-cols-2 gap-1.5 text-[10.5px] sm:grid-cols-3">
+                    {[
+                      {
+                        label: 'SSLCommerz',
+                        ok: Boolean(integrationReadiness.payments?.sslcommerz?.configured),
+                      },
+                      {
+                        label: 'bKash Checkout',
+                        ok: Boolean(integrationReadiness.payments?.bkash?.configured),
+                      },
+                      {
+                        label: 'Steadfast API',
+                        ok: Boolean(integrationReadiness.couriers?.steadfast),
+                      },
+                      {
+                        label: 'Pathao API',
+                        ok: Boolean(integrationReadiness.couriers?.pathao),
+                      },
+                      {
+                        label: 'RedX API',
+                        ok: Boolean(integrationReadiness.couriers?.redx),
+                      },
+                      {
+                        label: 'Courier Webhook',
+                        ok: Boolean(integrationReadiness.couriers?.webhookSecret),
+                      },
+                      {
+                        label: 'BulkSMSBD / Twilio',
+                        ok: Boolean(
+                          integrationReadiness.messaging?.bulksmsbd ||
+                            integrationReadiness.messaging?.twilioSms
+                        ),
+                      },
+                      {
+                        label: 'Resend Email',
+                        ok: Boolean(integrationReadiness.messaging?.resendEmail),
+                      },
+                      {
+                        label: 'Gemini Voice TTS',
+                        ok: Boolean(integrationReadiness.ai?.geminiTtsReady),
+                      },
+                      {
+                        label: 'WhatsApp Cloud',
+                        ok: Boolean(integrationReadiness.omnichannel?.whatsappCloud),
+                      },
+                      {
+                        label: 'Meta IG/Messenger',
+                        ok: Boolean(integrationReadiness.omnichannel?.metaMessengerInstagram),
+                      },
+                      {
+                        label: 'Cron Secret',
+                        ok: Boolean(integrationReadiness.security?.cronSecretConfigured),
+                      },
+                    ].map((row) => (
+                      <div
+                        key={row.label}
+                        className="flex items-center justify-between gap-1 rounded border border-[rgba(30,23,16,0.08)] bg-[#FFFDF9] px-2 py-1"
+                      >
+                        <span className="truncate text-[#1E1710]">{row.label}</span>
+                        <span
+                          className={`shrink-0 font-mono text-[9.5px] font-semibold ${
+                            row.ok ? 'text-emerald-800' : 'text-[#635647]'
+                          }`}
+                        >
+                          {row.ok ? 'Configured' : 'Pending'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -2019,25 +2136,65 @@ export function AdminChatbotPanel({
 
                 {/* Structured Approved Claims with Evidence & Expiry */}
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5">
                     <span className="text-[11px] font-medium text-[#1E1710]">
                       Verified Claim Records ({(draftConfig.approvedClaimsMeta || []).length})
                     </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setDraftConfig({
-                          ...draftConfig,
-                          approvedClaimsMeta: [
-                            ...(draftConfig.approvedClaimsMeta || []),
-                            { claim: '', evidenceNote: '', expiresAt: '' },
-                          ],
-                        })
-                      }
-                      className="rounded border border-[rgba(30,23,16,0.2)] bg-white px-2.5 py-1 text-[11px] font-medium hover:bg-[#F2ECE1]"
-                    >
-                      + Add Claim Record
-                    </button>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDraftConfig({
+                            ...draftConfig,
+                            approvedClaimsMeta: [
+                              ...(draftConfig.approvedClaimsMeta || []),
+                              {
+                                claim: 'BSTI Certified (License # — enter verified number)',
+                                evidenceNote: 'BSTI Certificate PDF URL / Reference',
+                                expiresAt: '',
+                              },
+                            ],
+                          })
+                        }
+                        className="rounded border border-[rgba(30,23,16,0.16)] bg-white px-2 py-1 text-[10px] font-medium text-[#635647] hover:bg-[#F2ECE1] hover:text-[#1E1710]"
+                      >
+                        + BSTI Template
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDraftConfig({
+                            ...draftConfig,
+                            approvedClaimsMeta: [
+                              ...(draftConfig.approvedClaimsMeta || []),
+                              {
+                                claim: 'Independent Lab Tested (Batch Report)',
+                                evidenceNote: 'Lab Report PDF / Lab Name & Date',
+                                expiresAt: '',
+                              },
+                            ],
+                          })
+                        }
+                        className="rounded border border-[rgba(30,23,16,0.16)] bg-white px-2 py-1 text-[10px] font-medium text-[#635647] hover:bg-[#F2ECE1] hover:text-[#1E1710]"
+                      >
+                        + Lab PDF Template
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDraftConfig({
+                            ...draftConfig,
+                            approvedClaimsMeta: [
+                              ...(draftConfig.approvedClaimsMeta || []),
+                              { claim: '', evidenceNote: '', expiresAt: '' },
+                            ],
+                          })
+                        }
+                        className="rounded border border-[rgba(30,23,16,0.2)] bg-white px-2.5 py-1 text-[11px] font-medium hover:bg-[#F2ECE1]"
+                      >
+                        + Add Claim Record
+                      </button>
+                    </div>
                   </div>
                   {(draftConfig.approvedClaimsMeta || []).map((item, idx) => (
                     <div

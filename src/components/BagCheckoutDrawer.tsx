@@ -5,6 +5,7 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronLeft,
+  CreditCard,
   Loader2,
   MessageCircle,
   Minus,
@@ -89,17 +90,79 @@ export function BagCheckoutDrawer({
   const [couponLoading, setCouponLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+  const [onlineGateways, setOnlineGateways] = useState<{
+    sslcommerz: boolean;
+    bkash: boolean;
+  }>({ sslcommerz: false, bkash: false });
+  const [gatewayBusy, setGatewayBusy] = useState<'sslcommerz' | 'bkash' | null>(null);
+  const [gatewayError, setGatewayError] = useState('');
 
   const bn = lang === 'bn';
 
   useEffect(() => {
     if (!open) return;
+    let active = true;
+    fetch('/api/integrations/status')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data?.payments) return;
+        setOnlineGateways({
+          sslcommerz: Boolean(data.payments.sslcommerz?.configured),
+          bkash: Boolean(data.payments.bkash?.configured),
+        });
+      })
+      .catch(() => {});
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      active = false;
+      window.removeEventListener('keydown', onKey);
+    };
   }, [open, onClose]);
+
+  const handleStartOnlinePayment = async (
+    gateway: 'sslcommerz' | 'bkash',
+    order: OrderRecord
+  ) => {
+    if (gatewayBusy) return;
+    setGatewayBusy(gateway);
+    setGatewayError('');
+    try {
+      const res = await fetch('/api/payments/initiate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+        },
+        body: JSON.stringify({
+          gateway,
+          orderNumber: order.orderNumber,
+          phone: order.phone,
+          customerName: order.customerName,
+          address: order.address,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok || !data.gatewayUrl) {
+        throw new Error(
+          data.error ||
+            (bn ? 'অনলাইন পেমেন্ট শুরু করা যায়নি।' : 'Could not initiate online payment.')
+        );
+      }
+      window.location.href = String(data.gatewayUrl);
+    } catch (err) {
+      setGatewayError(
+        err instanceof Error
+          ? err.message
+          : bn
+            ? 'পেমেন্ট গেটওয়ে সংযোগ ব্যর্থ হয়েছে।'
+            : 'Payment gateway connection failed.'
+      );
+      setGatewayBusy(null);
+    }
+  };
 
   useEffect(() => {
     if (open && cart.length > 0 && step === 'confirmed') {
@@ -605,6 +668,51 @@ export function BagCheckoutDrawer({
               </div>
 
               <div className="space-y-2.5">
+                {lastConfirmedOrder.paymentStatus !== 'verified' &&
+                  (onlineGateways.sslcommerz || onlineGateways.bkash) && (
+                    <div className="space-y-2 rounded-xl border border-[rgba(180,123,43,0.3)] bg-[#FAF7F2] p-3">
+                      <p className="text-xs font-semibold text-[#1E1710]">
+                        {bn ? 'তাৎক্ষণিক অনলাইন পেমেন্ট করুন' : 'Pay Online Instantly'}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {onlineGateways.sslcommerz && (
+                          <button
+                            type="button"
+                            disabled={Boolean(gatewayBusy)}
+                            onClick={() =>
+                              handleStartOnlinePayment('sslcommerz', lastConfirmedOrder)
+                            }
+                            className="inline-flex min-h-[42px] flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#B47B2B] px-3 py-2 text-xs font-semibold text-[#FFFDF9] hover:bg-[#9D6820] disabled:opacity-55"
+                          >
+                            {gatewayBusy === 'sslcommerz' ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <CreditCard className="h-3.5 w-3.5" />
+                            )}
+                            <span>{bn ? 'SSLCommerz দিয়ে পেমেন্ট' : 'Pay via SSLCommerz'}</span>
+                          </button>
+                        )}
+                        {onlineGateways.bkash && (
+                          <button
+                            type="button"
+                            disabled={Boolean(gatewayBusy)}
+                            onClick={() => handleStartOnlinePayment('bkash', lastConfirmedOrder)}
+                            className="inline-flex min-h-[42px] flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#B47B2B] bg-[#FFFDF9] px-3 py-2 text-xs font-semibold text-[#8A5A17] hover:bg-[#F2ECE1] disabled:opacity-55"
+                          >
+                            {gatewayBusy === 'bkash' ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <CreditCard className="h-3.5 w-3.5" />
+                            )}
+                            <span>{bn ? 'bKash গেটওয়ে পেমেন্ট' : 'Pay via bKash'}</span>
+                          </button>
+                        )}
+                      </div>
+                      {gatewayError && (
+                        <p className="text-[11px] font-medium text-red-700">{gatewayError}</p>
+                      )}
+                    </div>
+                  )}
                 <a
                   href={buildWhatsappSupportUrl(lastConfirmedOrder)}
                   target="_blank"

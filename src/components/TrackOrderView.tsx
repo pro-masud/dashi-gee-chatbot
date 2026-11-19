@@ -7,6 +7,7 @@ import {
   BellRing,
   CheckCircle2,
   Clock,
+  CreditCard,
   Edit3,
   ExternalLink,
   Headset,
@@ -112,8 +113,86 @@ export function TrackOrderView({
   const [savedReminder, setSavedReminder] = useState<RefillReminderDoc | null>(null);
   const [reminderBusy, setReminderBusy] = useState(false);
   const [reminderFeedback, setReminderFeedback] = useState('');
+  const [paymentBanner, setPaymentBanner] = useState<{
+    status: 'verified' | 'failed' | 'cancelled';
+    ref: string;
+  } | null>(null);
+  const [onlineGateways, setOnlineGateways] = useState<{
+    sslcommerz: boolean;
+    bkash: boolean;
+  }>({ sslcommerz: false, bkash: false });
+  const [gatewayBusy, setGatewayBusy] = useState<'sslcommerz' | 'bkash' | null>(null);
+  const [gatewayError, setGatewayError] = useState('');
 
   const bn = lang === 'bn';
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      const paymentParam = (sp.get('payment') || '').toLowerCase();
+      if (
+        paymentParam === 'verified' ||
+        paymentParam === 'failed' ||
+        paymentParam === 'cancelled'
+      ) {
+        setPaymentBanner({
+          status: paymentParam,
+          ref: sp.get('ref') || '',
+        });
+      }
+    }
+    let active = true;
+    fetch('/api/integrations/status')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data?.payments) return;
+        setOnlineGateways({
+          sslcommerz: Boolean(data.payments.sslcommerz?.configured),
+          bkash: Boolean(data.payments.bkash?.configured),
+        });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handlePayOrderOnline = async (gateway: 'sslcommerz' | 'bkash') => {
+    if (!result || !verifiedPhone || gatewayBusy) return;
+    setGatewayBusy(gateway);
+    setGatewayError('');
+    try {
+      const res = await fetch('/api/payments/initiate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+        },
+        body: JSON.stringify({
+          gateway,
+          orderNumber: result.orderNumber,
+          phone: verifiedPhone,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok || !data.gatewayUrl) {
+        throw new Error(
+          data.error ||
+            (bn ? 'অনলাইন পেমেন্ট শুরু করা যায়নি।' : 'Could not initiate online payment.')
+        );
+      }
+      window.location.href = String(data.gatewayUrl);
+    } catch (err) {
+      setGatewayError(
+        err instanceof Error
+          ? err.message
+          : bn
+            ? 'পেমেন্ট গেটওয়ে সংযোগ ব্যর্থ হয়েছে।'
+            : 'Payment gateway connection failed.'
+      );
+      setGatewayBusy(null);
+    }
+  };
 
   const shrinkImageForUpload = async (file: File): Promise<string> => {
     const rawUrl = await new Promise<string>((resolve, reject) => {
@@ -679,6 +758,42 @@ export function TrackOrderView({
         </div>
       )}
 
+      {paymentBanner && (
+        <div
+          className={`mt-6 flex items-start gap-2.5 rounded-xl border p-4 text-sm ${
+            paymentBanner.status === 'verified'
+              ? 'border-emerald-300 bg-emerald-50 text-emerald-950'
+              : 'border-amber-300 bg-amber-50 text-amber-950'
+          }`}
+        >
+          {paymentBanner.status === 'verified' ? (
+            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" />
+          ) : (
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+          )}
+          <div>
+            <p className="font-semibold">
+              {paymentBanner.status === 'verified'
+                ? bn
+                  ? 'অনলাইন পেমেন্ট যাচাই সফল হয়েছে'
+                  : 'Online Payment Verified'
+                : paymentBanner.status === 'cancelled'
+                  ? bn
+                    ? 'অনলাইন পেমেন্ট বাতিল করা হয়েছে'
+                    : 'Online Payment Cancelled'
+                  : bn
+                    ? 'অনলাইন পেমেন্ট সম্পন্ন হয়নি'
+                    : 'Online Payment Could Not Be Verified'}
+            </p>
+            {paymentBanner.ref && (
+              <p className="mt-0.5 font-mono text-xs opacity-80">
+                Ref: {paymentBanner.ref}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {result && (
         <div className="mt-8 space-y-6 rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6 sm:p-8">
           <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[rgba(30,23,16,0.10)] pb-5">
@@ -719,6 +834,53 @@ export function TrackOrderView({
               </p>
             </div>
           </div>
+
+          {result.status !== 'cancelled' &&
+            result.paymentStatus !== 'verified' &&
+            (onlineGateways.sslcommerz || onlineGateways.bkash) && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(180,123,43,0.3)] bg-[#FAF7F2] px-4 py-3 text-xs">
+                <span className="font-medium text-[#1E1710]">
+                  {bn
+                    ? 'এখনই অনলাইনে নিরাপদ পেমেন্ট সম্পন্ন করুন:'
+                    : 'Complete payment online securely:'}
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  {onlineGateways.sslcommerz && (
+                    <button
+                      type="button"
+                      disabled={Boolean(gatewayBusy)}
+                      onClick={() => handlePayOrderOnline('sslcommerz')}
+                      className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-3.5 py-1.5 font-semibold text-[#FFFDF9] hover:bg-[#9D6820] disabled:opacity-55"
+                    >
+                      {gatewayBusy === 'sslcommerz' ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <CreditCard className="h-3.5 w-3.5" />
+                      )}
+                      <span>{bn ? 'SSLCommerz পেমেন্ট' : 'Pay via SSLCommerz'}</span>
+                    </button>
+                  )}
+                  {onlineGateways.bkash && (
+                    <button
+                      type="button"
+                      disabled={Boolean(gatewayBusy)}
+                      onClick={() => handlePayOrderOnline('bkash')}
+                      className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-[#B47B2B] bg-[#FFFDF9] px-3.5 py-1.5 font-semibold text-[#8A5A17] hover:bg-[#F2ECE1] disabled:opacity-55"
+                    >
+                      {gatewayBusy === 'bkash' ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <CreditCard className="h-3.5 w-3.5" />
+                      )}
+                      <span>{bn ? 'bKash গেটওয়ে' : 'Pay via bKash'}</span>
+                    </button>
+                  )}
+                </div>
+                {gatewayError && (
+                  <p className="w-full text-[11px] font-medium text-red-700">{gatewayError}</p>
+                )}
+              </div>
+            )}
 
           {result.status === 'cancelled' ? (
             <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
