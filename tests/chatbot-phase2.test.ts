@@ -427,14 +427,15 @@ describe('Phase 2 (T2.1-T2.6) — Transactional Safety, 64 Districts, 4-Zone Pri
     assert.equal(savar.deliveryZone, 'suburban');
 
     const ctgTypo = resolveConfiguredDistrictAndZone('Chitagong', '', 'Agrabad');
-    assert.equal(ctgTypo.valid, true);
-    assert.equal(ctgTypo.canonicalDistrict, 'Chattogram');
-    assert.equal(ctgTypo.deliveryZone, 'nationwide');
+    assert.equal(ctgTypo.valid, false);
+    assert.equal(ctgTypo.needsClarification, true);
+    assert.equal(ctgTypo.suggestedDistrict, 'Chattogram');
     assert.equal(ctgTypo.matchedBy, 'fuzzy');
 
     const sylhetTypo = resolveConfiguredDistrictAndZone('Shylet', '', 'Zindabazar');
-    assert.equal(sylhetTypo.valid, true);
-    assert.equal(sylhetTypo.canonicalDistrict, 'Sylhet');
+    assert.equal(sylhetTypo.valid, false);
+    assert.equal(sylhetTypo.needsClarification, true);
+    assert.equal(sylhetTypo.suggestedDistrict, 'Sylhet');
 
     const remoteBandarban = resolveConfiguredDistrictAndZone('Bandarban', '', 'Sadar');
     assert.equal(remoteBandarban.valid, true);

@@ -253,7 +253,9 @@ async function main() {
   process.stdout?.on?.('error', () => {});
   process.stderr?.on?.('error', () => {});
 
-  await cleanupPreviousServers(port, hostname);
+  if (command === 'dev' && process.env.NODE_ENV !== 'production') {
+    await cleanupPreviousServers(port, hostname);
+  }
 
   const nextBin = resolve(process.cwd(), 'node_modules/next/dist/bin/next');
   const cmd = existsSync(nextBin) ? process.execPath : 'npx';

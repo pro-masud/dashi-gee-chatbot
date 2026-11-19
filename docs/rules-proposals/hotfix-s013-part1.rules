@@ -1,0 +1,1263 @@
+// ============================================================================
+// DEPLOY-BLOCKED NOTICE (see /DEPLOY_BLOCKED.md)
+// Commits a9b83d4 (S0-02) and 03b61fb (S0-03) restricted chat_sessions,
+// order_drafts, refill_reminders, and marketing_consents to isAdmin()-only.
+// Those hardened rules are STAGED on branch `rules-admin-only-pending-sdk`
+// and are DEPLOY-BLOCKED until server-side Firebase Admin SDK (ADC) replaces
+// unauthenticated REST calls in src/lib/chatbot/firestoreRest.ts and passes
+// Firestore Emulator tests + explicit owner deployment approval.
+// `master` intentionally keeps rules matching LIVE (1550bd7) and running code.
+// ============================================================================
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Bootstrapped connection check doc
+    match /test/connection {
+      allow get: if true;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 2 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && (
+          request.auth.token.email == 'kinboni.bd@gmail.com'
+          || exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        );
+    }
+
+    function isValidStoreSettings(data) {
+      return data.keys().hasAll([
+          'productNameEn', 'productNameBn', 'taglineEn', 'taglineBn',
+          'originLocation', 'price250g', 'price500g', 'price1kg',
+          'stock250g', 'stock500g', 'stock1kg', 'insideDhakaFee',
+          'outsideDhakaFee', 'freeDeliveryThreshold', 'estimatedDhakaDays',
+          'estimatedOutsideDays', 'bkashNumber', 'nagadNumber',
+          'advanceDiscountPct', 'whatsappNumber', 'supportPhone',
+          'supportEmail', 'businessAddress', 'facebookUrl', 'instagramUrl',
+          'activeBatchCode', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'productNameEn', 'productNameBn', 'taglineEn', 'taglineBn',
+          'originLocation', 'price250g', 'price500g', 'price1kg',
+          'stock250g', 'stock500g', 'stock1kg', 'insideDhakaFee',
+          'dhakaSuburbanFee', 'outsideDhakaFee', 'remoteDistrictFee',
+          'freeDeliveryThreshold', 'estimatedDhakaDays', 'estimatedSuburbanDays',
+          'estimatedOutsideDays', 'estimatedRemoteDays',
+          'dispatchCutoffHourBst', 'cutoffNoticeEn', 'cutoffNoticeBn',
+          'codConfirmEnabled', 'codHighValueThresholdBdt', 'lastOrderNumber',
+          'bkashNumber', 'nagadNumber',
+          'advanceDiscountPct', 'whatsappNumber', 'supportPhone',
+          'supportEmail', 'businessAddress', 'facebookUrl', 'instagramUrl',
+          'activeBatchCode', 'updatedAt'
+        ])
+        && data.productNameEn is string && data.productNameEn.size() >= 2 && data.productNameEn.size() <= 120
+        && data.productNameBn is string && data.productNameBn.size() >= 2 && data.productNameBn.size() <= 160
+        && data.taglineEn is string && data.taglineEn.size() <= 180
+        && data.taglineBn is string && data.taglineBn.size() <= 240
+        && data.originLocation is string && data.originLocation.size() <= 120
+        && data.price250g is number && data.price250g > 0
+        && data.price500g is number && data.price500g > 0
+        && data.price1kg is number && data.price1kg > 0
+        && data.stock250g is number && data.stock250g >= 0
+        && data.stock500g is number && data.stock500g >= 0
+        && data.stock1kg is number && data.stock1kg >= 0
+        && data.insideDhakaFee is number && data.insideDhakaFee >= 0
+        && (!('dhakaSuburbanFee' in data) || (data.dhakaSuburbanFee is number && data.dhakaSuburbanFee >= 0))
+        && data.outsideDhakaFee is number && data.outsideDhakaFee >= 0
+        && (!('remoteDistrictFee' in data) || (data.remoteDistrictFee is number && data.remoteDistrictFee >= 0))
+        && data.freeDeliveryThreshold is number && data.freeDeliveryThreshold >= 0
+        && data.estimatedDhakaDays is string && data.estimatedDhakaDays.size() <= 80
+        && (!('estimatedSuburbanDays' in data) || (data.estimatedSuburbanDays is string && data.estimatedSuburbanDays.size() <= 80))
+        && data.estimatedOutsideDays is string && data.estimatedOutsideDays.size() <= 80
+        && (!('estimatedRemoteDays' in data) || (data.estimatedRemoteDays is string && data.estimatedRemoteDays.size() <= 80))
+        && (!('dispatchCutoffHourBst' in data) || (data.dispatchCutoffHourBst is number && data.dispatchCutoffHourBst >= 0 && data.dispatchCutoffHourBst <= 23))
+        && (!('cutoffNoticeEn' in data) || (data.cutoffNoticeEn is string && data.cutoffNoticeEn.size() <= 240))
+        && (!('cutoffNoticeBn' in data) || (data.cutoffNoticeBn is string && data.cutoffNoticeBn.size() <= 300))
+        && (!('codConfirmEnabled' in data) || data.codConfirmEnabled is bool)
+        && (!('codHighValueThresholdBdt' in data) || (data.codHighValueThresholdBdt is number && data.codHighValueThresholdBdt >= 0))
+        && (!('lastOrderNumber' in data) || (data.lastOrderNumber is string && data.lastOrderNumber.size() <= 20))
+        && data.bkashNumber is string && data.bkashNumber.size() <= 30
+        && data.nagadNumber is string && data.nagadNumber.size() <= 30
+        && data.advanceDiscountPct is number && data.advanceDiscountPct >= 0 && data.advanceDiscountPct <= 50
+        && data.whatsappNumber is string && data.whatsappNumber.size() <= 30
+        && data.supportPhone is string && data.supportPhone.size() <= 30
+        && data.supportEmail is string && data.supportEmail.size() <= 120
+        && data.businessAddress is string && data.businessAddress.size() <= 240
+        && data.facebookUrl is string && data.facebookUrl.size() <= 200
+        && data.instagramUrl is string && data.instagramUrl.size() <= 200
+        && data.activeBatchCode is string && data.activeBatchCode.size() <= 40
+        && data.updatedAt == request.time;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+          'orderNumber', 'customerName', 'phone', 'district', 'area',
+          'address', 'note', 'deliveryZone', 'weight', 'qty',
+          'qty250g', 'qty500g', 'qty1kg', 'itemsSummary',
+          'unitPriceBdt', 'subtotalBdt', 'deliveryFeeBdt', 'discountBdt',
+          'totalBdt', 'couponCode', 'paymentMethod', 'paymentStatus',
+          'txnId', 'paymentProofData', 'status', 'estimatedDelivery',
+          'webhookStatus', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'orderNumber', 'customerName', 'phone', 'district', 'area',
+          'address', 'note', 'deliveryZone', 'weight', 'qty',
+          'qty250g', 'qty500g', 'qty1kg', 'itemsSummary',
+          'unitPriceBdt', 'subtotalBdt', 'deliveryFeeBdt', 'discountBdt',
+          'totalBdt', 'couponCode', 'paymentMethod', 'paymentStatus',
+          'txnId', 'paymentProofData', 'status', 'estimatedDelivery',
+          'webhookStatus', 'courierPartner', 'consignmentId', 'courierTrackingUrl',
+          'dispatchedAtIso', 'riskScore', 'riskSignals', 'reviewStatus',
+          'duplicateWarning', 'codVerificationStatus', 'sourceChannel',
+          'attributedSessionId', 'createdAt', 'updatedAt'
+        ])
+        && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
+        && data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 100
+        && data.phone is string && data.phone.matches('^01[3-9][0-9]{8}$')
+        && data.district is string && data.district.size() >= 2 && data.district.size() <= 80
+        && data.area is string && data.area.size() >= 2 && data.area.size() <= 100
+        && data.address is string && data.address.size() >= 5 && data.address.size() <= 300
+        && data.note is string && data.note.size() <= 240
+        && data.deliveryZone in ['dhaka', 'suburban', 'nationwide', 'remote']
+        && data.weight in ['250g', '500g', '1kg']
+        && data.qty250g is number && data.qty250g >= 0 && data.qty250g <= 50
+        && data.qty500g is number && data.qty500g >= 0 && data.qty500g <= 50
+        && data.qty1kg is number && data.qty1kg >= 0 && data.qty1kg <= 50
+        && data.qty is number && data.qty >= 1 && data.qty <= 50
+        && data.qty == data.qty250g + data.qty500g + data.qty1kg
+        && data.itemsSummary is string && data.itemsSummary.size() >= 3 && data.itemsSummary.size() <= 80
+        && data.unitPriceBdt is number && data.unitPriceBdt > 0
+        && data.subtotalBdt is number && data.subtotalBdt > 0
+        && data.deliveryFeeBdt is number && data.deliveryFeeBdt >= 0
+        && data.discountBdt is number && data.discountBdt >= 0 && data.discountBdt <= data.subtotalBdt
+        && data.totalBdt is number && data.totalBdt > 0 && data.totalBdt == data.subtotalBdt + data.deliveryFeeBdt - data.discountBdt
+        && data.couponCode is string && data.couponCode.size() <= 32
+        && data.paymentMethod in ['cod', 'bkash', 'nagad']
+        && data.paymentStatus in ['cod_due', 'pending_verification', 'verified', 'failed']
+        && data.txnId is string && data.txnId.size() <= 64
+        && data.paymentProofData is string && data.paymentProofData.size() <= 180000
+        && data.status in ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled']
+        && data.estimatedDelivery is string && data.estimatedDelivery.size() <= 80
+        && data.webhookStatus is string && data.webhookStatus.size() <= 80
+        && (!('courierPartner' in data) || data.courierPartner in ['steadfast', 'pathao', 'redx', 'manual'])
+        && (!('consignmentId' in data) || (data.consignmentId is string && data.consignmentId.size() <= 80))
+        && (!('courierTrackingUrl' in data) || (data.courierTrackingUrl is string && data.courierTrackingUrl.size() <= 300 && (data.courierTrackingUrl == '' || data.courierTrackingUrl.matches('^https://.*'))))
+        && (!('dispatchedAtIso' in data) || (data.dispatchedAtIso is string && data.dispatchedAtIso.size() <= 48))
+        && (!('riskScore' in data) || (data.riskScore is number && data.riskScore >= 0 && data.riskScore <= 100))
+        && (!('riskSignals' in data) || (data.riskSignals is list && data.riskSignals.size() <= 12 && (data.riskSignals.size() == 0 || data.riskSignals[0] is string)))
+        && (!('reviewStatus' in data) || data.reviewStatus in ['none', 'manual_review', 'approved', 'rejected'])
+        && (!('duplicateWarning' in data) || (data.duplicateWarning is string && data.duplicateWarning.size() <= 240))
+        && (!('codVerificationStatus' in data) || data.codVerificationStatus in ['not_required', 'not_configured', 'pending', 'verified'])
+        && (!('sourceChannel' in data) || data.sourceChannel in ['web', 'messenger', 'instagram', 'whatsapp', 'email', 'sms'])
+        && (!('attributedSessionId' in data) || (data.attributedSessionId is string && data.attributedSessionId.size() <= 64))
+        && data.updatedAt == request.time;
+    }
+
+    function matchesCanonicalStorePricing(data) {
+      return (
+        !exists(/databases/$(database)/documents/store_settings/main)
+        && data.subtotalBdt == (data.qty250g * 680) + (data.qty500g * 1290) + (data.qty1kg * 2480)
+        && (
+          (data.weight == '250g' && data.unitPriceBdt == 680)
+          || (data.weight == '500g' && data.unitPriceBdt == 1290)
+          || (data.weight == '1kg' && data.unitPriceBdt == 2480)
+        )
+      ) || (
+        exists(/databases/$(database)/documents/store_settings/main)
+        && data.subtotalBdt == (
+          (data.qty250g * get(/databases/$(database)/documents/store_settings/main).data.price250g)
+          + (data.qty500g * get(/databases/$(database)/documents/store_settings/main).data.price500g)
+          + (data.qty1kg * get(/databases/$(database)/documents/store_settings/main).data.price1kg)
+        )
+        && (
+          (data.weight == '250g' && data.unitPriceBdt == get(/databases/$(database)/documents/store_settings/main).data.price250g)
+          || (data.weight == '500g' && data.unitPriceBdt == get(/databases/$(database)/documents/store_settings/main).data.price500g)
+          || (data.weight == '1kg' && data.unitPriceBdt == get(/databases/$(database)/documents/store_settings/main).data.price1kg)
+        )
+      );
+    }
+
+    function isValidOrderTracking(data) {
+      return data.keys().hasAll([
+          'orderNumber', 'weight', 'qty', 'itemsSummary', 'totalBdt', 'paymentMethod',
+          'paymentStatus', 'status', 'estimatedDelivery', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'orderNumber', 'weight', 'qty', 'qty250g', 'qty500g', 'qty1kg',
+          'itemsSummary', 'subtotalBdt', 'deliveryFeeBdt', 'discountBdt',
+          'couponCode', 'deliveryZone', 'district', 'totalBdt', 'paymentMethod',
+          'paymentStatus', 'status', 'reviewStatus', 'estimatedDelivery',
+          'courierPartner', 'consignmentId', 'courierTrackingUrl', 'dispatchedAtIso', 'updatedAt'
+        ])
+        && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
+        && data.weight in ['250g', '500g', '1kg']
+        && data.qty is number && data.qty >= 1 && data.qty <= 50
+        && (!('qty250g' in data) || (data.qty250g is number && data.qty250g >= 0 && data.qty250g <= 50))
+        && (!('qty500g' in data) || (data.qty500g is number && data.qty500g >= 0 && data.qty500g <= 50))
+        && (!('qty1kg' in data) || (data.qty1kg is number && data.qty1kg >= 0 && data.qty1kg <= 50))
+        && data.itemsSummary is string && data.itemsSummary.size() >= 3 && data.itemsSummary.size() <= 80
+        && (!('subtotalBdt' in data) || (data.subtotalBdt is number && data.subtotalBdt > 0))
+        && (!('deliveryFeeBdt' in data) || (data.deliveryFeeBdt is number && data.deliveryFeeBdt >= 0))
+        && (!('discountBdt' in data) || (data.discountBdt is number && data.discountBdt >= 0))
+        && (!('couponCode' in data) || (data.couponCode is string && data.couponCode.size() <= 32))
+        && (!('deliveryZone' in data) || data.deliveryZone in ['dhaka', 'suburban', 'nationwide', 'remote'])
+        && (!('district' in data) || (data.district is string && data.district.size() <= 80))
+        && data.totalBdt is number && data.totalBdt > 0
+        && data.paymentMethod in ['cod', 'bkash', 'nagad']
+        && data.paymentStatus in ['cod_due', 'pending_verification', 'verified', 'failed']
+        && data.status in ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled']
+        && (!('reviewStatus' in data) || data.reviewStatus in ['none', 'manual_review', 'approved', 'rejected'])
+        && data.estimatedDelivery is string && data.estimatedDelivery.size() <= 80
+        && (!('courierPartner' in data) || data.courierPartner in ['steadfast', 'pathao', 'redx', 'manual'])
+        && (!('consignmentId' in data) || (data.consignmentId is string && data.consignmentId.size() <= 80))
+        && (!('courierTrackingUrl' in data) || (data.courierTrackingUrl is string && data.courierTrackingUrl.size() <= 300 && (data.courierTrackingUrl == '' || data.courierTrackingUrl.matches('^https://.*'))))
+        && (!('dispatchedAtIso' in data) || (data.dispatchedAtIso is string && data.dispatchedAtIso.size() <= 48))
+        && data.updatedAt == request.time;
+    }
+
+    function isValidBatch(data) {
+      return data.keys().hasAll([
+          'batchCode', 'originDistrict', 'milkSource', 'productionDate',
+          'expiryDate', 'labReportStatus', 'labReportUrl', 'licenceDetails',
+          'active', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'batchCode', 'originDistrict', 'milkSource', 'productionDate',
+          'expiryDate', 'labReportStatus', 'labReportUrl', 'licenceDetails',
+          'active', 'updatedAt'
+        ])
+        && data.batchCode is string && data.batchCode.size() >= 3 && data.batchCode.size() <= 40
+        && data.originDistrict is string && data.originDistrict.size() <= 100
+        && data.milkSource is string && data.milkSource.size() <= 140
+        && data.productionDate is string && data.productionDate.size() <= 40
+        && data.expiryDate is string && data.expiryDate.size() <= 40
+        && data.labReportStatus is string && data.labReportStatus.size() <= 120
+        && data.labReportUrl is string && data.labReportUrl.size() <= 300
+        && data.licenceDetails is string && data.licenceDetails.size() <= 160
+        && data.active is bool
+        && data.updatedAt == request.time;
+    }
+
+    function isValidReview(data) {
+      return data.keys().hasAll([
+          'customerName', 'district', 'rating', 'comment', 'orderNumber',
+          'verifiedPurchase', 'helpfulCount', 'photoData', 'status', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'customerName', 'district', 'rating', 'comment', 'orderNumber',
+          'verifiedPurchase', 'helpfulCount', 'photoData', 'status', 'createdAt'
+        ])
+        && data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 80
+        && data.district is string && data.district.size() >= 2 && data.district.size() <= 80
+        && data.rating is number && data.rating >= 1 && data.rating <= 5
+        && data.comment is string && data.comment.size() >= 6 && data.comment.size() <= 600
+        && data.orderNumber is string && data.orderNumber.size() <= 20
+        && data.verifiedPurchase is bool
+        && data.helpfulCount is number && data.helpfulCount >= 0
+        && data.photoData is string && data.photoData.size() <= 180000
+        && data.status in ['pending', 'approved', 'rejected'];
+    }
+
+    function isValidCoupon(data) {
+      return data.keys().hasAll(['code', 'discountPct', 'minSubtotalBdt', 'active', 'updatedAt'])
+        && data.keys().hasOnly([
+          'code', 'discountPct', 'minSubtotalBdt', 'active',
+          'expiresAt', 'maxUses', 'usedCount', 'stackableWithAdvance', 'descriptionEn',
+          'updatedAt'
+        ])
+        && data.code is string && data.code.size() >= 3 && data.code.size() <= 32
+        && data.discountPct is number && data.discountPct > 0 && data.discountPct <= 50
+        && data.minSubtotalBdt is number && data.minSubtotalBdt >= 0
+        && data.active is bool
+        && (!('expiresAt' in data) || (data.expiresAt is string && data.expiresAt.size() <= 40))
+        && (!('maxUses' in data) || (data.maxUses is number && data.maxUses >= 0))
+        && (!('usedCount' in data) || (data.usedCount is number && data.usedCount >= 0))
+        && (!('stackableWithAdvance' in data) || data.stackableWithAdvance is bool)
+        && (!('descriptionEn' in data) || (data.descriptionEn is string && data.descriptionEn.size() <= 160))
+        && data.updatedAt == request.time;
+    }
+
+    function isValidSubscriber(data) {
+      return data.keys().hasAll(['email', 'lang', 'createdAt'])
+        && data.keys().hasOnly(['email', 'lang', 'createdAt'])
+        && data.email is string && data.email.size() >= 5 && data.email.size() <= 160
+        && data.email.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$')
+        && data.lang in ['en', 'bn']
+        && data.createdAt == request.time;
+    }
+
+    function isValidChatbotConfigKeys(data) {
+      return data.keys().hasAll([
+          'enabled', 'maintenanceMode', 'maintenanceMessageEn', 'maintenanceMessageBn',
+          'botName', 'brandName', 'brandIntro', 'brandStory', 'brandMission',
+          'founderInfo', 'productDescription', 'ingredients', 'taste', 'aroma',
+          'texture', 'productionMethod', 'shelfLife', 'storageInstructions',
+          'approvedClaims', 'currentOffers', 'district', 'city', 'googleMapsUrl',
+          'directionsUrl', 'businessHours', 'openHourBst', 'closeHourBst',
+          'closedDays', 'supportAvailabilityNote', 'deliveryPolicy', 'returnPolicy',
+          'replacementPolicy', 'otherPaymentInfo', 'supportInstructions',
+          'customInstructions', 'responseTone', 'responseLength', 'languageBehavior',
+          'fallbackMessageBn', 'fallbackMessageEn', 'welcomeMessageBn',
+          'welcomeMessageEn', 'quickQuestionsBn', 'quickQuestionsEn',
+          'retentionDays', 'dailyRequestLimit', 'version', 'lastSyncStatus', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'enabled', 'maintenanceMode', 'maintenanceMessageEn', 'maintenanceMessageBn',
+          'botName', 'brandName', 'brandIntro', 'brandStory', 'brandMission',
+          'founderInfo', 'productDescription', 'ingredients', 'taste', 'aroma',
+          'texture', 'productionMethod', 'shelfLife', 'storageInstructions',
+          'approvedClaims', 'blockedClaims', 'approvedClaimsMeta', 'claimAuditHistory',
+          'currentOffers', 'district', 'city', 'googleMapsUrl',
+          'directionsUrl', 'businessHours', 'openHourBst', 'closeHourBst',
+          'closedDays', 'supportAvailabilityNote', 'humanSupportEnabled',
+          'slaStandardMinutes', 'slaUrgentMinutes', 'deliveryPolicy', 'returnPolicy',
+          'replacementPolicy', 'otherPaymentInfo', 'supportInstructions',
+          'customInstructions', 'responseTone', 'responseLength', 'languageBehavior',
+          'synonyms', 'primaryModel', 'fallbackModel',
+          'fallbackMessageBn', 'fallbackMessageEn', 'welcomeMessageBn',
+          'welcomeMessageEn', 'quickQuestionsBn', 'quickQuestionsEn',
+          'retentionDays', 'dailyRequestLimit', 'version', 'lastSyncStatus', 'updatedAt'
+        ]);
+    }
+
+    function isValidChatbotConfigBrandFacts(data) {
+      return data.enabled is bool
+        && data.maintenanceMode is bool
+        && data.maintenanceMessageEn is string && data.maintenanceMessageEn.size() <= 300
+        && data.maintenanceMessageBn is string && data.maintenanceMessageBn.size() <= 400
+        && data.botName is string && data.botName.size() >= 2 && data.botName.size() <= 60
+        && data.brandName is string && data.brandName.size() >= 2 && data.brandName.size() <= 80
+        && data.brandIntro is string && data.brandIntro.size() <= 800
+        && data.brandStory is string && data.brandStory.size() <= 2500
+        && data.brandMission is string && data.brandMission.size() <= 1000
+        && data.founderInfo is string && data.founderInfo.size() <= 1000
+        && data.productDescription is string && data.productDescription.size() <= 1500
+        && data.ingredients is string && data.ingredients.size() <= 600
+        && data.taste is string && data.taste.size() <= 400
+        && data.aroma is string && data.aroma.size() <= 400
+        && data.texture is string && data.texture.size() <= 400
+        && data.productionMethod is string && data.productionMethod.size() <= 1200
+        && data.shelfLife is string && data.shelfLife.size() <= 300
+        && data.storageInstructions is string && data.storageInstructions.size() <= 800
+        && data.approvedClaims is string && data.approvedClaims.size() <= 1200
+        && data.currentOffers is string && data.currentOffers.size() <= 800;
+    }
+
+    function isValidChatbotConfigLocation(data) {
+      return data.district is string && data.district.size() <= 80
+        && data.city is string && data.city.size() <= 80
+        && data.googleMapsUrl is string && data.googleMapsUrl.size() <= 300
+        && data.directionsUrl is string && data.directionsUrl.size() <= 300
+        && data.businessHours is string && data.businessHours.size() <= 200
+        && data.openHourBst is number && data.openHourBst >= 0 && data.openHourBst <= 23
+        && data.closeHourBst is number && data.closeHourBst >= 0 && data.closeHourBst <= 23
+        && data.closedDays is string && data.closedDays.size() <= 80
+        && data.supportAvailabilityNote is string && data.supportAvailabilityNote.size() <= 300
+        && (!('humanSupportEnabled' in data) || data.humanSupportEnabled is bool)
+        && (!('slaStandardMinutes' in data) || (data.slaStandardMinutes is number && data.slaStandardMinutes >= 15 && data.slaStandardMinutes <= 1440))
+        && (!('slaUrgentMinutes' in data) || (data.slaUrgentMinutes is number && data.slaUrgentMinutes >= 5 && data.slaUrgentMinutes <= 720))
+        && data.deliveryPolicy is string && data.deliveryPolicy.size() <= 1200
+        && data.returnPolicy is string && data.returnPolicy.size() <= 1200
+        && data.replacementPolicy is string && data.replacementPolicy.size() <= 1200
+        && data.otherPaymentInfo is string && data.otherPaymentInfo.size() <= 800
+        && data.supportInstructions is string && data.supportInstructions.size() <= 1200;
+    }
+
+    function isValidChatbotConfigBehavior(data) {
+      return data.customInstructions is string && data.customInstructions.size() <= 4000
+        && data.responseTone in ['warm', 'concise', 'formal']
+        && data.responseLength in ['short', 'balanced', 'detailed']
+        && data.languageBehavior in ['auto', 'prefer_bn', 'prefer_en', 'always_bn', 'mirror', 'customer_choice']
+        && data.fallbackMessageBn is string && data.fallbackMessageBn.size() <= 400
+        && data.fallbackMessageEn is string && data.fallbackMessageEn.size() <= 400
+        && data.welcomeMessageBn is string && data.welcomeMessageBn.size() <= 500
+        && data.welcomeMessageEn is string && data.welcomeMessageEn.size() <= 500
+        && data.quickQuestionsBn is list && data.quickQuestionsBn.size() <= 8
+        && (data.quickQuestionsBn.size() == 0 || data.quickQuestionsBn[0] is string)
+        && data.quickQuestionsEn is list && data.quickQuestionsEn.size() <= 8
+        && (data.quickQuestionsEn.size() == 0 || data.quickQuestionsEn[0] is string)
+        && data.retentionDays is number && data.retentionDays >= 1 && data.retentionDays <= 365
+        && data.dailyRequestLimit is number && data.dailyRequestLimit >= 10 && data.dailyRequestLimit <= 100000
+        && data.version is number && data.version >= 1
+        && data.lastSyncStatus is string && data.lastSyncStatus.size() <= 160
+        && data.updatedAt == request.time;
+    }
+
+    function isValidChatbotConfigClaimsGovernance(data) {
+      return (!('blockedClaims' in data) || (data.blockedClaims is string && data.blockedClaims.size() <= 800))
+        && (!('approvedClaimsMeta' in data) || (data.approvedClaimsMeta is list && data.approvedClaimsMeta.size() <= 20 && (data.approvedClaimsMeta.size() == 0 || data.approvedClaimsMeta[0] is map)))
+        && (!('claimAuditHistory' in data) || (data.claimAuditHistory is list && data.claimAuditHistory.size() <= 30 && (data.claimAuditHistory.size() == 0 || data.claimAuditHistory[0] is map)))
+        && (!('synonyms' in data) || (data.synonyms is map && data.synonyms.size() <= 40))
+        && (!('primaryModel' in data) || (data.primaryModel is string && data.primaryModel.size() <= 60))
+        && (!('fallbackModel' in data) || (data.fallbackModel is string && data.fallbackModel.size() <= 60));
+    }
+
+    function isValidChatbotConfig(data) {
+      return isValidChatbotConfigKeys(data)
+        && isValidChatbotConfigBrandFacts(data)
+        && isValidChatbotConfigLocation(data)
+        && isValidChatbotConfigBehavior(data)
+        && isValidChatbotConfigClaimsGovernance(data);
+    }
+
+    function isValidChatbotVersion(data) {
+      return data.keys().hasAll(['version', 'publishedBy', 'summary', 'snapshot', 'createdAt'])
+        && data.keys().hasOnly(['version', 'publishedBy', 'summary', 'snapshot', 'createdAt'])
+        && data.version is number && data.version >= 1
+        && data.publishedBy is string && data.publishedBy.size() <= 160
+        && data.summary is string && data.summary.size() <= 200
+        && data.snapshot is map
+        && data.createdAt == request.time;
+    }
+
+    function isValidChatbotFaq(data) {
+      return data.keys().hasAll(['question', 'answer', 'lang', 'category', 'active', 'published', 'updatedAt'])
+        && data.keys().hasOnly(['question', 'answer', 'lang', 'category', 'active', 'published', 'updatedAt'])
+        && data.question is string && data.question.size() >= 2 && data.question.size() <= 300
+        && data.answer is string && data.answer.size() >= 2 && data.answer.size() <= 2000
+        && data.lang in ['bn', 'en', 'both']
+        && data.category is string && data.category.size() <= 60
+        && data.active is bool
+        && data.published is bool
+        && data.updatedAt == request.time;
+    }
+
+    function isValidChatbotKbDoc(data) {
+      return data.keys().hasAll([
+          'title', 'category', 'sourceType', 'fileName', 'content',
+          'chunkCount', 'status', 'syncStatus', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'title', 'category', 'sourceType', 'fileName', 'content',
+          'chunkCount', 'status', 'syncStatus',
+          'version', 'owner', 'language', 'effectiveDate', 'reviewDate', 'contentHash', 'accessScope',
+          'updatedAt'
+        ])
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 160
+        && data.category is string && data.category.size() <= 60
+        && data.sourceType in ['manual', 'txt', 'csv', 'pdf', 'docx']
+        && data.fileName is string && data.fileName.size() <= 160
+        && data.content is string && data.content.size() >= 10 && data.content.size() <= 60000
+        && data.chunkCount is number && data.chunkCount >= 1 && data.chunkCount <= 200
+        && data.status in ['draft', 'published']
+        && data.syncStatus is string && data.syncStatus.size() <= 120
+        && (!('version' in data) || (data.version is number && data.version >= 1 && data.version <= 1000))
+        && (!('owner' in data) || (data.owner is string && data.owner.size() <= 120))
+        && (!('language' in data) || data.language in ['bn', 'en', 'both'])
+        && (!('effectiveDate' in data) || (data.effectiveDate is string && data.effectiveDate.size() <= 32))
+        && (!('reviewDate' in data) || (data.reviewDate is string && data.reviewDate.size() <= 32))
+        && (!('contentHash' in data) || (data.contentHash is string && data.contentHash.size() <= 64))
+        && (!('accessScope' in data) || data.accessScope in ['public', 'internal'])
+        && data.updatedAt == request.time;
+    }
+
+    function isValidChatbotLog(data) {
+      return data.keys().hasAll([
+          'sessionId', 'lang', 'userMessage', 'assistantReply', 'intent',
+          'isUnanswered', 'resolved', 'handoverRequested', 'latencyMs',
+          'promptTokens', 'outputTokens', 'estimatedCostUsd', 'errorCode',
+          'isTestPlayground', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'lang', 'userMessage', 'assistantReply', 'intent',
+          'isUnanswered', 'resolved', 'handoverRequested', 'latencyMs',
+          'promptTokens', 'outputTokens', 'estimatedCostUsd', 'errorCode',
+          'isTestPlayground', 'path', 'model', 'isError', 'finishReason',
+          'guardCategory', 'retryCount', 'toolCallCount', 'factsVersion',
+          'ragMs', 'modelMs', 'toolMs', 'ragSources', 'confidence',
+          'feedback', 'feedbackReason', 'channel', 'createdAt'
+        ])
+        && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
+        && data.lang in ['bn', 'en', 'banglish']
+        && data.userMessage is string && data.userMessage.size() >= 1 && data.userMessage.size() <= 1000
+        && data.assistantReply is string && data.assistantReply.size() <= 2500
+        && data.intent is string && data.intent.size() <= 60
+        && data.isUnanswered is bool
+        && data.resolved is bool
+        && data.handoverRequested is bool
+        && data.latencyMs is number && data.latencyMs >= 0 && data.latencyMs <= 120000
+        && data.promptTokens is number && data.promptTokens >= 0
+        && data.outputTokens is number && data.outputTokens >= 0
+        && data.estimatedCostUsd is number && data.estimatedCostUsd >= 0
+        && data.errorCode is string && data.errorCode.size() <= 80
+        && data.isTestPlayground is bool
+        && (!('path' in data) || data.path in ['gemini', 'fallback'])
+        && (!('model' in data) || (data.model is string && data.model.size() <= 80))
+        && (!('isError' in data) || data.isError is bool)
+        && (!('finishReason' in data) || (data.finishReason is string && data.finishReason.size() <= 60))
+        && (!('guardCategory' in data) || (data.guardCategory is string && data.guardCategory.size() <= 60))
+        && (!('retryCount' in data) || (data.retryCount is number && data.retryCount >= 0 && data.retryCount <= 10))
+        && (!('toolCallCount' in data) || (data.toolCallCount is number && data.toolCallCount >= 0 && data.toolCallCount <= 30))
+        && (!('factsVersion' in data) || (data.factsVersion is string && data.factsVersion.size() <= 40))
+        && (!('ragMs' in data) || (data.ragMs is number && data.ragMs >= 0 && data.ragMs <= 60000))
+        && (!('modelMs' in data) || (data.modelMs is number && data.modelMs >= 0 && data.modelMs <= 120000))
+        && (!('toolMs' in data) || (data.toolMs is number && data.toolMs >= 0 && data.toolMs <= 60000))
+        && (!('ragSources' in data) || (data.ragSources is list && data.ragSources.size() <= 10 && (data.ragSources.size() == 0 || data.ragSources[0] is string)))
+        && (!('confidence' in data) || (data.confidence is number && data.confidence >= 0 && data.confidence <= 1))
+        && (!('feedback' in data) || data.feedback in ['', 'up', 'down'])
+        && (!('feedbackReason' in data) || (data.feedbackReason is string && data.feedbackReason.size() <= 60))
+        && (!('channel' in data) || data.channel in ['web', 'messenger', 'instagram', 'whatsapp', 'email', 'sms']);
+    }
+
+    function isValidSupportRequest(data) {
+      return data.keys().hasAll([
+          'sessionId', 'customerName', 'phone', 'issueSummary',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'customerName', 'phone', 'issueSummary',
+          'status', 'createdAt', 'updatedAt',
+          'ticketNumber', 'orderNumber', 'category', 'priority', 'contextSummary',
+          'transcriptExcerpt', 'consentGranted', 'evidenceIds', 'paymentStatusSnapshot',
+          'orderStatusSnapshot', 'slaMinutes', 'slaDueAtIso', 'slaWindowLabelEn',
+          'slaWindowLabelBn', 'assignedTo', 'tags', 'resolutionReason',
+          'internalNotes', 'firstRespondedAtIso', 'resolvedAtIso',
+          'channel', 'externalThreadId'
+        ])
+        && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
+        && data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 100
+        && data.phone is string && data.phone.matches('^01[3-9][0-9]{8}$')
+        && data.issueSummary is string && data.issueSummary.size() >= 4 && data.issueSummary.size() <= 500
+        && data.status in ['open', 'pending', 'contacted', 'waiting_for_customer', 'escalated', 'resolved']
+        && (!('ticketNumber' in data) || (data.ticketNumber is string && data.ticketNumber.size() <= 32))
+        && (!('orderNumber' in data) || (data.orderNumber is string && data.orderNumber.size() <= 20))
+        && (!('category' in data) || data.category in ['damaged_jar', 'payment_dispute', 'late_delivery', 'refund_return', 'bulk_order', 'general'])
+        && (!('priority' in data) || data.priority in ['standard', 'urgent'])
+        && (!('contextSummary' in data) || (data.contextSummary is string && data.contextSummary.size() <= 1000))
+        && (!('transcriptExcerpt' in data) || (data.transcriptExcerpt is string && data.transcriptExcerpt.size() <= 2000))
+        && (!('consentGranted' in data) || data.consentGranted is bool)
+        && (!('evidenceIds' in data) || (data.evidenceIds is list && data.evidenceIds.size() <= 6 && (data.evidenceIds.size() == 0 || data.evidenceIds[0] is string)))
+        && (!('paymentStatusSnapshot' in data) || (data.paymentStatusSnapshot is string && data.paymentStatusSnapshot.size() <= 40))
+        && (!('orderStatusSnapshot' in data) || (data.orderStatusSnapshot is string && data.orderStatusSnapshot.size() <= 40))
+        && (!('slaMinutes' in data) || (data.slaMinutes is number && data.slaMinutes >= 5 && data.slaMinutes <= 2880))
+        && (!('slaDueAtIso' in data) || (data.slaDueAtIso is string && data.slaDueAtIso.size() <= 48))
+        && (!('slaWindowLabelEn' in data) || (data.slaWindowLabelEn is string && data.slaWindowLabelEn.size() <= 240))
+        && (!('slaWindowLabelBn' in data) || (data.slaWindowLabelBn is string && data.slaWindowLabelBn.size() <= 300))
+        && (!('assignedTo' in data) || (data.assignedTo is string && data.assignedTo.size() <= 120))
+        && (!('tags' in data) || (data.tags is list && data.tags.size() <= 10 && (data.tags.size() == 0 || data.tags[0] is string)))
+        && (!('resolutionReason' in data) || (data.resolutionReason is string && data.resolutionReason.size() <= 240))
+        && (!('internalNotes' in data) || (data.internalNotes is string && data.internalNotes.size() <= 1000))
+        && (!('firstRespondedAtIso' in data) || (data.firstRespondedAtIso is string && data.firstRespondedAtIso.size() <= 48))
+        && (!('resolvedAtIso' in data) || (data.resolvedAtIso is string && data.resolvedAtIso.size() <= 48))
+        && (!('channel' in data) || data.channel in ['web', 'messenger', 'instagram', 'whatsapp', 'email', 'sms'])
+        && (!('externalThreadId' in data) || (data.externalThreadId is string && data.externalThreadId.size() <= 128))
+        && data.updatedAt == request.time;
+    }
+
+    function isValidChatbotUsedToken(data) {
+      return data.keys().hasAll(['orderNumber', 'sessionId', 'createdAt'])
+        && data.keys().hasOnly(['orderNumber', 'sessionId', 'createdAt'])
+        && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
+        && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
+        && data.createdAt == request.time;
+    }
+
+    function isValidChatbotOrderIdempotency(data) {
+      return data.keys().hasAll(['orderNumber', 'createdAt'])
+        && data.keys().hasOnly(['orderNumber', 'createdAt'])
+        && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
+        && data.createdAt == request.time;
+    }
+
+    function isValidChatbotRateBucket(data) {
+      return data.keys().hasAll(['count', 'windowStartMs', 'updatedAt'])
+        && data.keys().hasOnly(['count', 'windowStartMs', 'updatedAt'])
+        && data.count is number && data.count >= 1 && data.count <= 100000
+        && data.windowStartMs is number && data.windowStartMs >= 0
+        && data.updatedAt == request.time;
+    }
+
+    function isValidChatbotCostLedger(data) {
+      return data.keys().hasAll(['dateKey', 'totalUsd', 'requestCount', 'promptTokens', 'outputTokens', 'capHit', 'updatedAt'])
+        && data.keys().hasOnly(['dateKey', 'totalUsd', 'requestCount', 'promptTokens', 'outputTokens', 'capHit', 'updatedAt'])
+        && data.dateKey is string && data.dateKey.matches('^20[0-9]{2}-[0-9]{2}-[0-9]{2}$')
+        && data.totalUsd is number && data.totalUsd >= 0 && data.totalUsd <= 10000
+        && data.requestCount is number && data.requestCount >= 1 && data.requestCount <= 1000000
+        && data.promptTokens is number && data.promptTokens >= 0
+        && data.outputTokens is number && data.outputTokens >= 0
+        && data.capHit is bool
+        && data.updatedAt == request.time;
+    }
+
+    function isValidKnowledgeChunk(data) {
+      return data.keys().hasAll([
+          'docId', 'title', 'category', 'chunkIndex', 'sectionHeading',
+          'text', 'tokenEstimate', 'contentHash', 'language', 'status',
+          'accessScope', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'docId', 'title', 'category', 'chunkIndex', 'sectionHeading',
+          'text', 'tokenEstimate', 'contentHash', 'language', 'status',
+          'accessScope', 'embedding', 'updatedAt'
+        ])
+        && data.docId is string && data.docId.size() >= 2 && data.docId.size() <= 128
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 160
+        && data.category is string && data.category.size() <= 60
+        && data.chunkIndex is number && data.chunkIndex >= 0 && data.chunkIndex <= 200
+        && data.sectionHeading is string && data.sectionHeading.size() <= 80
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 4000
+        && data.tokenEstimate is number && data.tokenEstimate >= 1 && data.tokenEstimate <= 8000
+        && data.contentHash is string && data.contentHash.size() <= 64
+        && data.language in ['bn', 'en', 'both']
+        && data.status in ['draft', 'published']
+        && data.accessScope in ['public', 'internal']
+        && (!('embedding' in data) || (data.embedding is list && data.embedding.size() <= 1536 && (data.embedding.size() == 0 || data.embedding[0] is number)))
+        && data.updatedAt == request.time;
+    }
+
+    function isValidChatSession(data) {
+      return data.keys().hasAll([
+          'sessionId', 'language', 'lockedLang', 'scriptPreference',
+          'consent', 'currentIntent', 'orderDraftId', 'turnCount', 'lastTurnAt'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'language', 'lockedLang', 'scriptPreference',
+          'consent', 'currentIntent', 'orderDraftId', 'turnCount',
+          'aiPaused', 'activeTicketId', 'assignedAgentName', 'agentReplies',
+          'channel', 'externalUserId', 'linkedPhone', 'lastTurnAt'
+        ])
+        && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
+        && data.language in ['bn', 'en']
+        && data.lockedLang in ['', 'bn', 'en']
+        && data.scriptPreference in ['bn_script', 'banglish_roman', 'en']
+        && data.consent is bool
+        && data.currentIntent is string && data.currentIntent.size() <= 60
+        && data.orderDraftId is string && data.orderDraftId.size() <= 96
+        && data.turnCount is number && data.turnCount >= 0 && data.turnCount <= 1000
+        && (!('aiPaused' in data) || data.aiPaused is bool)
+        && (!('activeTicketId' in data) || (data.activeTicketId is string && data.activeTicketId.size() <= 96))
+        && (!('assignedAgentName' in data) || (data.assignedAgentName is string && data.assignedAgentName.size() <= 80))
+        && (!('agentReplies' in data) || (data.agentReplies is list && data.agentReplies.size() <= 25 && (data.agentReplies.size() == 0 || data.agentReplies[0] is map)))
+        && (!('channel' in data) || data.channel in ['web', 'messenger', 'instagram', 'whatsapp', 'email', 'sms'])
+        && (!('externalUserId' in data) || (data.externalUserId is string && data.externalUserId.size() <= 128))
+        && (!('linkedPhone' in data) || (data.linkedPhone is string && (data.linkedPhone == '' || data.linkedPhone.matches('^01[3-9][0-9]{8}$'))))
+        && data.lastTurnAt == request.time;
+    }
+
+    function isValidOrderDraft(data) {
+      return data.keys().hasAll([
+          'draftId', 'sessionId', 'weight', 'qty', 'customerName', 'phone',
+          'district', 'area', 'address', 'paymentMethod', 'txnId', 'couponCode',
+          'note', 'state', 'priceQuoteVersion', 'validationErrors', 'expiresAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'draftId', 'sessionId', 'weight', 'qty', 'qty250g', 'qty500g', 'qty1kg',
+          'customerName', 'phone', 'district', 'area', 'address', 'addressQualityNote',
+          'paymentMethod', 'txnId', 'couponCode',
+          'note', 'state', 'priceQuoteVersion', 'validationErrors', 'expiresAt', 'updatedAt'
+        ])
+        && data.draftId is string && data.draftId.size() >= 4 && data.draftId.size() <= 96
+        && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
+        && data.weight in ['', '250g', '500g', '1kg']
+        && data.qty is number && data.qty >= 0 && data.qty <= 50
+        && (!('qty250g' in data) || (data.qty250g is number && data.qty250g >= 0 && data.qty250g <= 50))
+        && (!('qty500g' in data) || (data.qty500g is number && data.qty500g >= 0 && data.qty500g <= 50))
+        && (!('qty1kg' in data) || (data.qty1kg is number && data.qty1kg >= 0 && data.qty1kg <= 50))
+        && data.customerName is string && data.customerName.size() <= 100
+        && data.phone is string && data.phone.size() <= 15
+        && data.district is string && data.district.size() <= 80
+        && data.area is string && data.area.size() <= 100
+        && data.address is string && data.address.size() <= 300
+        && (!('addressQualityNote' in data) || (data.addressQualityNote is string && data.addressQualityNote.size() <= 240))
+        && data.paymentMethod in ['', 'cod', 'bkash', 'nagad']
+        && data.txnId is string && data.txnId.size() <= 64
+        && data.couponCode is string && data.couponCode.size() <= 32
+        && data.note is string && data.note.size() <= 240
+        && data.state in ['collecting_details', 'quote_ready', 'awaiting_confirmation', 'confirmed', 'expired', 'cancelled']
+        && data.priceQuoteVersion is number && data.priceQuoteVersion >= 1 && data.priceQuoteVersion <= 1000
+        && data.validationErrors is list && data.validationErrors.size() <= 8
+        && (data.validationErrors.size() == 0 || data.validationErrors[0] is string)
+        && data.expiresAt is number && data.expiresAt >= 0
+        && data.updatedAt == request.time;
+    }
+
+    function isValidOrderFingerprint(data) {
+      return data.keys().hasAll(['orderNumber', 'createdAtMs', 'updatedAt'])
+        && data.keys().hasOnly(['orderNumber', 'createdAtMs', 'updatedAt'])
+        && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
+        && data.createdAtMs is number && data.createdAtMs > 0
+        && data.updatedAt == request.time;
+    }
+
+    function isValidOrderAuditLog(data) {
+      return data.keys().hasAll(['orderNumber', 'action', 'actorType', 'summary', 'createdAt'])
+        && data.keys().hasOnly([
+          'orderNumber', 'action', 'actorType', 'summary',
+          'previousStatus', 'nextStatus', 'previousTotalBdt', 'nextTotalBdt', 'metadata', 'createdAt'
+        ])
+        && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
+        && data.action in ['created', 'address_updated', 'cancelled', 'review_approved', 'review_rejected', 'status_updated', 'cod_verification', 'courier_updated', 'payment_gateway_verified', 'courier_webhook_synced']
+        && data.actorType in ['customer', 'admin', 'system']
+        && data.summary is string && data.summary.size() >= 3 && data.summary.size() <= 300
+        && (!('previousStatus' in data) || (data.previousStatus is string && data.previousStatus.size() <= 40))
+        && (!('nextStatus' in data) || (data.nextStatus is string && data.nextStatus.size() <= 40))
+        && (!('previousTotalBdt' in data) || data.previousTotalBdt is number)
+        && (!('nextTotalBdt' in data) || data.nextTotalBdt is number)
+        && (!('metadata' in data) || (data.metadata is map && data.metadata.size() <= 16))
+        && data.createdAt == request.time;
+    }
+
+    function isValidChatbotFeedback(data) {
+      return data.keys().hasAll([
+          'sessionId', 'logId', 'rating', 'reason', 'userMessage',
+          'assistantReply', 'lang', 'intent', 'resolved', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'logId', 'rating', 'reason', 'userMessage',
+          'assistantReply', 'lang', 'intent', 'resolved', 'createdAt'
+        ])
+        && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
+        && data.logId is string && data.logId.size() <= 128
+        && data.rating in ['up', 'down']
+        && data.reason in ['', 'wrong_price', 'unclear', 'missing_info', 'wrong_language', 'other']
+        && data.userMessage is string && data.userMessage.size() >= 1 && data.userMessage.size() <= 1000
+        && data.assistantReply is string && data.assistantReply.size() >= 1 && data.assistantReply.size() <= 2500
+        && data.lang in ['bn', 'en']
+        && data.intent is string && data.intent.size() <= 60
+        && data.resolved is bool
+        && data.createdAt == request.time;
+    }
+
+    function isValidSupportEvidence(data) {
+      return data.keys().hasAll([
+          'sessionId', 'mimeType', 'filename', 'sizeBytes', 'dataBase64', 'purpose', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'sessionId', 'orderNumber', 'mimeType', 'filename', 'sizeBytes', 'dataBase64', 'purpose', 'createdAt'
+        ])
+        && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
+        && (!('orderNumber' in data) || (data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')))
+        && data.mimeType in ['image/jpeg', 'image/png', 'image/webp']
+        && data.filename is string && data.filename.size() >= 1 && data.filename.size() <= 120
+        && data.sizeBytes is number && data.sizeBytes >= 32 && data.sizeBytes <= 550000
+        && data.dataBase64 is string && data.dataBase64.size() >= 32 && data.dataBase64.size() <= 720000
+        && data.purpose in ['damage_claim', 'payment_dispute', 'general']
+        && data.createdAt == request.time;
+    }
+
+    function isValidSupportAgentReply(data) {
+      return data.keys().hasAll([
+          'ticketId', 'sessionId', 'agentEmail', 'agentName', 'text', 'createdAtIso', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ticketId', 'sessionId', 'agentEmail', 'agentName', 'text', 'createdAtIso', 'createdAt'
+        ])
+        && data.ticketId is string && data.ticketId.size() >= 4 && data.ticketId.size() <= 96
+        && data.sessionId is string && data.sessionId.size() >= 4 && data.sessionId.size() <= 64
+        && data.agentEmail is string && data.agentEmail.size() <= 160
+        && data.agentName is string && data.agentName.size() >= 2 && data.agentName.size() <= 80
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 2000
+        && data.createdAtIso is string && data.createdAtIso.size() <= 48
+        && data.createdAt == request.time;
+    }
+
+    function isValidOrderReviewClaim(data) {
+      return data.keys().hasAll(['orderNumber', 'createdAt'])
+        && data.keys().hasOnly(['orderNumber', 'createdAt'])
+        && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
+        && data.createdAt == request.time;
+    }
+
+    function isValidRefillReminder(data) {
+      return data.keys().hasAll([
+          'orderNumber', 'phone', 'intervalDays', 'status', 'consentGranted',
+          'nextReminderAtIso', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'orderNumber', 'phone', 'customerName', 'weight', 'intervalDays', 'status',
+          'consentGranted', 'nextReminderAtIso', 'lastNotifiedAtIso', 'reminderCount',
+          'createdAt', 'updatedAt'
+        ])
+        && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
+        && data.phone is string && data.phone.matches('^01[3-9][0-9]{8}$')
+        && (!('customerName' in data) || (data.customerName is string && data.customerName.size() <= 100))
+        && (!('weight' in data) || data.weight in ['250g', '500g', '1kg'])
+        && data.intervalDays in [30, 45, 60, 90]
+        && data.status in ['active', 'paused', 'opted_out']
+        && data.consentGranted == true
+        && data.nextReminderAtIso is string && data.nextReminderAtIso.size() <= 48
+        && (!('lastNotifiedAtIso' in data) || (data.lastNotifiedAtIso is string && data.lastNotifiedAtIso.size() <= 48))
+        && (!('reminderCount' in data) || (data.reminderCount is number && data.reminderCount >= 0 && data.reminderCount <= 1000))
+        && data.updatedAt == request.time;
+    }
+
+    function isValidChannelWebhookEvent(data) {
+      return data.keys().hasAll(['channel', 'eventId', 'senderId', 'status', 'createdAtIso', 'createdAt'])
+        && data.keys().hasOnly(['channel', 'eventId', 'senderId', 'verifiedPhone', 'status', 'createdAtIso', 'createdAt'])
+        && data.channel in ['messenger', 'instagram', 'whatsapp']
+        && data.eventId is string && data.eventId.size() >= 2 && data.eventId.size() <= 128
+        && data.senderId is string && data.senderId.size() >= 2 && data.senderId.size() <= 128
+        && (!('verifiedPhone' in data) || (data.verifiedPhone is string && (data.verifiedPhone == '' || data.verifiedPhone.matches('^01[3-9][0-9]{8}$'))))
+        && data.status in ['processed', 'duplicate', 'rejected']
+        && data.createdAtIso is string && data.createdAtIso.size() <= 48
+        && data.createdAt == request.time;
+    }
+
+    function isValidMarketingConsent(data) {
+      return data.keys().hasAll([
+          'phone', 'channel', 'optIn', 'unsubscribed', 'source',
+          'quietHoursRespect', 'consentTimestampIso', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'phone', 'customerName', 'channel', 'optIn', 'unsubscribed', 'source',
+          'quietHoursRespect', 'consentTimestampIso', 'lastCampaignAtIso', 'campaignCount',
+          'createdAt', 'updatedAt'
+        ])
+        && data.phone is string && data.phone.matches('^01[3-9][0-9]{8}$')
+        && (!('customerName' in data) || (data.customerName is string && data.customerName.size() <= 100))
+        && data.channel in ['web', 'messenger', 'instagram', 'whatsapp', 'email', 'sms']
+        && data.optIn is bool
+        && data.unsubscribed is bool
+        && data.source in ['checkout', 'chat', 'track_order', 'whatsapp', 'admin']
+        && data.quietHoursRespect is bool
+        && data.consentTimestampIso is string && data.consentTimestampIso.size() <= 48
+        && (!('lastCampaignAtIso' in data) || (data.lastCampaignAtIso is string && data.lastCampaignAtIso.size() <= 48))
+        && (!('campaignCount' in data) || (data.campaignCount is number && data.campaignCount >= 0 && data.campaignCount <= 1000))
+        && data.updatedAt == request.time;
+    }
+
+    function isValidPaymentGatewayEvent(data) {
+      return data.keys().hasAll([
+          'provider', 'eventType', 'orderNumber', 'externalRef',
+          'rawStatus', 'verified', 'createdAtIso', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'provider', 'eventType', 'orderNumber', 'externalRef',
+          'amountBdt', 'rawStatus', 'verified', 'createdAtIso', 'createdAt'
+        ])
+        && data.provider in ['sslcommerz', 'bkash', 'steadfast', 'pathao', 'redx']
+        && data.eventType in ['payment_verified', 'payment_failed', 'payment_cancelled', 'courier_status']
+        && data.orderNumber is string && data.orderNumber.matches('^DG-[0-9]{4,8}$')
+        && data.externalRef is string && data.externalRef.size() >= 2 && data.externalRef.size() <= 128
+        && (!('amountBdt' in data) || (data.amountBdt is number && data.amountBdt >= 0 && data.amountBdt <= 500000))
+        && data.rawStatus is string && data.rawStatus.size() >= 1 && data.rawStatus.size() <= 64
+        && data.verified is bool
+        && data.createdAtIso is string && data.createdAtIso.size() <= 48
+        && data.createdAt == request.time;
+    }
+
+    function matchesNewOrderStockDecrement(lastOrderNumber) {
+      let o = getAfter(/databases/$(database)/documents/orders/$(lastOrderNumber)).data;
+      return existsAfter(/databases/$(database)/documents/orders/$(lastOrderNumber))
+        && !exists(/databases/$(database)/documents/orders/$(lastOrderNumber))
+        && incoming().stock250g == existing().stock250g - o.qty250g
+        && incoming().stock500g == existing().stock500g - o.qty500g
+        && incoming().stock1kg == existing().stock1kg - o.qty1kg;
+    }
+
+    match /store_settings/{docId} {
+      allow get: if isValidId(docId) && (docId == 'main' || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(docId) && isAdmin() && isValidStoreSettings(incoming());
+      allow update: if isValidId(docId) && isValidStoreSettings(incoming()) && (
+        isAdmin()
+        || (
+          docId == 'main'
+          && incoming().diff(existing()).affectedKeys().hasOnly(['stock250g', 'stock500g', 'stock1kg', 'lastOrderNumber', 'updatedAt'])
+          && incoming().lastOrderNumber is string
+          && incoming().lastOrderNumber.matches('^DG-[0-9]{4,8}$')
+          && matchesNewOrderStockDecrement(incoming().lastOrderNumber)
+        )
+      );
+      allow delete: if false;
+    }
+
+    match /orders/{orderId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(orderId)
+        && isValidOrder(incoming())
+        && incoming().orderNumber == orderId
+        && incoming().createdAt == request.time
+        && incoming().status == 'pending'
+        && (
+          (incoming().paymentMethod == 'cod' && incoming().paymentStatus == 'cod_due')
+          || (incoming().paymentMethod in ['bkash', 'nagad'] && incoming().paymentStatus == 'pending_verification' && incoming().txnId.size() >= 4)
+        )
+        && matchesCanonicalStorePricing(incoming())
+        && existsAfter(/databases/$(database)/documents/order_tracking/$(orderId + '_' + incoming().phone));
+      allow update: if isValidId(orderId)
+        && isValidOrder(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().orderNumber == existing().orderNumber
+        && isAdmin()
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'paymentStatus', 'webhookStatus', 'reviewStatus',
+          'courierPartner', 'consignmentId', 'courierTrackingUrl', 'dispatchedAtIso', 'updatedAt'
+        ]);
+      allow delete: if isValidId(orderId) && isAdmin();
+    }
+
+    match /order_tracking/{lookupId} {
+      allow get: if isValidId(lookupId);
+      allow list: if isAdmin();
+      allow create: if isValidId(lookupId)
+        && isValidOrderTracking(incoming())
+        && incoming().status == 'pending'
+        && incoming().paymentStatus in ['cod_due', 'pending_verification']
+        && existsAfter(/databases/$(database)/documents/orders/$(incoming().orderNumber));
+      allow update: if isValidId(lookupId)
+        && isValidOrderTracking(incoming())
+        && incoming().orderNumber == existing().orderNumber
+        && isAdmin()
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'paymentStatus', 'estimatedDelivery', 'reviewStatus',
+          'courierPartner', 'consignmentId', 'courierTrackingUrl', 'dispatchedAtIso', 'updatedAt'
+        ]);
+      allow delete: if isValidId(lookupId) && isAdmin();
+    }
+
+    match /batches/{batchId} {
+      allow get: if isValidId(batchId);
+      allow list: if existing().active == true || isAdmin();
+      allow create, update: if isValidId(batchId) && isAdmin() && isValidBatch(incoming());
+      allow delete: if isValidId(batchId) && isAdmin();
+    }
+
+    match /reviews/{reviewId} {
+      allow get: if isValidId(reviewId) && (existing().status == 'approved' || isAdmin());
+      allow list: if existing().status == 'approved' || isAdmin();
+      allow create: if isValidId(reviewId)
+        && isValidReview(incoming())
+        && incoming().createdAt == request.time
+        && incoming().status == 'pending'
+        && incoming().helpfulCount == 0
+        && (
+          incoming().verifiedPurchase == false
+          || (
+            incoming().verifiedPurchase == true
+            && incoming().orderNumber.matches('^DG-[0-9]{4,8}$')
+            && reviewId == 'rev_' + incoming().orderNumber
+            && existsAfter(/databases/$(database)/documents/order_review_claims/$(incoming().orderNumber))
+          )
+        );
+      allow update: if isValidId(reviewId)
+        && isValidReview(incoming())
+        && incoming().createdAt == existing().createdAt
+        && (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'verifiedPurchase']))
+          || (
+            existing().status == 'approved'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['helpfulCount'])
+            && incoming().helpfulCount == existing().helpfulCount + 1
+          )
+        );
+      allow delete: if isValidId(reviewId) && isAdmin();
+    }
+
+    match /coupons/{code} {
+      allow get: if isValidId(code) && (existing().active == true || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isValidId(code) && isAdmin() && isValidCoupon(incoming());
+      allow delete: if isValidId(code) && isAdmin();
+    }
+
+    match /subscribers/{subId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(subId) && isValidSubscriber(incoming());
+      allow update, delete: if isValidId(subId) && isAdmin();
+    }
+
+    match /admins/{uid} {
+      allow get: if isValidId(uid) && isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /chatbot_config/{docId} {
+      allow get: if isValidId(docId) && (docId == 'published' || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isValidId(docId)
+        && (docId == 'published' || docId == 'draft')
+        && isAdmin()
+        && isValidChatbotConfig(incoming());
+      allow delete: if false;
+    }
+
+    match /chatbot_config_versions/{versionId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(versionId) && isAdmin() && isValidChatbotVersion(incoming());
+      allow update: if false;
+      allow delete: if isValidId(versionId) && isAdmin();
+    }
+
+    match /chatbot_faqs/{faqId} {
+      allow get: if isValidId(faqId) && ((existing().active == true && existing().published == true) || isAdmin());
+      allow list: if (existing().active == true && existing().published == true) || isAdmin();
+      allow create, update: if isValidId(faqId) && isAdmin() && isValidChatbotFaq(incoming());
+      allow delete: if isValidId(faqId) && isAdmin();
+    }
+
+    match /chatbot_kb_docs/{docId} {
+      allow get: if isValidId(docId) && ((existing().status == 'published' && (!('accessScope' in existing()) || existing().accessScope == 'public')) || isAdmin());
+      allow list: if (existing().status == 'published' && (!('accessScope' in existing()) || existing().accessScope == 'public')) || isAdmin();
+      allow create, update: if isValidId(docId) && isAdmin() && isValidChatbotKbDoc(incoming());
+      allow delete: if isValidId(docId) && isAdmin();
+    }
+
+    match /chatbot_logs/{logId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(logId)
+        && isValidChatbotLog(incoming())
+        && incoming().createdAt == request.time
+        && incoming().resolved == false;
+      allow update: if isValidId(logId)
+        && isAdmin()
+        && isValidChatbotLog(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['resolved', 'feedback', 'feedbackReason']);
+      allow delete: if isValidId(logId) && isAdmin();
+    }
+
+    match /chatbot_support_requests/{reqId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(reqId)
+        && isValidSupportRequest(incoming())
+        && incoming().createdAt == request.time
+        && incoming().status == 'open'
+        && !('assignedTo' in incoming())
+        && !('internalNotes' in incoming())
+        && !('resolvedAtIso' in incoming())
+        && !('firstRespondedAtIso' in incoming())
+        && !('resolutionReason' in incoming());
+      allow update: if isValidId(reqId)
+        && isAdmin()
+        && isValidSupportRequest(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'priority', 'assignedTo', 'tags', 'resolutionReason',
+          'internalNotes', 'firstRespondedAtIso', 'resolvedAtIso', 'updatedAt'
+        ]);
+      allow delete: if isValidId(reqId) && isAdmin();
+    }
+
+    match /chatbot_used_tokens/{tokenId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(tokenId)
+        && isValidChatbotUsedToken(incoming())
+        && existsAfter(/databases/$(database)/documents/orders/$(incoming().orderNumber));
+      allow update, delete: if false;
+    }
+
+    match /chatbot_order_idempotency/{idemKey} {
+      allow get: if isValidId(idemKey);
+      allow list: if isAdmin();
+      allow create: if isValidId(idemKey)
+        && isValidChatbotOrderIdempotency(incoming())
+        && existsAfter(/databases/$(database)/documents/orders/$(incoming().orderNumber));
+      allow update, delete: if false;
+    }
+
+    match /chatbot_rate_buckets/{bucketId} {
+      allow get: if isValidId(bucketId);
+      allow list: if isAdmin();
+      allow create: if isValidId(bucketId)
+        && isValidChatbotRateBucket(incoming())
+        && incoming().count == 1;
+      allow update: if isValidId(bucketId)
+        && isValidChatbotRateBucket(incoming())
+        && (incoming().count == existing().count + 1 || incoming().count == 1);
+      allow delete: if isValidId(bucketId) && isAdmin();
+    }
+
+    match /chatbot_cost_ledger/{dateKey} {
+      allow get: if isValidId(dateKey);
+      allow list: if isAdmin();
+      allow create: if isValidId(dateKey)
+        && isValidChatbotCostLedger(incoming())
+        && incoming().dateKey == dateKey
+        && incoming().requestCount == 1
+        && incoming().totalUsd <= 0.5;
+      allow update: if isValidId(dateKey)
+        && isValidChatbotCostLedger(incoming())
+        && incoming().dateKey == existing().dateKey
+        && incoming().requestCount == existing().requestCount + 1
+        && incoming().totalUsd >= existing().totalUsd
+        && (incoming().totalUsd - existing().totalUsd) <= 0.5;
+      allow delete: if isValidId(dateKey) && isAdmin();
+    }
+
+    match /knowledge_chunks/{chunkId} {
+      allow get: if isValidId(chunkId) && ((existing().status == 'published' && existing().accessScope == 'public') || isAdmin());
+      allow list: if (existing().status == 'published' && existing().accessScope == 'public') || isAdmin();
+      allow create, update: if isValidId(chunkId) && isAdmin() && isValidKnowledgeChunk(incoming());
+      allow delete: if isValidId(chunkId) && isAdmin();
+    }
+
+    match /chat_sessions/{sessionId} {
+      allow get: if isValidId(sessionId);
+      allow list: if isAdmin();
+      allow create: if isValidId(sessionId)
+        && isValidChatSession(incoming())
+        && incoming().sessionId == sessionId
+        && (
+          isAdmin()
+          || (
+            (!('aiPaused' in incoming()) || incoming().aiPaused == false)
+            && (!('activeTicketId' in incoming()) || incoming().activeTicketId == '')
+            && (!('assignedAgentName' in incoming()) || incoming().assignedAgentName == '')
+            && (!('agentReplies' in incoming()) || incoming().agentReplies.size() == 0)
+          )
+        );
+      allow update: if isValidId(sessionId)
+        && isValidChatSession(incoming())
+        && incoming().sessionId == sessionId
+        && (
+          isAdmin()
+          || (
+            !incoming().diff(existing()).affectedKeys().hasAny(['aiPaused', 'activeTicketId', 'assignedAgentName', 'agentReplies'])
+            && (!('linkedPhone' in existing()) || existing().linkedPhone == '' || incoming().linkedPhone == existing().linkedPhone)
+          )
+        );
+      allow delete: if isValidId(sessionId) && isAdmin();
+    }
+
+    match /order_drafts/{draftId} {
+      allow get: if isValidId(draftId);
+      allow list: if isAdmin();
+      allow create, update: if isValidId(draftId)
+        && isValidOrderDraft(incoming())
+        && incoming().draftId == draftId;
+      allow delete: if isValidId(draftId) && isAdmin();
+    }
+
+    match /chatbot_feedback/{feedbackId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(feedbackId)
+        && isValidChatbotFeedback(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(feedbackId)
+        && isAdmin()
+        && isValidChatbotFeedback(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['resolved']);
+      allow delete: if isValidId(feedbackId) && isAdmin();
+    }
+
+    match /order_fingerprints/{fingerprintId} {
+      allow get: if isValidId(fingerprintId);
+      allow list: if isAdmin();
+      allow create, update: if isValidId(fingerprintId)
+        && isValidOrderFingerprint(incoming())
+        && existsAfter(/databases/$(database)/documents/orders/$(incoming().orderNumber));
+      allow delete: if isValidId(fingerprintId) && isAdmin();
+    }
+
+    match /order_audit_logs/{logId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(logId)
+        && isValidOrderAuditLog(incoming())
+        && (
+          isAdmin()
+          || existsAfter(/databases/$(database)/documents/orders/$(incoming().orderNumber))
+          || exists(/databases/$(database)/documents/orders/$(incoming().orderNumber))
+        );
+      allow update, delete: if false;
+    }
+
+    match /support_evidence/{evidenceId} {
+      allow get: if isValidId(evidenceId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(evidenceId) && isValidSupportEvidence(incoming());
+      allow update, delete: if isValidId(evidenceId) && isAdmin();
+    }
+
+    match /support_agent_replies/{replyId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(replyId) && isAdmin() && isValidSupportAgentReply(incoming());
+      allow update, delete: if false;
+    }
+
+    match /order_review_claims/{orderNumber} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(orderNumber)
+        && isValidOrderReviewClaim(incoming())
+        && incoming().orderNumber == orderNumber
+        && get(/databases/$(database)/documents/orders/$(orderNumber)).data.status == 'delivered'
+        && existsAfter(/databases/$(database)/documents/reviews/$('rev_' + orderNumber));
+      allow update, delete: if isValidId(orderNumber) && isAdmin();
+    }
+
+    match /refill_reminders/{reminderId} {
+      allow get: if isValidId(reminderId);
+      allow list: if isAdmin();
+      allow create: if isValidId(reminderId)
+        && isValidRefillReminder(incoming())
+        && incoming().createdAt == request.time
+        && reminderId == incoming().orderNumber + '_' + incoming().phone
+        && exists(/databases/$(database)/documents/order_tracking/$(reminderId));
+      allow update: if isValidId(reminderId)
+        && isValidRefillReminder(incoming())
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin()
+          || (
+            reminderId == existing().orderNumber + '_' + existing().phone
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'intervalDays', 'status', 'nextReminderAtIso', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(reminderId) && isAdmin();
+    }
+
+    match /channel_webhook_events/{eventId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(eventId) && isValidChannelWebhookEvent(incoming());
+      allow update, delete: if false;
+    }
+
+    match /marketing_consents/{phoneKey} {
+      allow get: if isValidId(phoneKey);
+      allow list: if isAdmin();
+      allow create: if isValidId(phoneKey)
+        && isValidMarketingConsent(incoming())
+        && incoming().createdAt == request.time
+        && phoneKey == incoming().phone
+        && (!('campaignCount' in incoming()) || incoming().campaignCount == 0)
+        && !('lastCampaignAtIso' in incoming());
+      allow update: if isValidId(phoneKey)
+        && isValidMarketingConsent(incoming())
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin()
+          || (
+            phoneKey == existing().phone
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'optIn', 'unsubscribed', 'quietHoursRespect', 'channel',
+              'source', 'consentTimestampIso', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(phoneKey) && isAdmin();
+    }
+
+    match /payment_gateway_events/{eventId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(eventId)
+        && isValidPaymentGatewayEvent(incoming())
+        && exists(/databases/$(database)/documents/orders/$(incoming().orderNumber));
+      allow update, delete: if false;
+    }
+  }
+}

@@ -80,7 +80,30 @@ export class LiveFirestoreWriteBlockedInTestError extends Error {
   }
 }
 
+export class ProductionTestModeForbiddenError extends Error {
+  readonly code = 'TEST_MODE_FORBIDDEN_IN_PRODUCTION';
+
+  constructor() {
+    super(
+      'CRITICAL_MISCONFIGURATION: DESHI_GEE_TEST_MODE=1 is forbidden when NODE_ENV=production. Refusing to run in-memory/test hooks in production.'
+    );
+    this.name = 'ProductionTestModeForbiddenError';
+  }
+}
+
+export function assertNoTestModeInProduction(): void {
+  if (process.env.NODE_ENV === 'production' && process.env.DESHI_GEE_TEST_MODE === '1') {
+    const err = new ProductionTestModeForbiddenError();
+    console.error(`[SECURITY_FATAL] ${err.message}`);
+    throw err;
+  }
+}
+
+// Fail fast at module evaluation if a production deployment accidentally enables DESHI_GEE_TEST_MODE=1.
+assertNoTestModeInProduction();
+
 export function isTestProcessRuntime(): boolean {
+  assertNoTestModeInProduction();
   return (
     process.env.NODE_ENV === 'test' ||
     process.env.DESHI_GEE_TEST_MODE === '1' ||
@@ -105,6 +128,7 @@ function getFirestoreBaseDocUrl(): string {
 }
 
 export function assertLiveFirestoreWriteAllowed(operation: string): void {
+  assertNoTestModeInProduction();
   if (!isTestProcessRuntime()) return;
   const hasEmulator = Boolean((process.env.FIRESTORE_EMULATOR_HOST || '').trim());
   const hasMockFetch = globalThis.fetch !== NATIVE_FETCH_AT_LOAD;
@@ -117,6 +141,7 @@ async function firestoreCommitFetch(
   init: RequestInit,
   operation = 'firestore_commit'
 ): Promise<Response> {
+  assertNoTestModeInProduction();
   assertLiveFirestoreWriteAllowed(operation);
   return fetch(`${getFirestoreBaseDocUrl()}:commit?key=${encodeURIComponent(API_KEY)}`, init);
 }
@@ -349,23 +374,54 @@ export async function verifyServerAdminToken(
   }
 }
 
-export async function fetchServerStoreSettings(): Promise<StoreSettingsDoc> {
+export async function fetchServerStoreSettingsWithMeta(): Promise<{
+  settings: StoreSettingsDoc;
+  confirmedFromDb: boolean;
+  source: 'firestore' | 'test_memory' | 'default_fallback';
+}> {
+  assertNoTestModeInProduction();
   if (
     (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
     globalFirestoreTestHooks.__deshiGeeTestStoreSettings
   ) {
-    return { ...globalFirestoreTestHooks.__deshiGeeTestStoreSettings };
+    return {
+      settings: { ...globalFirestoreTestHooks.__deshiGeeTestStoreSettings },
+      confirmedFromDb: true,
+      source: 'test_memory',
+    };
   }
   try {
     const data = await fetchFsGet('store_settings/main');
     if (data) {
-      return { ...DEFAULT_STORE_SETTINGS, ...(data as Partial<StoreSettingsDoc>) };
+      return {
+        settings: { ...DEFAULT_STORE_SETTINGS, ...(data as Partial<StoreSettingsDoc>) },
+        confirmedFromDb: true,
+        source: 'firestore',
+      };
     }
-    return DEFAULT_STORE_SETTINGS;
+    return {
+      settings: DEFAULT_STORE_SETTINGS,
+      confirmedFromDb: false,
+      source: 'default_fallback',
+    };
   } catch (__fsGuardErr) {
-    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
-    return DEFAULT_STORE_SETTINGS;
+    if (
+      __fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError ||
+      __fsGuardErr instanceof ProductionTestModeForbiddenError
+    ) {
+      throw __fsGuardErr;
+    }
+    return {
+      settings: DEFAULT_STORE_SETTINGS,
+      confirmedFromDb: false,
+      source: 'default_fallback',
+    };
   }
+}
+
+export async function fetchServerStoreSettings(): Promise<StoreSettingsDoc> {
+  const { settings } = await fetchServerStoreSettingsWithMeta();
+  return settings;
 }
 
 export async function fetchServerBatchRecord(batchCode: string): Promise<BatchRecord> {
@@ -973,6 +1029,10 @@ export interface ManageOrderResult {
   currentStatus?: string;
   nextStatus?: string;
   orderNumber?: string;
+  currentTotalBdt?: number;
+  currentSubtotalBdt?: number;
+  currentDiscountBdt?: number;
+  suggestedDistrict?: string;
   updatedTotalBdt?: number;
   updatedDeliveryFeeBdt?: number;
   updatedZone?: DeliveryZone;
@@ -1067,6 +1127,9 @@ export async function manageServerOrder(params: ManageOrderParams): Promise<Mana
       currentStatus,
       updatedTotalBdt: tracking.totalBdt,
       estimatedDelivery: tracking.estimatedDelivery,
+      currentTotalBdt: Number(tracking.totalBdt || 0),
+      currentSubtotalBdt: Number(tracking.subtotalBdt ?? tracking.totalBdt ?? 0),
+      currentDiscountBdt: Number(tracking.discountBdt ?? 0),
       messageEn: preDispatchEligible
         ? `Order ${cleanOrder} (${currentStatus}) is still pre-dispatch and eligible for address edit or cancellation.`
         : `Order ${cleanOrder} is already "${currentStatus}". Please contact customer support for changes.`,
@@ -1100,6 +1163,18 @@ export async function manageServerOrder(params: ManageOrderParams): Promise<Mana
       `${params.area || ''} ${params.address || ''}`
     );
     if (!resolved.valid) {
+      if (resolved.needsClarification && resolved.suggestedDistrict) {
+        return {
+          ok: false,
+          eligible: true,
+          code: 'district_typo_confirmation_required',
+          orderNumber: cleanOrder,
+          currentStatus,
+          suggestedDistrict: resolved.suggestedDistrict,
+          messageEn: `Did you mean ${resolved.suggestedDistrict}? Please confirm the district name before updating the delivery address.`,
+          messageBn: `আপনি কি ${resolved.suggestedDistrict} বোঝাতে চেয়েছেন? ঠিকানা আপডেট করার আগে অনুগ্রহ করে জেলার নাম নিশ্চিত করুন।`,
+        };
+      }
       return {
         ok: false,
         eligible: true,
@@ -1940,12 +2015,14 @@ const globalFirestoreTestHooks = globalThis as unknown as {
 export function setAdminAuthOverrideForTests(
   fn: ((authHeader: string | null) => Promise<{ ok: boolean; email: string; uid: string }>) | null
 ): void {
+  assertNoTestModeInProduction();
   if (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') {
     globalFirestoreTestHooks.__deshiGeeAdminVerifyOverride = fn;
   }
 }
 
 export function setSupportInboxMemoryModeForTests(enabled: boolean): void {
+  assertNoTestModeInProduction();
   if (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') {
     globalFirestoreTestHooks.__deshiGeeSupportMemoryState = enabled
       ? {
@@ -1963,6 +2040,7 @@ export function getSupportInboxMemoryStateForTests() {
 }
 
 export function setRetentionMemoryModeForTests(enabled: boolean): void {
+  assertNoTestModeInProduction();
   if (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') {
     globalFirestoreTestHooks.__deshiGeeRetentionMemoryState = enabled
       ? {
@@ -1980,6 +2058,7 @@ export function getRetentionMemoryStateForTests() {
 }
 
 export function setChannelMemoryModeForTests(enabled: boolean): void {
+  assertNoTestModeInProduction();
   if (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') {
     globalFirestoreTestHooks.__deshiGeeChannelMemoryState = enabled
       ? {
@@ -1999,6 +2078,7 @@ export function getChannelMemoryStateForTests() {
 export function setInventoryMemoryModeForTests(
   settingsOverride: Partial<StoreSettingsDoc> | null
 ): void {
+  assertNoTestModeInProduction();
   if (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') {
     globalFirestoreTestHooks.__deshiGeeTestStoreSettings = settingsOverride
       ? { ...DEFAULT_STORE_SETTINGS, ...settingsOverride }
@@ -2011,6 +2091,7 @@ export function getInventoryMemoryStateForTests(): StoreSettingsDoc | null {
 }
 
 export function setCouponsMemoryForTests(coupons: CouponRecord[] | null): void {
+  assertNoTestModeInProduction();
   if (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') {
     if (!coupons) {
       globalFirestoreTestHooks.__deshiGeeTestCouponsMap = null;
@@ -2025,6 +2106,7 @@ export function setCouponsMemoryForTests(coupons: CouponRecord[] | null): void {
 }
 
 export function setOrderStorageMemoryModeForTests(enabled: boolean): void {
+  assertNoTestModeInProduction();
   if (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') {
     globalFirestoreTestHooks.__deshiGeeOrderMemoryState = enabled
       ? {
@@ -5020,6 +5102,8 @@ export async function fetchServerOrderForPaymentValidation(
   phone?: string;
   status: string;
   paymentStatus: string;
+  consignmentId?: string;
+  courierPartner?: string;
 } | null> {
   const cleanOrder = String(orderNumber || '').trim().toUpperCase();
   if (!/^DG-\d{4,8}$/.test(cleanOrder)) return null;
@@ -5039,6 +5123,8 @@ export async function fetchServerOrderForPaymentValidation(
         phone: order.phone,
         status: order.status,
         paymentStatus: order.paymentStatus,
+        consignmentId: order.consignmentId,
+        courierPartner: order.courierPartner,
       };
     }
     if (cleanPhone) {
@@ -5050,6 +5136,8 @@ export async function fetchServerOrderForPaymentValidation(
           phone: cleanPhone,
           status: tr.status,
           paymentStatus: tr.paymentStatus,
+          consignmentId: tr.consignmentId,
+          courierPartner: tr.courierPartner,
         };
       }
     }
@@ -5062,6 +5150,8 @@ export async function fetchServerOrderForPaymentValidation(
           phone: suffixPhone,
           status: tr.status,
           paymentStatus: tr.paymentStatus,
+          consignmentId: tr.consignmentId,
+          courierPartner: tr.courierPartner,
         };
       }
     }
@@ -5077,6 +5167,8 @@ export async function fetchServerOrderForPaymentValidation(
         phone: cleanPhone,
         status: tr.status,
         paymentStatus: tr.paymentStatus,
+        consignmentId: tr.consignmentId,
+        courierPartner: tr.courierPartner,
       };
     }
   }
@@ -5090,6 +5182,8 @@ export async function fetchServerOrderForPaymentValidation(
       phone: typeof orderData.phone === 'string' ? orderData.phone : undefined,
       status: String(orderData.status || 'pending'),
       paymentStatus: String(orderData.paymentStatus || 'pending'),
+      consignmentId: typeof orderData.consignmentId === 'string' ? orderData.consignmentId : undefined,
+      courierPartner: typeof orderData.courierPartner === 'string' ? orderData.courierPartner : undefined,
     };
   }
 
@@ -5182,4 +5276,115 @@ export async function markServerOrderPaymentVerified(input: {
     };
   }
 }
+
+/**
+ * S0-07: Applies a validated courier webhook status transition to orders + order_tracking.
+ * Refuses regressive transitions on already-delivered orders.
+ */
+export async function applyValidatedCourierStatusToOrder(input: {
+  orderNumber: string;
+  phone?: string;
+  nextStatus: OrderRecord['status'];
+  courierPartner: CourierPartner;
+  consignmentId?: string;
+  rawStatus: string;
+}): Promise<{ ok: boolean; detail: string }> {
+  const cleanOrder = String(input.orderNumber || '').trim().toUpperCase();
+  const cleanPhone = String(input.phone || '').replace(/[\s-]/g, '');
+  if (!/^DG-\d{4,8}$/.test(cleanOrder)) {
+    return { ok: false, detail: 'invalid_order_number' };
+  }
+
+  const isTestMem =
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeOrderMemoryState?.enabled;
+
+  if (isTestMem) {
+    const mem = globalFirestoreTestHooks.__deshiGeeOrderMemoryState!;
+    const order = mem.orders.get(cleanOrder);
+    if (!order) {
+      return { ok: false, detail: 'order_not_found' };
+    }
+    if (order.status === 'delivered' && input.nextStatus !== 'delivered') {
+      return { ok: false, detail: 'terminal_delivered_locked' };
+    }
+    order.status = input.nextStatus;
+    order.courierPartner = input.courierPartner;
+    if (input.consignmentId) {
+      order.consignmentId = input.consignmentId;
+    }
+    order.updatedAt = Date.now();
+    mem.orders.set(cleanOrder, order);
+
+    for (const [key, tr] of mem.tracking.entries()) {
+      if (tr.orderNumber === cleanOrder) {
+        tr.status = input.nextStatus;
+        tr.courierPartner = input.courierPartner;
+        if (input.consignmentId) {
+          tr.consignmentId = input.consignmentId;
+        }
+        tr.updatedAt = Date.now();
+        mem.tracking.set(key, tr);
+      }
+    }
+    return { ok: true, detail: `updated_to_${input.nextStatus}` };
+  }
+
+  try {
+    const updateFields: Record<string, unknown> = {
+      status: input.nextStatus,
+      courierPartner: input.courierPartner,
+    };
+    const fieldPaths = ['status', 'courierPartner'];
+    if (input.consignmentId) {
+      updateFields.consignmentId = input.consignmentId.slice(0, 80);
+      fieldPaths.push('consignmentId');
+    }
+
+    const writes: unknown[] = [
+      {
+        update: {
+          name: docName('orders', cleanOrder),
+          fields: encodeFsFields(updateFields),
+        },
+        updateMask: { fieldPaths },
+        updateTransforms: [{ fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' }],
+        currentDocument: { exists: true },
+      },
+    ];
+
+    if (/^01[3-9][0-9]{8}$/.test(cleanPhone)) {
+      writes.push({
+        update: {
+          name: docName('order_tracking', `${cleanOrder}_${cleanPhone}`),
+          fields: encodeFsFields(updateFields),
+        },
+        updateMask: { fieldPaths },
+        updateTransforms: [{ fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' }],
+        currentDocument: { exists: true },
+      });
+    }
+
+    const res = await firestoreCommitFetch(
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ writes }),
+        cache: 'no-store',
+      },
+      'apply_validated_courier_status'
+    );
+    if (!res.ok) {
+      return { ok: false, detail: `firestore_commit_failed_${res.status}` };
+    }
+    return { ok: true, detail: `updated_to_${input.nextStatus}` };
+  } catch (err) {
+    if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
+    return {
+      ok: false,
+      detail: err instanceof Error ? err.message : 'courier_status_update_failed',
+    };
+  }
+}
+
 

@@ -10,11 +10,13 @@ import {
   ExternalLink,
   Loader2,
   LogOut,
+  Menu,
   Printer,
   Send,
   ShieldCheck,
   Trash2,
   Truck,
+  X,
 } from 'lucide-react';
 import {
   BatchRecord,
@@ -70,6 +72,7 @@ export function AdminDashboardView({
   const [isAdmin, setIsAdmin] = useState(false);
   const [authError, setAuthError] = useState('');
   const [tab, setTab] = useState<AdminTab>('overview');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
 
   const [orders, setOrders] = useState<OrderRecord[]>([]);
@@ -134,6 +137,19 @@ export function AdminDashboardView({
     });
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (mobileNavOpen) {
+        setMobileNavOpen(false);
+      } else if (selectedOrder && typeof window !== 'undefined' && window.innerWidth < 1024) {
+        setSelectedOrder(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mobileNavOpen, selectedOrder]);
 
   const loadAdminWorkspace = async () => {
     setLoadingData(true);
@@ -604,72 +620,173 @@ export function AdminDashboardView({
     );
   }
 
+  const adminTabs: { id: AdminTab; label: string }[] = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'orders', label: `Orders (${orders.length})` },
+    { id: 'store', label: 'Product, Stock & Delivery' },
+    { id: 'batches', label: 'Batches & Coupons' },
+    { id: 'reviews', label: `Reviews (${reviews.length}) & Subscribers` },
+    { id: 'chatbot', label: 'AI Chatbot' },
+  ];
+  const activeTabLabel = adminTabs.find((t) => t.id === tab)?.label || 'Overview';
+
   return (
-    <section className="mx-auto min-h-[85vh] max-w-[1320px] px-4 py-8 sm:px-8 sm:py-10">
-      {/* Admin Top Header */}
-      <div className="no-print flex flex-wrap items-center justify-between gap-4 border-b border-[rgba(30,23,16,0.12)] pb-5 sm:pb-6">
-        <div>
-          <button
-            type="button"
-            onClick={onBackHome}
-            className="inline-flex min-h-[40px] items-center gap-1.5 text-xs font-medium text-[#635647] hover:text-[#1E1710]"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            <span>Back to Storefront</span>
-          </button>
-          <h1 className="font-display mt-1 text-2xl font-semibold text-[#1E1710] sm:text-3xl">
-            Deshi Gee Operations
-          </h1>
+    <div className="min-h-dvh bg-[#FAF7F2] text-[#1E1710]">
+      {/* Dedicated Compact Admin Header Bar */}
+      <header className="no-print sticky top-0 z-30 border-b border-[rgba(250,247,242,0.12)] bg-[#1A120B] text-[#FAF7F2]">
+        <div className="mx-auto flex h-16 max-w-[1320px] items-center justify-between gap-3 px-4 sm:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen(true)}
+              aria-label="Open admin menu"
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-[#FAF7F2]/20 bg-[#FAF7F2]/5 text-[#FAF7F2] hover:bg-[#FAF7F2]/10 lg:hidden"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-[#D4AF37]" />
+                <h1 className="font-display truncate text-base font-semibold tracking-tight text-[#FAF7F2] sm:text-xl">
+                  Deshi Gee Operations
+                </h1>
+              </div>
+              <p className="truncate text-[11px] text-[#E5B25D] lg:hidden">
+                {activeTabLabel}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={onBackHome}
+              className="hidden min-h-[44px] items-center gap-1.5 rounded-lg border border-[#FAF7F2]/20 px-3.5 py-2 text-xs font-medium text-[#FAF7F2]/90 hover:bg-[#FAF7F2]/10 sm:inline-flex"
+            >
+              <ArrowLeft className="h-3.5 w-3.5 text-[#E5B25D]" />
+              <span>Storefront</span>
+            </button>
+            <span className="hidden max-w-[200px] truncate text-xs text-[#E8DFC5]/75 md:inline">
+              {user.email}
+            </span>
+            <button
+              type="button"
+              onClick={() => signOutAdmin()}
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-[#FAF7F2]/20 bg-[#FAF7F2]/5 px-3 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#FAF7F2]/15"
+            >
+              <LogOut className="h-3.5 w-3.5 text-[#E5B25D]" />
+              <span className="hidden sm:inline">Sign Out</span>
+            </button>
+          </div>
         </div>
+      </header>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="max-w-[200px] truncate text-xs text-[#635647] sm:max-w-none">
-            {user.email}
-          </span>
-          <button
-            type="button"
-            onClick={() => signOutAdmin()}
-            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.2)] px-3.5 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+      {/* Mobile & Tablet Slide-Over Admin Navigation Drawer (< 1024px) */}
+      {mobileNavOpen && (
+        <div className="no-print fixed inset-0 z-50 flex lg:hidden">
+          <div
+            onClick={() => setMobileNavOpen(false)}
+            aria-hidden="true"
+            className="fixed inset-0 bg-[#1A120B]/60 backdrop-blur-xs"
+          />
+          <aside
+            role="dialog"
+            aria-modal="true"
+            aria-label="Admin navigation"
+            className="relative z-10 flex h-dvh w-72 max-w-[85vw] flex-col bg-[#1A120B] text-[#FAF7F2] shadow-2xl"
           >
-            <LogOut className="h-3.5 w-3.5" />
-            <span>Sign Out</span>
-          </button>
-        </div>
-      </div>
+            <div className="flex items-center justify-between border-b border-[#FAF7F2]/10 px-4 py-4">
+              <div>
+                <p className="font-display text-base font-semibold text-[#FAF7F2]">
+                  Deshi Gee Admin
+                </p>
+                <p className="mt-0.5 max-w-[180px] truncate text-[11px] text-[#E8DFC5]/70">
+                  {user.email}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(false)}
+                aria-label="Close admin menu"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-[#FAF7F2]/15 text-[#FAF7F2] hover:bg-[#FAF7F2]/10"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
 
-      {/* Navigation Tabs */}
-      <div className="no-print mt-5 flex gap-2 overflow-x-auto pb-1 sm:mt-6 sm:flex-wrap sm:overflow-visible sm:pb-0">
-        {(
-          [
-            ['overview', 'Overview'],
-            ['orders', `Orders (${orders.length})`],
-            ['store', 'Product, Stock & Delivery'],
-            ['batches', 'Batches & Coupons'],
-            ['reviews', `Reviews (${reviews.length}) & Subscribers`],
-            ['chatbot', 'AI Chatbot'],
-          ] as [AdminTab, string][]
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            className={`min-h-[40px] shrink-0 rounded-lg px-4 py-2 text-xs font-medium transition-colors whitespace-nowrap ${
-              tab === id
-                ? 'bg-[#1E1710] text-[#FAF7F2]'
-                : 'border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] text-[#635647] hover:text-[#1E1710]'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+            <nav className="flex-1 space-y-1.5 overflow-y-auto p-3">
+              {adminTabs.map(({ id, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setTab(id);
+                    setMobileNavOpen(false);
+                  }}
+                  className={`flex min-h-[44px] w-full items-center rounded-xl px-3.5 py-2.5 text-left text-sm font-medium transition-colors ${
+                    tab === id
+                      ? 'bg-[#B47B2B] text-[#FFFDF9]'
+                      : 'text-[#E8DFC5]/85 hover:bg-[#FAF7F2]/10 hover:text-[#FAF7F2]'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </nav>
 
-      {loadingData && (
-        <div className="mt-6 flex items-center gap-2 text-xs text-[#635647]">
-          <Loader2 className="h-4 w-4 animate-spin text-[#B47B2B]" />
-          <span>Syncing live Firestore data...</span>
+            <div className="space-y-2 border-t border-[#FAF7F2]/10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileNavOpen(false);
+                  onBackHome();
+                }}
+                className="flex min-h-[44px] w-full items-center gap-2 rounded-xl border border-[#FAF7F2]/20 px-3.5 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#FAF7F2]/10"
+              >
+                <ArrowLeft className="h-4 w-4 text-[#E5B25D]" />
+                <span>Back to Storefront</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileNavOpen(false);
+                  signOutAdmin();
+                }}
+                className="flex min-h-[44px] w-full items-center gap-2 rounded-xl bg-[#FAF7F2]/10 px-3.5 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#FAF7F2]/15"
+              >
+                <LogOut className="h-4 w-4 text-[#E5B25D]" />
+                <span>Sign Out</span>
+              </button>
+            </div>
+          </aside>
         </div>
       )}
+
+      <section className="mx-auto min-h-[calc(100dvh-64px)] max-w-[1320px] px-4 py-6 sm:px-8 sm:py-8">
+        {/* Desktop Navigation Tabs (>= 1024px) */}
+        <div className="no-print hidden lg:flex lg:flex-wrap lg:gap-2">
+          {adminTabs.map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              className={`min-h-[44px] shrink-0 rounded-lg px-4 py-2 text-xs font-medium transition-colors whitespace-nowrap ${
+                tab === id
+                  ? 'bg-[#1E1710] text-[#FAF7F2]'
+                  : 'border border-[rgba(30,23,16,0.14)] bg-[#FFFDF9] text-[#635647] hover:text-[#1E1710]'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {loadingData && (
+          <div className="mt-4 flex items-center gap-2 text-xs text-[#635647]">
+            <Loader2 className="h-4 w-4 animate-spin text-[#B47B2B]" />
+            <span>Syncing live Firestore data...</span>
+          </div>
+        )}
 
       {/* TAB 1: OVERVIEW */}
       {tab === 'overview' && (
@@ -813,10 +930,11 @@ export function AdminDashboardView({
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
             <div className="no-print space-y-3 lg:col-span-7">
               {filteredOrders.map((order) => (
-                <div
+                <button
                   key={order.orderNumber}
+                  type="button"
                   onClick={() => setSelectedOrder(order)}
-                  className={`cursor-pointer rounded-xl border p-4 transition-colors ${
+                  className={`block w-full cursor-pointer rounded-xl border p-4 text-left transition-colors ${
                     selectedOrder?.orderNumber === order.orderNumber
                       ? 'border-[#B47B2B] bg-[#F2ECE1]'
                       : 'border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] hover:bg-[#FAF7F2]'
@@ -850,7 +968,7 @@ export function AdminDashboardView({
                       {order.status} · {order.paymentMethod} ({order.paymentStatus})
                     </span>
                   </div>
-                </div>
+                </button>
               ))}
               {filteredOrders.length === 0 && (
                 <p className="text-sm text-[#635647]">No matching orders found.</p>
@@ -858,25 +976,41 @@ export function AdminDashboardView({
             </div>
 
             {selectedOrder && (
-              <div className="rounded-2xl border border-[rgba(30,23,16,0.14)] bg-[#FFFDF9] p-6 lg:col-span-5">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="font-mono text-xs uppercase text-[#8A5A17]">
-                      Order Receipt &amp; Controls
-                    </p>
-                    <h3 className="font-display mt-1 text-2xl font-semibold">
-                      {selectedOrder.orderNumber}
-                    </h3>
+              <div
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) setSelectedOrder(null);
+                }}
+                className="fixed inset-0 z-40 flex justify-end bg-[#1A120B]/50 backdrop-blur-xs lg:static lg:inset-auto lg:z-auto lg:col-span-5 lg:block lg:bg-transparent lg:backdrop-blur-none"
+              >
+                <div className="h-dvh w-full max-w-lg overflow-y-auto overscroll-contain bg-[#FFFDF9] p-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] shadow-2xl lg:h-auto lg:max-w-none lg:overflow-visible lg:rounded-2xl lg:border lg:border-[rgba(30,23,16,0.14)] lg:p-6 lg:shadow-none">
+                  <div className="sticky top-0 z-10 -mx-5 -mt-5 mb-4 flex items-start justify-between gap-2 border-b border-[rgba(30,23,16,0.10)] bg-[#FFFDF9]/95 px-5 py-4 backdrop-blur-xs lg:static lg:mx-0 lg:mt-0 lg:mb-0 lg:border-b-0 lg:bg-transparent lg:p-0">
+                    <div>
+                      <p className="font-mono text-xs uppercase text-[#8A5A17]">
+                        Order Receipt &amp; Controls
+                      </p>
+                      <h3 className="font-display mt-1 text-2xl font-semibold">
+                        {selectedOrder.orderNumber}
+                      </h3>
+                    </div>
+                    <div className="no-print flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => window.print()}
+                        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.2)] px-3 py-1.5 text-xs font-medium hover:bg-[#F2ECE1]"
+                      >
+                        <Printer className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Print Receipt</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedOrder(null)}
+                        aria-label="Close order details"
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-[rgba(30,23,16,0.2)] text-[#1E1710] hover:bg-[#F2ECE1] lg:hidden"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => window.print()}
-                    className="no-print inline-flex items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.2)] px-3 py-1.5 text-xs font-medium hover:bg-[#F2ECE1]"
-                  >
-                    <Printer className="h-3.5 w-3.5" />
-                    <span>Print Receipt</span>
-                  </button>
-                </div>
 
                 <dl className="mt-5 space-y-2.5 border-y border-[rgba(30,23,16,0.10)] py-4 text-xs">
                   <div className="flex items-baseline justify-between gap-3">
@@ -1176,6 +1310,7 @@ export function AdminDashboardView({
                       </ul>
                     )}
                   </div>
+                </div>
                 </div>
               </div>
             )}
@@ -1935,6 +2070,7 @@ export function AdminDashboardView({
           onPublishedConfig={(cfg) => setChatbotConfig(cfg)}
         />
       )}
-    </section>
+      </section>
+    </div>
   );
 }

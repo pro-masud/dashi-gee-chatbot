@@ -21,7 +21,6 @@ import {
   XCircle,
 } from 'lucide-react';
 import {
-  DEFAULT_STORE_SETTINGS,
   OrderStatus,
   TrackingRecord,
   trackOrderLookup,
@@ -37,6 +36,7 @@ import {
   formatPaymentClarification,
 } from '../lib/chatbot/supportEngine';
 import type { RefillReminderDoc, SupportCategory } from '../lib/chatbot/types';
+import { useStorefront } from './StorefrontProvider';
 
 interface TrackOrderViewProps {
   lang: Lang;
@@ -59,6 +59,7 @@ export function TrackOrderView({
   initialPhone = '',
   onBackHome,
 }: TrackOrderViewProps) {
+  const { settings } = useStorefront();
   const [orderInput, setOrderInput] = useState(initialOrderNumber);
   const [phoneInput, setPhoneInput] = useState(initialPhone);
   const [verifiedPhone, setVerifiedPhone] = useState(initialPhone);
@@ -259,7 +260,7 @@ export function TrackOrderView({
         if (record.district) setEditDistrict(record.district);
         if (record.status === 'delivered') {
           fetch(
-            `/api/orders/refill-reminder?orderNumber=${encodeURIComponent(cleanOrd)}&phone=${encodeURIComponent(cleanPhone)}`
+            `/api/orders/refill-reminder?orderNumber=${encodeURIComponent(cleanOrd)}&phone=${encodeURIComponent(cleanPhone)}&uiLang=${lang}`
           )
             .then((r) => (r.ok ? r.json() : null))
             .then((d: { ok?: boolean; reminder?: RefillReminderDoc | null } | null) => {
@@ -436,7 +437,7 @@ export function TrackOrderView({
     ? formatPaymentClarification(
         result.paymentMethod,
         result.paymentStatus,
-        DEFAULT_STORE_SETTINGS,
+        settings,
         bn ? 'bn' : 'en'
       )
     : null;
@@ -562,6 +563,7 @@ export function TrackOrderView({
         body: JSON.stringify({
           orderNumber: result.orderNumber,
           phone: verifiedPhone,
+          uiLang: lang,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -598,6 +600,7 @@ export function TrackOrderView({
           district: result.district || 'Dhaka',
           rating: reviewRating,
           comment: reviewComment.trim(),
+          uiLang: lang,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -642,6 +645,7 @@ export function TrackOrderView({
           intervalDays: reminderInterval,
           status: nextStatus,
           consentGranted: reminderConsent || nextStatus !== 'active',
+          uiLang: lang,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -664,7 +668,7 @@ export function TrackOrderView({
       <button
         type="button"
         onClick={onBackHome}
-        className="inline-flex min-h-[40px] items-center gap-2 text-sm font-medium text-[#635647] hover:text-[#1E1710]"
+        className="inline-flex min-h-[44px] items-center gap-2 text-sm font-medium text-[#635647] hover:text-[#1E1710]"
       >
         <ArrowLeft className="h-4 w-4" />
         <span>{bn ? 'স্টোরফ্রন্টে ফিরে যান' : 'Back to Deshi Gee'}</span>
@@ -850,7 +854,7 @@ export function TrackOrderView({
                       type="button"
                       disabled={Boolean(gatewayBusy)}
                       onClick={() => handlePayOrderOnline('sslcommerz')}
-                      className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-3.5 py-1.5 font-semibold text-[#FFFDF9] hover:bg-[#9D6820] disabled:opacity-55"
+                      className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-3.5 py-2 font-semibold text-[#FFFDF9] hover:bg-[#9D6820] disabled:opacity-55"
                     >
                       {gatewayBusy === 'sslcommerz' ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -865,7 +869,7 @@ export function TrackOrderView({
                       type="button"
                       disabled={Boolean(gatewayBusy)}
                       onClick={() => handlePayOrderOnline('bkash')}
-                      className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-[#B47B2B] bg-[#FFFDF9] px-3.5 py-1.5 font-semibold text-[#8A5A17] hover:bg-[#F2ECE1] disabled:opacity-55"
+                      className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-[#B47B2B] bg-[#FFFDF9] px-3.5 py-2 font-semibold text-[#8A5A17] hover:bg-[#F2ECE1] disabled:opacity-55"
                     >
                       {gatewayBusy === 'bkash' ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -956,7 +960,7 @@ export function TrackOrderView({
                     href={result.courierTrackingUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex min-h-[38px] shrink-0 items-center gap-1.5 rounded-lg bg-[#1E1710] px-3.5 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E]"
+                    className="inline-flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-lg bg-[#1E1710] px-3.5 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E]"
                   >
                     <span>{bn ? 'কুরিয়ার ট্র্যাক করুন' : 'Track on Courier'}</span>
                     <ExternalLink className="h-3.5 w-3.5" />
@@ -994,7 +998,7 @@ export function TrackOrderView({
                       setShowEditForm((v) => !v);
                       setShowCancelConfirm(false);
                     }}
-                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-3 py-1.5 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-3.5 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
                   >
                     <Edit3 className="h-3.5 w-3.5 text-[#8A5A17]" />
                     <span>{bn ? 'ঠিকানা পরিবর্তন' : 'Edit Delivery Address'}</span>
@@ -1005,7 +1009,7 @@ export function TrackOrderView({
                       setShowCancelConfirm((v) => !v);
                       setShowEditForm(false);
                     }}
-                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-800 hover:bg-red-100"
+                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-red-300 bg-red-50 px-3.5 py-2 text-xs font-medium text-red-800 hover:bg-red-100"
                   >
                     <XCircle className="h-3.5 w-3.5" />
                     <span>{bn ? 'অর্ডার বাতিল' : 'Cancel Order'}</span>
@@ -1026,7 +1030,7 @@ export function TrackOrderView({
                       <select
                         value={editDistrict}
                         onChange={(e) => setEditDistrict(e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-sm text-[#1E1710]"
+                        className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base text-[#1E1710] sm:text-sm"
                       >
                         {BANGLADESH_DISTRICTS.map((d) => (
                           <option key={d} value={d}>
@@ -1045,7 +1049,7 @@ export function TrackOrderView({
                         value={editArea}
                         onChange={(e) => setEditArea(e.target.value)}
                         placeholder={bn ? 'যেমন: সাভার / উত্তরা' : 'e.g. Savar / Uttara'}
-                        className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-sm text-[#1E1710]"
+                        className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base text-[#1E1710] sm:text-sm"
                       />
                     </div>
                   </div>
@@ -1059,14 +1063,14 @@ export function TrackOrderView({
                       value={editAddress}
                       onChange={(e) => setEditAddress(e.target.value)}
                       placeholder={bn ? 'বাড়ি ১২, রোড ৪, সেক্টর ১০' : 'House 12, Road 4, Sector 10'}
-                      className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-sm text-[#1E1710]"
+                      className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base text-[#1E1710] sm:text-sm"
                     />
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="submit"
                       disabled={manageLoading}
-                      className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-4 py-2 text-xs font-semibold text-[#FFFDF9] disabled:opacity-60"
+                      className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-4 py-2 text-xs font-semibold text-[#FFFDF9] disabled:opacity-60"
                     >
                       {manageLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                       <span>
@@ -1076,7 +1080,7 @@ export function TrackOrderView({
                     <button
                       type="button"
                       onClick={() => setShowEditForm(false)}
-                      className="min-h-[40px] rounded-lg border border-[rgba(30,23,16,0.18)] px-4 py-2 text-xs font-medium text-[#635647]"
+                      className="min-h-[44px] rounded-lg border border-[rgba(30,23,16,0.18)] px-4 py-2 text-xs font-medium text-[#635647]"
                     >
                       {bn ? 'বন্ধ করুন' : 'Dismiss'}
                     </button>
@@ -1098,14 +1102,14 @@ export function TrackOrderView({
                     placeholder={
                       bn ? 'বাতিলের কারণ (ঐচ্ছিক)' : 'Reason for cancellation (optional)'
                     }
-                    className="w-full rounded-lg border border-red-200 bg-[#FFFDF9] px-3 py-2 text-xs text-[#1E1710]"
+                    className="w-full rounded-lg border border-red-200 bg-[#FFFDF9] px-3 py-2 text-base text-[#1E1710] sm:text-xs"
                   />
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       disabled={manageLoading}
                       onClick={handleConfirmCancelOrder}
-                      className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg bg-red-700 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                      className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-red-700 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
                     >
                       {manageLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                       <span>{bn ? 'হ্যাঁ, অর্ডার বাতিল করুন' : 'Yes, Cancel Order'}</span>
@@ -1113,7 +1117,7 @@ export function TrackOrderView({
                     <button
                       type="button"
                       onClick={() => setShowCancelConfirm(false)}
-                      className="min-h-[38px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FFFDF9] px-4 py-2 text-xs font-medium text-[#1E1710]"
+                      className="min-h-[44px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FFFDF9] px-4 py-2 text-xs font-medium text-[#1E1710]"
                     >
                       {bn ? 'ফিরে যান' : 'Keep Order'}
                     </button>
@@ -1147,7 +1151,7 @@ export function TrackOrderView({
                       setTicketCategory('payment_dispute');
                       setShowSupportPanel(true);
                     }}
-                    className="rounded-lg border border-amber-400 bg-[#FFFDF9] px-3 py-1 text-[11px] font-semibold text-[#1E1710] hover:bg-[#F2ECE1]"
+                    className="min-h-[44px] rounded-lg border border-amber-400 bg-[#FFFDF9] px-3.5 py-2 text-xs font-semibold text-[#1E1710] hover:bg-[#F2ECE1]"
                   >
                     {bn ? 'পেমেন্ট ডিসপিউট টিকিট দিন' : 'Dispute Payment Verification'}
                   </button>
@@ -1173,7 +1177,7 @@ export function TrackOrderView({
                     setTicketCategory('late_delivery');
                     setShowSupportPanel(true);
                   }}
-                  className="shrink-0 rounded-lg border border-[rgba(180,123,43,0.45)] bg-[#FFFDF9] px-3 py-1.5 text-[11px] font-semibold text-[#1E1710] hover:bg-[#F2ECE1]"
+                  className="min-h-[44px] shrink-0 rounded-lg border border-[rgba(180,123,43,0.45)] bg-[#FFFDF9] px-3.5 py-2 text-xs font-semibold text-[#1E1710] hover:bg-[#F2ECE1]"
                 >
                   {bn ? 'জরুরি ডেলিভারি ফলো-আপ' : 'Report Delay (Urgent)'}
                 </button>
@@ -1202,7 +1206,7 @@ export function TrackOrderView({
               <button
                 type="button"
                 onClick={() => setShowSupportPanel((v) => !v)}
-                className="min-h-[38px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-3.5 py-1.5 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+                className="min-h-[44px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-4 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
               >
                 {showSupportPanel
                   ? bn
@@ -1239,7 +1243,7 @@ export function TrackOrderView({
                     <select
                       value={ticketCategory}
                       onChange={(e) => setTicketCategory(e.target.value as SupportCategory)}
-                      className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-xs"
+                      className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base sm:text-xs"
                     >
                       <option value="damaged_jar">
                         {bn ? 'ভাঙা বা লিক হওয়া জার (Urgent)' : 'Damaged / Leaking Jar (Urgent)'}
@@ -1268,7 +1272,7 @@ export function TrackOrderView({
                       value={ticketName}
                       onChange={(e) => setTicketName(e.target.value)}
                       placeholder={bn ? 'যেমন: রাকিব হাসান' : 'Full Name'}
-                      className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-xs"
+                      className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base sm:text-xs"
                     />
                   </div>
                 </div>
@@ -1287,12 +1291,12 @@ export function TrackOrderView({
                         ? 'দয়া করে আপনার সমস্যাটি সংক্ষেপে লিখুন...'
                         : 'Briefly explain the jar condition, payment TxnID, or delivery concern...'
                     }
-                    className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-xs"
+                    className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base sm:text-xs"
                   />
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
-                  <label className="inline-flex min-h-[38px] cursor-pointer items-center gap-2 rounded-lg border border-[rgba(180,123,43,0.4)] bg-[#FFFDF9] px-3 py-1.5 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]">
+                  <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border border-[rgba(180,123,43,0.4)] bg-[#FFFDF9] px-3.5 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]">
                     {evidenceBusy ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin text-[#B47B2B]" />
                     ) : (
@@ -1344,7 +1348,7 @@ export function TrackOrderView({
                 <button
                   type="submit"
                   disabled={ticketBusy}
-                  className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-[#B47B2B] px-4 py-2 text-xs font-semibold text-[#FFFDF9] hover:bg-[#9D6820] disabled:opacity-60"
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-[#B47B2B] px-4 py-2 text-xs font-semibold text-[#FFFDF9] hover:bg-[#9D6820] disabled:opacity-60"
                 >
                   {ticketBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                   <span>{bn ? 'সাপোর্ট টিকিট জমা দিন' : 'Submit Support Ticket'}</span>
@@ -1374,7 +1378,7 @@ export function TrackOrderView({
                   type="button"
                   disabled={reorderBusy}
                   onClick={handleOneClickReorder}
-                  className="inline-flex min-h-[42px] items-center gap-2 rounded-xl bg-[#1E1710] px-4 py-2 text-xs font-semibold text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-60"
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[#1E1710] px-4 py-2 text-xs font-semibold text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-60"
                 >
                   {reorderBusy ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1397,17 +1401,17 @@ export function TrackOrderView({
                       {bn ? 'যাচাইকৃত ক্রেতা রিভিউ দিন' : 'Share Your Verified Review'}
                     </span>
                   </h4>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-0.5">
                     {[1, 2, 3, 4, 5].map((star) => (
                       <button
                         key={star}
                         type="button"
                         onClick={() => setReviewRating(star)}
                         aria-label={`${star} stars`}
-                        className="p-1"
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-[#F2ECE1]"
                       >
                         <Star
-                          className={`h-4 w-4 ${
+                          className={`h-5 w-5 ${
                             star <= reviewRating
                               ? 'fill-[#B47B2B] text-[#B47B2B]'
                               : 'text-[#C5B8A5]'
@@ -1422,7 +1426,7 @@ export function TrackOrderView({
                     value={reviewName}
                     onChange={(e) => setReviewName(e.target.value)}
                     placeholder={bn ? 'আপনার নাম' : 'Your name'}
-                    className="w-full rounded-lg border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3 py-2 text-xs"
+                    className="w-full rounded-lg border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3 py-2 text-base sm:text-xs"
                   />
                   <textarea
                     rows={2}
@@ -1434,7 +1438,7 @@ export function TrackOrderView({
                         ? 'ঘিয়ের স্বাদ, দানা ও প্যাকেজিং কেমন লেগেছে লিখুন...'
                         : 'Tell us how the aroma, danadar texture, and jar arrived...'
                     }
-                    className="w-full rounded-lg border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3 py-2 text-xs"
+                    className="w-full rounded-lg border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3 py-2 text-base sm:text-xs"
                   />
                   {reviewStatus && (
                     <p
@@ -1448,7 +1452,7 @@ export function TrackOrderView({
                   <button
                     type="submit"
                     disabled={reviewBusy}
-                    className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-3.5 py-1.5 text-xs font-semibold text-[#FFFDF9] disabled:opacity-60"
+                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-4 py-2 text-xs font-semibold text-[#FFFDF9] disabled:opacity-60"
                   >
                     {reviewBusy && <Loader2 className="h-3 w-3 animate-spin" />}
                     <span>{bn ? 'রিভিউ জমা দিন' : 'Submit Verified Review'}</span>
@@ -1472,7 +1476,7 @@ export function TrackOrderView({
                         key={days}
                         type="button"
                         onClick={() => setReminderInterval(days)}
-                        className={`min-h-[36px] rounded-lg border font-mono text-xs font-semibold ${
+                        className={`min-h-[44px] rounded-lg border font-mono text-xs font-semibold ${
                           reminderInterval === days
                             ? 'border-[#B47B2B] bg-[#B47B2B] text-[#FFFDF9]'
                             : 'border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] text-[#1E1710]'
@@ -1508,7 +1512,7 @@ export function TrackOrderView({
                       type="button"
                       disabled={reminderBusy || !reminderConsent}
                       onClick={() => handleSaveRefillReminder('active')}
-                      className="min-h-[38px] rounded-lg bg-[#1E1710] px-3.5 py-1.5 text-xs font-semibold text-[#FAF7F2] disabled:opacity-50"
+                      className="min-h-[44px] rounded-lg bg-[#1E1710] px-4 py-2 text-xs font-semibold text-[#FAF7F2] disabled:opacity-50"
                     >
                       {bn ? 'রিমাইন্ডার চালু করুন' : 'Save Reminder'}
                     </button>
@@ -1517,7 +1521,7 @@ export function TrackOrderView({
                         type="button"
                         disabled={reminderBusy}
                         onClick={() => handleSaveRefillReminder('opted_out')}
-                        className="min-h-[38px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FFFDF9] px-3 py-1.5 text-xs font-medium text-[#635647]"
+                        className="min-h-[44px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FFFDF9] px-3.5 py-2 text-xs font-medium text-[#635647]"
                       >
                         {bn ? 'বন্ধ করুন' : 'Opt Out'}
                       </button>

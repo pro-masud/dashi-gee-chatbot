@@ -79,11 +79,29 @@ export async function POST(request: Request) {
     zoneHint,
     `${area} ${address}`
   );
-  if (!zoneResolved.valid || area.length < 2) {
+  if (!zoneResolved.valid) {
+    if (zoneResolved.needsClarification && zoneResolved.suggestedDistrict) {
+      return NextResponse.json(
+        {
+          error: `Did you mean ${zoneResolved.suggestedDistrict}? Please confirm your district before continuing.`,
+          code: 'district_typo_confirmation_required',
+          needsClarification: true,
+          suggestedDistrict: zoneResolved.suggestedDistrict,
+        },
+        { status: 400 }
+      );
+    }
     return NextResponse.json(
       {
-        error:
-          'Please select a valid Bangladesh district and enter your delivery area.',
+        error: 'Please select a valid Bangladesh district and enter your delivery area.',
+      },
+      { status: 400 }
+    );
+  }
+  if (area.length < 2) {
+    return NextResponse.json(
+      {
+        error: 'Please select a valid Bangladesh district and enter your delivery area.',
       },
       { status: 400 }
     );

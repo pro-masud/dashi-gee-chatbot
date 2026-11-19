@@ -4,7 +4,11 @@ import {
   manageServerOrder,
   verifyServerAdminToken,
 } from '../../../../src/lib/chatbot/firestoreRest';
-import { normalizeBangladeshPhone } from '../../../../src/lib/chatbot/orderToken';
+import {
+  consumeSignedOrderManageToken,
+  normalizeBangladeshPhone,
+  verifySignedOrderManageToken,
+} from '../../../../src/lib/chatbot/orderToken';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -31,6 +35,79 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json().catch(() => ({}));
+  const actionToken = String(body.actionToken || '').trim();
+  const sessionId = String(body.sessionId || '').trim();
+
+  // Item 5: Signed single-use HMAC action token path for chat Confirm-button cancel / address-edit.
+  if (actionToken) {
+    if (!sessionId) {
+      return NextResponse.json(
+        { ok: false, eligible: false, code: 'session_required', error: 'Session ID is required for confirmed chat actions.' },
+        { status: 400 }
+      );
+    }
+
+    const verified = verifySignedOrderManageToken({
+      token: actionToken,
+      sessionId,
+    });
+    if (!verified.ok) {
+      const status =
+        verified.reason === 'token_already_used'
+          ? 409
+          : verified.reason === 'session_mismatch'
+            ? 403
+            : verified.reason === 'order_secret_missing'
+              ? 503
+              : 400;
+      return NextResponse.json(
+        {
+          ok: false,
+          eligible: false,
+          code: verified.reason,
+          error:
+            verified.reason === 'token_already_used'
+              ? 'This confirmation token has already been used.'
+              : verified.reason === 'expired_token'
+                ? 'This confirmation card has expired. Please request a fresh proposal.'
+                : verified.reason === 'session_mismatch'
+                  ? 'Confirmation token does not match this chat session.'
+                  : 'Invalid or tampered order confirmation token.',
+        },
+        { status }
+      );
+    }
+
+    const consumed = consumeSignedOrderManageToken(verified.payload);
+    if (!consumed) {
+      return NextResponse.json(
+        { ok: false, eligible: false, code: 'token_already_used', error: 'Confirmation token already consumed.' },
+        { status: 409 }
+      );
+    }
+
+    const p = verified.payload;
+    const result = await manageServerOrder({
+      action: p.action,
+      orderNumber: p.orderNumber,
+      phone: p.phone,
+      district: p.district,
+      area: p.area,
+      address: p.address,
+      reason: p.reason,
+    });
+
+    const statusCode = result.ok
+      ? 200
+      : result.code === 'post_dispatch_locked'
+        ? 409
+        : result.code === 'order_not_found'
+          ? 404
+          : 400;
+
+    return NextResponse.json({ ...result, confirmedViaToken: true }, { status: statusCode });
+  }
+
   const action = String(body.action || '').trim();
   const orderNumber = String(body.orderNumber || '').trim().toUpperCase();
   const phone = normalizeBangladeshPhone(String(body.phone || ''));

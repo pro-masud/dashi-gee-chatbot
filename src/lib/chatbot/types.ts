@@ -33,6 +33,7 @@ export interface ApprovedClaimMeta {
   claim: string;
   evidenceNote?: string;
   expiresAt?: string;
+  status?: 'draft' | 'approved';
   updatedAt?: string;
   updatedBy?: string;
 }
@@ -724,6 +725,25 @@ export interface OrderSummaryCard {
   reviewStatus?: 'none' | 'manual_review' | 'approved' | 'rejected';
 }
 
+export interface OrderManageProposalCard {
+  action: 'cancel' | 'edit_address';
+  orderNumber: string;
+  phoneMasked: string;
+  currentStatus: string;
+  currentTotalBdt: number;
+  newTotalBdt?: number;
+  newDeliveryFeeBdt?: number;
+  proposedDistrict?: string;
+  proposedArea?: string;
+  proposedAddress?: string;
+  proposedDeliveryZone?: 'dhaka' | 'suburban' | 'nationwide' | 'remote';
+  reason?: string;
+  actionToken: string;
+  expiresAt: number;
+  status?: 'pending_confirm' | 'confirmed' | 'dismissed' | 'failed';
+  resultMessage?: string;
+}
+
 export interface ChatMessageItem {
   id: string;
   role: 'user' | 'assistant';
@@ -731,6 +751,7 @@ export interface ChatMessageItem {
   timestamp: string;
   actions?: ChatActionItem[];
   orderSummary?: OrderSummaryCard;
+  orderManageProposal?: OrderManageProposalCard;
   productCards?: ProductCardItem[];
   trackingCard?: TrackingCardData;
   suggestedReplies?: string[];
@@ -739,6 +760,7 @@ export interface ChatMessageItem {
   feedback?: 'up' | 'down';
   feedbackReason?: FeedbackReason;
   logId?: string;
+  ttsToken?: string;
   isError?: boolean;
   retryPrompt?: string;
   isAgentReply?: boolean;

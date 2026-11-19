@@ -21,6 +21,9 @@ export interface CourierBookingRequest {
   codAmountBdt: number;
   weightGrams: number;
   note?: string;
+  recipientCityId?: number;
+  recipientZoneId?: number;
+  deliveryAreaId?: number;
 }
 
 export interface CourierBookingResult {
@@ -218,6 +221,61 @@ export function normalizeCourierWebhookPayload(
   };
 }
 
+function resolvePathaoCityZoneIds(
+  req: CourierBookingRequest
+): { cityId: number; zoneId: number } | null {
+  if (
+    Number.isInteger(req.recipientCityId) &&
+    Number(req.recipientCityId) > 0 &&
+    Number.isInteger(req.recipientZoneId) &&
+    Number(req.recipientZoneId) > 0
+  ) {
+    return {
+      cityId: Number(req.recipientCityId),
+      zoneId: Number(req.recipientZoneId),
+    };
+  }
+  const rawMap = (process.env.PATHAO_CITY_ZONE_MAP_JSON || '').trim();
+  if (!rawMap) return null;
+  try {
+    const parsed = JSON.parse(rawMap) as Record<
+      string,
+      { cityId?: number; zoneId?: number; city_id?: number; zone_id?: number }
+    >;
+    const areaKey = `${req.recipientDistrict}:${req.recipientArea}`.toLowerCase().trim();
+    const districtKey = String(req.recipientDistrict || '').toLowerCase().trim();
+    const hit = parsed[areaKey] || parsed[districtKey];
+    const cityId = Number(hit?.cityId ?? hit?.city_id ?? 0);
+    const zoneId = Number(hit?.zoneId ?? hit?.zone_id ?? 0);
+    if (Number.isInteger(cityId) && cityId > 0 && Number.isInteger(zoneId) && zoneId > 0) {
+      return { cityId, zoneId };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function resolveRedxDeliveryAreaId(req: CourierBookingRequest): number | null {
+  if (Number.isInteger(req.deliveryAreaId) && Number(req.deliveryAreaId) > 0) {
+    return Number(req.deliveryAreaId);
+  }
+  const rawMap = (process.env.REDX_AREA_ID_MAP_JSON || '').trim();
+  if (!rawMap) return null;
+  try {
+    const parsed = JSON.parse(rawMap) as Record<string, number>;
+    const areaKey = `${req.recipientDistrict}:${req.recipientArea}`.toLowerCase().trim();
+    const districtKey = String(req.recipientDistrict || '').toLowerCase().trim();
+    const hit = Number(parsed[areaKey] ?? parsed[districtKey] ?? 0);
+    if (Number.isInteger(hit) && hit > 0) {
+      return hit;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 export async function bookCourierParcel(
   req: CourierBookingRequest
 ): Promise<CourierBookingResult> {
@@ -301,6 +359,17 @@ export async function bookCourierParcel(
           'Pathao Hermes credentials (PATHAO_CLIENT_ID, PATHAO_CLIENT_SECRET, PATHAO_USERNAME, PATHAO_PASSWORD, PATHAO_STORE_ID) are not configured.',
       };
     }
+    const pathaoLocation = resolvePathaoCityZoneIds(req);
+    if (!pathaoLocation) {
+      return {
+        ok: false,
+        partner: 'pathao',
+        code: 'pathao_location_ids_required',
+        error:
+          'Pathao requires explicit recipient_city and recipient_zone IDs (pass recipientCityId/recipientZoneId or configure PATHAO_CITY_ZONE_MAP_JSON).',
+      };
+    }
+
     const baseUrl =
       String(process.env.PATHAO_IS_LIVE || '').toLowerCase() === 'true'
         ? 'https://api-hermes.pathao.com'
@@ -348,6 +417,8 @@ export async function bookCourierParcel(
             0,
             220
           ),
+          recipient_city: pathaoLocation.cityId,
+          recipient_zone: pathaoLocation.zoneId,
           delivery_type: 48,
           item_type: 2,
           special_instruction: (req.note || 'Fragile glass jar — handle carefully').slice(0, 180),
@@ -409,6 +480,17 @@ export async function bookCourierParcel(
       ? 'https://openapi.redx.com.bd'
       : 'https://sandbox.redx.com.bd';
 
+  const redxAreaId = resolveRedxDeliveryAreaId(req);
+  if (!redxAreaId) {
+    return {
+      ok: false,
+      partner: 'redx',
+      code: 'redx_area_id_required',
+      error:
+        'RedX requires a verified delivery_area_id (pass deliveryAreaId or configure REDX_AREA_ID_MAP_JSON); refusing hardcoded fallback ID.',
+    };
+  }
+
   try {
     const res = await fetch(`${redxBase}/v1.0.0-beta/parcel`, {
       method: 'POST',
@@ -420,7 +502,7 @@ export async function bookCourierParcel(
         customer_name: req.recipientName.slice(0, 100),
         customer_phone: cleanPhone,
         delivery_area: req.recipientArea || req.recipientDistrict || 'Dhaka',
-        delivery_area_id: 1,
+        delivery_area_id: redxAreaId,
         customer_address: `${req.recipientAddress}, ${req.recipientArea}, ${req.recipientDistrict}`.slice(
           0,
           250

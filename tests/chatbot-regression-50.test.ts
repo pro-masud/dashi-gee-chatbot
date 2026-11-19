@@ -14,6 +14,7 @@ import {
   setRateLimitMemoryModeForTests,
 } from '../src/lib/chatbot/firestoreRest';
 import {
+  resetUsedOrderManageTokensForTests,
   resolveConfiguredDistrictAndZone,
   tryCreateSignedOrderToken,
 } from '../src/lib/chatbot/orderToken';
@@ -712,14 +713,15 @@ describe('T0.10 Bilingual Chatbot Regression Suite (62 Curated & Order-Safety Sc
     }
   });
 
-  it('Case #60 (Zone Typo): Misspelled district resolves safely and unknown district is rejected rather than silently priced as Dhaka', async () => {
+  it('Case #60 (Zone Typo Clarification): Misspelled district like Chitagong is NOT silently fixed or priced; bot asks "Did you mean Chattogram?"', async () => {
     const typoCtg = resolveConfiguredDistrictAndZone('Chitagong');
-    assert.equal(typoCtg.valid, true);
-    assert.equal(typoCtg.canonicalDistrict, 'Chattogram');
-    assert.equal(typoCtg.deliveryZone, 'nationwide');
+    assert.equal(typoCtg.valid, false);
+    assert.equal(typoCtg.needsClarification, true);
+    assert.equal(typoCtg.suggestedDistrict, 'Chattogram');
 
     const unknownZone = resolveConfiguredDistrictAndZone('ZzzzzUnknownCity');
     assert.equal(unknownZone.valid, false);
+    assert.equal(unknownZone.needsClarification, false);
 
     const facts = buildStoreFactsSnapshot({
       settings: DEFAULT_STORE_SETTINGS,
@@ -742,6 +744,36 @@ describe('T0.10 Bilingual Chatbot Regression Suite (62 Curated & Order-Safety Sc
       detectedIntent: 'order',
       verifiedMonetaryAmounts: getSeededVerifiedMonetaryAmounts(facts),
     };
+
+    const deliveryTypoRes = await executeChatbotTool(
+      'quote_delivery',
+      { district: 'Chitagong' },
+      ctx
+    );
+    assert.equal(deliveryTypoRes.valid, false);
+    assert.equal(deliveryTypoRes.needsClarification, true);
+    assert.equal(deliveryTypoRes.suggestedDistrict, 'Chattogram');
+    assert.match(String(deliveryTypoRes.clarificationQuestionEn || deliveryTypoRes.message || ''), /Did you mean Chattogram\?/i);
+
+    const summaryTypoRes = await executeChatbotTool(
+      'prepare_order_summary',
+      {
+        weight: '500g',
+        quantity: 1,
+        customer_name: 'Sajib Mia',
+        phone: '01711223399',
+        district: 'Chitagong',
+        area: 'Agrabad',
+        address: 'House 12 Main Road',
+        payment_method: 'cod',
+      },
+      ctx
+    );
+    assert.equal(summaryTypoRes.ready, false);
+    assert.equal(summaryTypoRes.needsClarification, true);
+    assert.equal(summaryTypoRes.suggestedDistrict, 'Chattogram');
+    assert.match(String(summaryTypoRes.message || ''), /Did you mean Chattogram\?/i);
+
     const badDistrictRes = await executeChatbotTool(
       'prepare_order_summary',
       {
@@ -757,5 +789,324 @@ describe('T0.10 Bilingual Chatbot Regression Suite (62 Curated & Order-Safety Sc
       ctx
     );
     assert.equal(badDistrictRes.ready, false);
+
+    // Fallback chat route also asks clarification instead of silently fixing Chitagong
+    delete process.env.GEMINI_API_KEY;
+    const chatRes = await callChat({
+      sessionId: 'reg_zone_typo_chat_60',
+      uiLang: 'en',
+      messages: [{ role: 'user', text: 'What is the delivery charge to Chitagong?' }],
+      ip: '103.50.10.60',
+    });
+    assert.equal(chatRes.status, 200);
+    assert.match(chatRes.text, /Did you mean \*?\*?Chattogram\*?\*?\?/i);
+  });
+
+  it('Case #61 (Chat Cancel Two-Step Confirm Card): request_cancel proposes a signed single-use token without mutating; Confirm executes and blocks replay/session-mismatch', async () => {
+    setOrderStorageMemoryModeForTests(true);
+    resetUsedOrderManageTokensForTests();
+    const prevSecret = process.env.ORDER_TOKEN_SECRET;
+    process.env.ORDER_TOKEN_SECRET = 'case61_order_manage_token_secret_32chars';
+    try {
+      const mem = getOrderStorageMemoryStateForTests()!;
+      mem.orders.set('DG-61001', {
+        orderNumber: 'DG-61001',
+        customerName: 'Nusrat Jahan',
+        phone: '01711610001',
+        district: 'Dhaka',
+        area: 'Uttara',
+        address: 'Sector 7 Road 12 House 4',
+        note: '',
+        deliveryZone: 'dhaka',
+        weight: '500g',
+        qty: 1,
+        qty250g: 0,
+        qty500g: 1,
+        qty1kg: 0,
+        itemsSummary: '500g × 1',
+        unitPriceBdt: 1290,
+        subtotalBdt: 1290,
+        deliveryFeeBdt: 80,
+        discountBdt: 0,
+        totalBdt: 1370,
+        couponCode: '',
+        paymentMethod: 'cod',
+        paymentStatus: 'cod_due',
+        txnId: '',
+        paymentProofData: '',
+        status: 'pending',
+        estimatedDelivery: 'Within 24 hours',
+        webhookStatus: 'ok',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      mem.tracking.set('DG-61001_01711610001', {
+        orderNumber: 'DG-61001',
+        weight: '500g',
+        qty: 1,
+        itemsSummary: '500g × 1',
+        totalBdt: 1370,
+        status: 'pending',
+        paymentMethod: 'cod',
+        paymentStatus: 'cod_due',
+        district: 'Dhaka',
+        estimatedDelivery: 'Within 24 hours',
+        updatedAt: Date.now(),
+      });
+
+      const facts = buildStoreFactsSnapshot({
+        settings: DEFAULT_STORE_SETTINGS,
+        batch: DEFAULT_ACTIVE_BATCH,
+        config: DEFAULT_CHATBOT_CONFIG,
+      });
+      const ctx: ToolRuntimeContext = {
+        sessionId: 'sess_cancel_confirm_61',
+        replyLang: 'en',
+        settings: DEFAULT_STORE_SETTINGS,
+        config: DEFAULT_CHATBOT_CONFIG,
+        batch: DEFAULT_ACTIVE_BATCH,
+        facts,
+        faqs: [],
+        kbDocs: [],
+        isTestPlayground: false,
+        collectedActions: [],
+        orderState: 'collecting_details',
+        handoverTriggered: false,
+        detectedIntent: 'order_manage',
+        verifiedMonetaryAmounts: getSeededVerifiedMonetaryAmounts(facts),
+      };
+
+      // Step 1: Tool returns confirmation proposal ONLY — order stays pending!
+      const proposalRes = await executeChatbotTool(
+        'request_cancel',
+        {
+          order_id: 'DG-61001',
+          phone: '01711610001',
+          reason: 'Ordered wrong jar size',
+        },
+        ctx
+      );
+      assert.equal(proposalRes.ok, true);
+      assert.equal(proposalRes.requiresConfirmation, true);
+      assert.equal(mem.orders.get('DG-61001')?.status, 'pending');
+      assert.ok(ctx.collectedOrderManageProposal);
+      const token = ctx.collectedOrderManageProposal!.actionToken;
+      assert.ok(token && token.includes('.'));
+
+      // Step 2: Wrong sessionId rejected (403)
+      const wrongSession = await orderManagePost(
+        new Request('http://localhost:3000/api/orders/manage', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-requested-with': 'DeshiGeeStorefront',
+          },
+          body: JSON.stringify({
+            actionToken: token,
+            sessionId: 'attacker_other_session',
+          }),
+        })
+      );
+      assert.equal(wrongSession.status, 403);
+      assert.equal(mem.orders.get('DG-61001')?.status, 'pending');
+
+      // Step 3: Tampered token rejected (400)
+      const tampered = await orderManagePost(
+        new Request('http://localhost:3000/api/orders/manage', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-requested-with': 'DeshiGeeStorefront',
+          },
+          body: JSON.stringify({
+            actionToken: `${token}tampered`,
+            sessionId: 'sess_cancel_confirm_61',
+          }),
+        })
+      );
+      assert.equal(tampered.status, 400);
+      assert.equal(mem.orders.get('DG-61001')?.status, 'pending');
+
+      // Step 4: Valid Confirm click cancels order
+      const confirmRes = await orderManagePost(
+        new Request('http://localhost:3000/api/orders/manage', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-requested-with': 'DeshiGeeStorefront',
+          },
+          body: JSON.stringify({
+            actionToken: token,
+            sessionId: 'sess_cancel_confirm_61',
+          }),
+        })
+      );
+      assert.equal(confirmRes.status, 200);
+      assert.equal(mem.orders.get('DG-61001')?.status, 'cancelled');
+
+      // Step 5: Replay of single-use token rejected (409)
+      const replayRes = await orderManagePost(
+        new Request('http://localhost:3000/api/orders/manage', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-requested-with': 'DeshiGeeStorefront',
+          },
+          body: JSON.stringify({
+            actionToken: token,
+            sessionId: 'sess_cancel_confirm_61',
+          }),
+        })
+      );
+      assert.equal(replayRes.status, 409);
+    } finally {
+      setOrderStorageMemoryModeForTests(false);
+      resetUsedOrderManageTokensForTests();
+      if (prevSecret === undefined) delete process.env.ORDER_TOKEN_SECRET;
+      else process.env.ORDER_TOKEN_SECRET = prevSecret;
+    }
+  });
+
+  it('Case #62 (Chat Address-Edit Two-Step Confirm Card): request_address_change asks typo clarification on Chitagong, proposes signed token on valid district, and mutates only after Confirm', async () => {
+    setOrderStorageMemoryModeForTests(true);
+    resetUsedOrderManageTokensForTests();
+    const prevSecret = process.env.ORDER_TOKEN_SECRET;
+    process.env.ORDER_TOKEN_SECRET = 'case62_order_manage_token_secret_32chars';
+    try {
+      const mem = getOrderStorageMemoryStateForTests()!;
+      mem.orders.set('DG-62001', {
+        orderNumber: 'DG-62001',
+        customerName: 'Mahmud Hasan',
+        phone: '01711620001',
+        district: 'Dhaka',
+        area: 'Dhanmondi',
+        address: 'House 5 Road 2 Dhanmondi',
+        note: '',
+        deliveryZone: 'dhaka',
+        weight: '500g',
+        qty: 1,
+        qty250g: 0,
+        qty500g: 1,
+        qty1kg: 0,
+        itemsSummary: '500g × 1',
+        unitPriceBdt: 1290,
+        subtotalBdt: 1290,
+        deliveryFeeBdt: 80,
+        discountBdt: 0,
+        totalBdt: 1370,
+        couponCode: '',
+        paymentMethod: 'cod',
+        paymentStatus: 'cod_due',
+        txnId: '',
+        paymentProofData: '',
+        status: 'confirmed',
+        estimatedDelivery: 'Within 24 hours',
+        webhookStatus: 'ok',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      mem.tracking.set('DG-62001_01711620001', {
+        orderNumber: 'DG-62001',
+        weight: '500g',
+        qty: 1,
+        itemsSummary: '500g × 1',
+        totalBdt: 1370,
+        status: 'confirmed',
+        paymentMethod: 'cod',
+        paymentStatus: 'cod_due',
+        district: 'Dhaka',
+        estimatedDelivery: 'Within 24 hours',
+        updatedAt: Date.now(),
+      });
+
+      const facts = buildStoreFactsSnapshot({
+        settings: DEFAULT_STORE_SETTINGS,
+        batch: DEFAULT_ACTIVE_BATCH,
+        config: DEFAULT_CHATBOT_CONFIG,
+      });
+      const ctx: ToolRuntimeContext = {
+        sessionId: 'sess_addr_confirm_62',
+        replyLang: 'en',
+        settings: DEFAULT_STORE_SETTINGS,
+        config: DEFAULT_CHATBOT_CONFIG,
+        batch: DEFAULT_ACTIVE_BATCH,
+        facts,
+        faqs: [],
+        kbDocs: [],
+        isTestPlayground: false,
+        collectedActions: [],
+        orderState: 'collecting_details',
+        handoverTriggered: false,
+        detectedIntent: 'order_manage',
+        verifiedMonetaryAmounts: getSeededVerifiedMonetaryAmounts(facts),
+      };
+
+      // Typo in new district must ask clarification, never silently mutate or propose
+      const typoAddrRes = await executeChatbotTool(
+        'request_address_change',
+        {
+          order_id: 'DG-62001',
+          phone: '01711620001',
+          district: 'Chitagong',
+          area: 'Agrabad',
+          address: 'Commercial Area Road 9 Agrabad',
+        },
+        ctx
+      );
+      assert.equal(typoAddrRes.ok, false);
+      assert.equal(typoAddrRes.needsClarification, true);
+      assert.equal(typoAddrRes.suggestedDistrict, 'Chattogram');
+      assert.equal(mem.orders.get('DG-62001')?.district, 'Dhaka');
+
+      // Exact canonical district produces two-step proposal without mutating DB yet
+      const proposalRes = await executeChatbotTool(
+        'request_address_change',
+        {
+          order_id: 'DG-62001',
+          phone: '01711620001',
+          district: 'Chattogram',
+          area: 'Agrabad',
+          address: 'Commercial Area Road 9 Agrabad',
+        },
+        ctx
+      );
+      assert.equal(proposalRes.ok, true);
+      assert.equal(proposalRes.requiresConfirmation, true);
+      assert.equal(mem.orders.get('DG-62001')?.district, 'Dhaka');
+      assert.ok(ctx.collectedOrderManageProposal);
+      assert.equal(ctx.collectedOrderManageProposal!.action, 'edit_address');
+      assert.equal(ctx.collectedOrderManageProposal!.proposedDistrict, 'Chattogram');
+      assert.equal(
+        ctx.collectedOrderManageProposal!.newDeliveryFeeBdt,
+        DEFAULT_STORE_SETTINGS.outsideDhakaFee
+      );
+
+      // Customer clicks Confirm -> /api/orders/manage verifies signed token and applies update
+      const confirmRes = await orderManagePost(
+        new Request('http://localhost:3000/api/orders/manage', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-requested-with': 'DeshiGeeStorefront',
+          },
+          body: JSON.stringify({
+            actionToken: ctx.collectedOrderManageProposal!.actionToken,
+            sessionId: 'sess_addr_confirm_62',
+          }),
+        })
+      );
+      assert.equal(confirmRes.status, 200);
+      assert.equal(mem.orders.get('DG-62001')?.district, 'Chattogram');
+      assert.equal(mem.orders.get('DG-62001')?.area, 'Agrabad');
+      assert.equal(
+        mem.orders.get('DG-62001')?.deliveryFeeBdt,
+        DEFAULT_STORE_SETTINGS.outsideDhakaFee
+      );
+    } finally {
+      setOrderStorageMemoryModeForTests(false);
+      resetUsedOrderManageTokensForTests();
+      if (prevSecret === undefined) delete process.env.ORDER_TOKEN_SECRET;
+      else process.env.ORDER_TOKEN_SECRET = prevSecret;
+    }
   });
 });

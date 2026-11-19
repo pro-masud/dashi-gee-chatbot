@@ -38,6 +38,13 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
+export function sanitizeGatewayDetail(raw: string): string {
+  return String(raw || '')
+    .replace(/https?:\/\/[^\s"'<>]+/gi, '[redacted-url]')
+    .replace(/(api[_-]?key|token|secret|password)\s*[=:]\s*[^\s&,"']+/gi, '$1=[redacted]')
+    .slice(0, 140);
+}
+
 export async function sendDirectSms(params: {
   toPhone: string;
   message: string;
@@ -61,14 +68,23 @@ export async function sendDirectSms(params: {
   const readiness = getMessagingGatewayReadiness();
 
   if (readiness.bulksmsbd) {
+    // S0-12: Send BulkSMSBD credentials in POST form body (never in GET query URL) and never log URLs/keys.
     const recipient = `88${cleanPhone}`;
-    const url = `https://bulksmsbd.net/api/smsapi?api_key=${encodeURIComponent(
-      (process.env.BULKSMSBD_API_KEY || '').trim()
-    )}&type=text&number=${encodeURIComponent(recipient)}&senderid=${encodeURIComponent(
-      (process.env.BULKSMSBD_SENDER_ID || '').trim()
-    )}&message=${encodeURIComponent(text)}`;
+    const formBody = new URLSearchParams({
+      api_key: (process.env.BULKSMSBD_API_KEY || '').trim(),
+      type: 'text',
+      number: recipient,
+      senderid: (process.env.BULKSMSBD_SENDER_ID || '').trim(),
+      message: text,
+    });
     try {
-      const res = await fetch(url, { method: 'GET' });
+      const res = await fetch('https://bulksmsbd.net/api/smsapi', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: formBody.toString(),
+      });
       const bodyText = await res.text().catch(() => '');
       const ok = res.ok && !/error|invalid|100[1-9]|101\d/i.test(bodyText);
       return {
@@ -77,7 +93,7 @@ export async function sendDirectSms(params: {
         status: ok ? 'sent' : 'failed',
         detail: ok
           ? `BulkSMSBD delivered to ${recipient}`
-          : `BulkSMSBD HTTP ${res.status}: ${bodyText.slice(0, 120)}`,
+          : `BulkSMSBD HTTP ${res.status}: ${sanitizeGatewayDetail(bodyText)}`,
         timestamp,
       };
     } catch (err) {
@@ -85,7 +101,9 @@ export async function sendDirectSms(params: {
         orderNumber,
         channel: 'bulksmsbd',
         status: 'failed',
-        detail: err instanceof Error ? err.message : 'BulkSMSBD network error',
+        detail: sanitizeGatewayDetail(
+          err instanceof Error ? err.message : 'BulkSMSBD network error'
+        ),
         timestamp,
       };
     }

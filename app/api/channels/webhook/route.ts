@@ -8,6 +8,7 @@ import {
   verifyMetaWebhookSignature,
 } from '../../../../src/lib/chatbot/channelEngine';
 import {
+  checkAndIncrementFirestoreRateLimit,
   createServerChatLog,
   fetchServerBatchRecord,
   fetchServerChatbotConfig,
@@ -17,10 +18,16 @@ import {
   recordOrCheckWebhookEventIdempotency,
   upsertMarketingConsent,
 } from '../../../../src/lib/chatbot/firestoreRest';
+import { classifyDomainRequest } from '../../../../src/lib/chatbot/domain-guard';
 import { generateLiveFallbackReply } from '../../../../src/lib/chatbot/liveFallbackEngine';
 import { isValidBangladeshPhone, normalizeBangladeshPhone } from '../../../../src/lib/chatbot/orderToken';
+import { hashIdentifier } from '../../../../src/lib/chatbot/rateLimit';
 import { validateChatbotResponse } from '../../../../src/lib/chatbot/responseValidator';
-import { detectLanguageAndSignals } from '../../../../src/lib/chatbot/security';
+import {
+  detectLanguageAndSignals,
+  detectPromptInjection,
+  detectSensitiveSecret,
+} from '../../../../src/lib/chatbot/security';
 import {
   applySlotsToOrderDraft,
   buildInitialSessionDoc,
@@ -282,52 +289,113 @@ export async function POST(request: Request) {
       continue;
     }
 
-    const extracted = extractOrderSlotsFromText(ev.text, sessionState.draft);
-    const hasOrderCue =
-      Boolean(sessionState.draft) ||
-      Boolean(extracted.phone || extracted.address || extracted.weight || extracted.qty);
-    const nextDraft = hasOrderCue
-      ? applySlotsToOrderDraft({
-          sessionId,
-          currentDraft: sessionState.draft,
-          extracted,
-          settings,
-        }).draft
-      : sessionState.draft;
+    // S0-11: Per-channel / per-sender Firestore rate limit before processing.
+    const senderRateKey = `ch_sender_${ev.channel}_${hashIdentifier(`${ev.channel}:${ev.senderId}`)}`;
+    const senderLimit = await checkAndIncrementFirestoreRateLimit(senderRateKey, 15, 60_000);
+    if (!senderLimit.allowed) {
+      results.push({
+        eventId: ev.eventId,
+        sessionId,
+        channel: ev.channel,
+        status: 'rate_limited',
+        retryAfterSec: senderLimit.retryAfterSec,
+      });
+      continue;
+    }
 
-    const fallback = generateLiveFallbackReply({
-      userMessage: ev.text,
-      replyLang: langRes.replyLang,
-      settings,
-      batch,
-      config,
-      matchedFaqs: faqs,
-      activeDraft: nextDraft,
-      facts,
-    });
+    // S0-11: Shared pre-generation guards (credential/PIN/OTP shield, prompt injection, domain lock).
+    let preGuardBlocked = false;
+    let preGuardCategory = '';
+    let preGuardReply = '';
 
-    const verifiedAmounts = getSeededVerifiedMonetaryAmounts(facts);
-    for (const amt of fallback.extraVerifiedAmounts || []) {
-      if (Number.isFinite(amt) && amt > 0) {
-        verifiedAmounts.add(Math.round(amt));
+    if (detectSensitiveSecret(ev.text)) {
+      preGuardBlocked = true;
+      preGuardCategory = 'sensitive_secret_shield';
+      preGuardReply =
+        langRes.replyLang === 'bn'
+          ? 'নিরাপত্তার স্বার্থে অনুগ্রহ করে কখনোই আপনার বিকাশ/নগদ পিন, OTP, কার্ড নম্বর বা পাসওয়ার্ড শেয়ার করবেন না। আমাদের সহায়তার জন্য শুধু অর্ডার নম্বর বা সাধারণ প্রশ্ন লিখুন।'
+          : 'For your safety, please never share bKash/Nagad PINs, OTPs, CVV, or passwords here. Deshi Gee never asks for banking credentials.';
+    } else if (detectPromptInjection(ev.text)) {
+      preGuardBlocked = true;
+      preGuardCategory = 'prompt_injection_blocked';
+      preGuardReply =
+        langRes.replyLang === 'bn'
+          ? 'আমি শুধুমাত্র Deshi Gee-এর ঘি, দাম, অর্ডার ও ডেলিভারি বিষয়ে সাহায্য করতে পারি। কীভাবে সহযোগিতা করতে পারি?'
+          : 'I can only help with Deshi Gee cow ghee, pricing, orders, and delivery questions. How may I assist you?';
+    } else {
+      const domainCheck = classifyDomainRequest(ev.text, Boolean(sessionState.draft));
+      if (domainCheck.category === 'disallowed_off_topic') {
+        preGuardBlocked = true;
+        preGuardCategory = 'off_topic_blocked';
+        preGuardReply =
+          langRes.replyLang === 'bn'
+            ? 'দুঃখিত, আমি কেবল Deshi Gee পাবনা বিলোনা গাওয়া ঘি, দাম, সাইজ, অর্ডার ও ডেলিভারি বিষয়ে সহায়তা করতে পারি।'
+            : 'Sorry, I can only assist with Deshi Gee Pabna Bilona Cow Ghee, pricing, jar sizes, orders, and delivery.';
       }
     }
 
-    const guard = validateChatbotResponse({
-      replyText: fallback.replyText,
-      replyLang: langRes.replyLang,
-      settings,
-      config,
-      verifiedMonetaryAmounts: Array.from(verifiedAmounts),
-      hasPreparedOrderSummary: false,
-      customerPhoneInTurn: verifiedPhone || sessionState.session?.linkedPhone || undefined,
-      isMixedQuestion: false,
-    });
-    const safeReply = guard.passed
-      ? fallback.replyText
-      : langRes.replyLang === 'bn'
-        ? config.fallbackMessageBn
-        : config.fallbackMessageEn;
+    let nextDraft = sessionState.draft;
+    let fallback: ReturnType<typeof generateLiveFallbackReply>;
+    let safeReply: string;
+
+    if (preGuardBlocked) {
+      fallback = {
+        replyText: preGuardReply,
+        intent: 'unknown',
+        actions: [],
+        noVerifiedInfo: false,
+        factsVersion: facts.factsVersion,
+        extraVerifiedAmounts: [],
+      };
+      safeReply = preGuardReply;
+    } else {
+      const extracted = extractOrderSlotsFromText(ev.text, sessionState.draft);
+      const hasOrderCue =
+        Boolean(sessionState.draft) ||
+        Boolean(extracted.phone || extracted.address || extracted.weight || extracted.qty);
+      nextDraft = hasOrderCue
+        ? applySlotsToOrderDraft({
+            sessionId,
+            currentDraft: sessionState.draft,
+            extracted,
+            settings,
+          }).draft
+        : sessionState.draft;
+
+      fallback = generateLiveFallbackReply({
+        userMessage: ev.text,
+        replyLang: langRes.replyLang,
+        settings,
+        batch,
+        config,
+        matchedFaqs: faqs,
+        activeDraft: nextDraft,
+        facts,
+      });
+
+      const verifiedAmounts = getSeededVerifiedMonetaryAmounts(facts);
+      for (const amt of fallback.extraVerifiedAmounts || []) {
+        if (Number.isFinite(amt) && amt > 0) {
+          verifiedAmounts.add(Math.round(amt));
+        }
+      }
+
+      const guard = validateChatbotResponse({
+        replyText: fallback.replyText,
+        replyLang: langRes.replyLang,
+        settings,
+        config,
+        verifiedMonetaryAmounts: Array.from(verifiedAmounts),
+        hasPreparedOrderSummary: false,
+        customerPhoneInTurn: verifiedPhone || sessionState.session?.linkedPhone || undefined,
+        isMixedQuestion: false,
+      });
+      safeReply = guard.passed
+        ? fallback.replyText
+        : langRes.replyLang === 'bn'
+          ? config.fallbackMessageBn
+          : config.fallbackMessageEn;
+    }
 
     const sessionDoc = buildInitialSessionDoc(sessionId, sessionState.session, {
       replyLang: langRes.replyLang,
@@ -360,8 +428,9 @@ export async function POST(request: Request) {
         isTestPlayground: false,
         path: 'fallback',
         model: `channel-${ev.channel}-engine`,
+        guardCategory: preGuardCategory || undefined,
         factsVersion: fallback.factsVersion,
-        confidence: 0.9,
+        confidence: preGuardBlocked ? 1 : 0.9,
       }),
     ]);
 
@@ -388,6 +457,7 @@ export async function POST(request: Request) {
       sessionId,
       channel: ev.channel,
       intent: fallback.intent,
+      guardCategory: preGuardCategory || undefined,
       replyText: safeReply,
       verifiedPhone: verifiedPhone || sessionDoc.linkedPhone || undefined,
       deliveryStatus: delivery.status,

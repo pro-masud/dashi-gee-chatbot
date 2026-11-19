@@ -8,11 +8,12 @@
     "dev": "node scripts/next-cli.mjs dev",
     "prebuild": "[ -d node_modules/.bin ] || npm install",
     "build": "NODE_ENV=production next build",
-    "start": "node scripts/next-cli.mjs start",
+    "start": "next start -H 0.0.0.0",
     "prelint": "[ -d node_modules/.bin ] || npm install",
     "lint": "tsc --noEmit",
     "test": "NODE_ENV=test tsx --test tests/*.test.ts",
-    "test:chatbot": "NODE_ENV=test tsx --test tests/chatbot-regression-50.test.ts"
+    "test:chatbot": "NODE_ENV=test tsx --test tests/chatbot-regression-50.test.ts",
+    "test:rules:s013": "NODE_ENV=test tsx --test tests/emulator/firestore-rules-hotfix-s013.test.ts"
   },
   "dependencies": {
     "@firebase/eslint-plugin-security-rules": "^0.0.2",

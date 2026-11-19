@@ -10,6 +10,7 @@ import {
   validateGeminiModelCapability,
 } from '../src/lib/gemini/client';
 import {
+  setAdminAuthOverrideForTests,
   setChatLogObserverForTests,
   setCostLedgerOverrideForTests,
   setFirestoreHealthOverrideForTests,
@@ -94,6 +95,7 @@ describe('T0.1 Gemini runtime configuration & health diagnostics', () => {
     restoreEnv();
     clearGeminiHealthCacheForTests();
     setGeminiClientFactoryForTests(null);
+    setAdminAuthOverrideForTests(null);
     setChatLogObserverForTests(null);
     setRateLimitMemoryModeForTests(false);
     setSessionDraftMemoryModeForTests(false);
@@ -137,13 +139,37 @@ describe('T0.1 Gemini runtime configuration & health diagnostics', () => {
     assert.equal(deprecated15.errorCode, 'gemini_model_deprecated');
   });
 
-  it('GET /api/health reports fallback status without leaking secrets when GEMINI_API_KEY and ORDER_TOKEN_SECRET are missing', async () => {
+  it('GET /api/health returns minimal redacted liveness payload for unauthenticated callers and ignores ?refresh=1', async () => {
     delete process.env.GEMINI_API_KEY;
     delete process.env.ORDER_TOKEN_SECRET;
     process.env.GEMINI_MODEL = 'gemini-2.5-flash';
     process.env.GEMINI_FALLBACK_MODEL = 'gemini-2.0-flash';
 
-    const res = await healthGet(new Request('http://localhost:3000/api/health'));
+    const res = await healthGet(new Request('http://localhost:3000/api/health?refresh=1'));
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as Record<string, any>;
+
+    assert.equal(body.ok, true);
+    assert.equal(body.status, 'degraded');
+    assert.equal(typeof body.timestamp, 'string');
+    assert.equal('checks' in body, false);
+    assert.equal('activePath' in body, false);
+    assert.equal('warnings' in body, false);
+    assert.equal('errorCode' in body, false);
+  });
+
+  it('GET /api/health reports fallback diagnostics to authenticated admins without leaking secrets when GEMINI_API_KEY is missing', async () => {
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.ORDER_TOKEN_SECRET;
+    process.env.GEMINI_MODEL = 'gemini-2.5-flash';
+    process.env.GEMINI_FALLBACK_MODEL = 'gemini-2.0-flash';
+    setAdminAuthOverrideForTests(async () => ({ ok: true, email: 'kinboni.bd@gmail.com', uid: 'admin_health_1' }));
+
+    const res = await healthGet(
+      new Request('http://localhost:3000/api/health', {
+        headers: { Authorization: 'Bearer test-admin-token' },
+      })
+    );
     assert.equal(res.status, 200);
     const body = (await res.json()) as Record<string, any>;
 
@@ -160,13 +186,14 @@ describe('T0.1 Gemini runtime configuration & health diagnostics', () => {
     assert.equal(body.checks.sdk.functionDeclarationsCount, 26);
   });
 
-  it('GET /api/health reports healthy Gemini reachability and never leaks key/secret values', async () => {
+  it('GET /api/health reports healthy Gemini reachability to authenticated admins and never leaks key/secret values', async () => {
     const fakeKey = 'AIzaSyTestSecretKeyValue1234567890';
     const fakeOrderSecret = 'super-secret-order-token-signing-key-32chars';
     process.env.GEMINI_API_KEY = fakeKey;
     process.env.ORDER_TOKEN_SECRET = fakeOrderSecret;
     process.env.GEMINI_MODEL = 'gemini-2.5-flash';
     process.env.GEMINI_FALLBACK_MODEL = 'gemini-2.5-flash-lite';
+    setAdminAuthOverrideForTests(async () => ({ ok: true, email: 'kinboni.bd@gmail.com', uid: 'admin_health_2' }));
 
     setGeminiClientFactoryForTests(() => ({
       models: {
@@ -177,7 +204,11 @@ describe('T0.1 Gemini runtime configuration & health diagnostics', () => {
       },
     }) as unknown as GoogleGenAI);
 
-    const res = await healthGet(new Request('http://localhost:3000/api/health?refresh=1'));
+    const res = await healthGet(
+      new Request('http://localhost:3000/api/health?refresh=1', {
+        headers: { Authorization: 'Bearer test-admin-token' },
+      })
+    );
     assert.equal(res.status, 200);
     const rawJson = await res.text();
     const body = JSON.parse(rawJson) as Record<string, any>;
@@ -194,7 +225,7 @@ describe('T0.1 Gemini runtime configuration & health diagnostics', () => {
     assert.equal(redactPotentialSecrets(`err with ${fakeKey}`).includes(fakeKey), false);
   });
 
-  it('GET /api/health fails diagnostically with HTTP 503 when no supported model is configured', async () => {
+  it('GET /api/health fails diagnostically with HTTP 503 when no supported model is configured (redacted for public, full for admin)', async () => {
     process.env.GEMINI_API_KEY = 'AIzaSyTestSecretKeyValue1234567890';
     process.env.GEMINI_MODEL = 'gemini-1.5-flash';
     process.env.GEMINI_FALLBACK_MODEL = 'gemini-2.0-flash';
@@ -207,14 +238,50 @@ describe('T0.1 Gemini runtime configuration & health diagnostics', () => {
       },
     }) as unknown as GoogleGenAI);
 
-    const res = await healthGet(new Request('http://localhost:3000/api/health?refresh=1'));
-    assert.equal(res.status, 503);
-    const body = (await res.json()) as Record<string, any>;
+    // Unauthenticated still gets HTTP 503 with redacted body
+    const pubRes = await healthGet(new Request('http://localhost:3000/api/health'));
+    assert.equal(pubRes.status, 503);
+    const pubBody = (await pubRes.json()) as Record<string, any>;
+    assert.equal(pubBody.ok, false);
+    assert.equal(pubBody.status, 'unhealthy');
+    assert.equal('errorCode' in pubBody, false);
+
+    // Admin gets full diagnostic breakdown
+    setAdminAuthOverrideForTests(async () => ({ ok: true, email: 'kinboni.bd@gmail.com', uid: 'admin_health_3' }));
+    const adminRes = await healthGet(
+      new Request('http://localhost:3000/api/health?refresh=1', {
+        headers: { Authorization: 'Bearer test-admin-token' },
+      })
+    );
+    assert.equal(adminRes.status, 503);
+    const body = (await adminRes.json()) as Record<string, any>;
 
     assert.equal(body.ok, false);
     assert.equal(body.status, 'unhealthy');
     assert.equal(body.supportedModelConfigured, false);
     assert.equal(body.errorCode, 'no_supported_model_configured');
+  });
+
+  it('GET /api/health?refresh=1 rate-limits excessive admin refresh probes with HTTP 429', async () => {
+    delete process.env.GEMINI_API_KEY;
+    process.env.GEMINI_MODEL = 'gemini-2.5-flash';
+    const fixedUid = `admin_rl_${Date.now()}`;
+    setAdminAuthOverrideForTests(async () => ({
+      ok: true,
+      email: 'kinboni.bd@gmail.com',
+      uid: fixedUid,
+    }));
+
+    let lastStatus = 200;
+    for (let i = 0; i < 7; i++) {
+      const r = await healthGet(
+        new Request('http://localhost:3000/api/health?refresh=1', {
+          headers: { Authorization: 'Bearer test-admin-token' },
+        })
+      );
+      lastStatus = r.status;
+    }
+    assert.equal(lastStatus, 429);
   });
 
   it('POST /api/chat logs path=fallback and errorCode=gemini_api_key_missing when key is unset', async () => {

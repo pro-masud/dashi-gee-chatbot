@@ -31,6 +31,7 @@ import type {
   FeedbackReason,
   KnowledgeSourceRef,
   OrderDraftDoc,
+  OrderManageProposalCard,
   OrderSummaryCard,
   ProductCardItem,
   TrackingCardData,
@@ -140,6 +141,7 @@ export function ChatPanel({
   const [rolloverNotice, setRolloverNotice] = useState(false);
   const [resumedDraft, setResumedDraft] = useState<OrderDraftDoc | null>(null);
   const [confirmingOrderMsgId, setConfirmingOrderMsgId] = useState<string | null>(null);
+  const [confirmingManageMsgId, setConfirmingManageMsgId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState('dg_init');
   const [aiPaused, setAiPaused] = useState(false);
   const [activeTicketId, setActiveTicketId] = useState('');
@@ -431,7 +433,7 @@ export function ChatPanel({
     setSpeakingMsgId(null);
   };
 
-  const handleSpeakMessage = async (msgId: string, text: string) => {
+  const handleSpeakMessage = async (msgId: string, text: string, ttsToken?: string) => {
     setTtsError('');
     if (speakingMsgId === msgId) {
       stopAudioPlayback();
@@ -464,15 +466,32 @@ export function ChatPanel({
       return;
     }
 
+    const resolvedTtsToken =
+      ttsToken || messages.find((m) => m.id === msgId)?.ttsToken || '';
+    if (!resolvedTtsToken) {
+      setTtsError(
+        bn
+          ? 'এই বার্তার জন্য ভয়েস টোকেন পাওয়া যায়নি।'
+          : 'Voice playback is only available for verified assistant replies.'
+      );
+      return;
+    }
+
     setLoadingAudioMsgId(msgId);
     try {
       const res = await fetch('/api/chat/tts', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
           'x-requested-with': 'DeshiGeeStorefront',
         },
-        body: JSON.stringify({ text, lang, sessionId }),
+        body: JSON.stringify({
+          text,
+          lang,
+          sessionId,
+          ttsToken: resolvedTtsToken,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok || !data.audioBase64) {
@@ -711,12 +730,14 @@ export function ChatPanel({
       let assembledText = '';
       let metaActions: ChatActionItem[] = [];
       let metaOrderSummary: OrderSummaryCard | undefined;
+      let metaOrderManageProposal: OrderManageProposalCard | undefined;
       let metaProductCards: ProductCardItem[] | undefined;
       let metaTrackingCard: TrackingCardData | undefined;
       let metaSuggestedReplies: string[] | undefined;
       let metaSources: KnowledgeSourceRef[] | undefined;
       let metaDiagnostics: ChatDiagnosticsMeta | undefined;
       let metaLogId: string | undefined;
+      let metaTtsToken: string | undefined;
       let metaIsError = false;
 
       while (true) {
@@ -735,12 +756,14 @@ export function ChatPanel({
               text?: string;
               actions?: ChatActionItem[];
               orderSummary?: OrderSummaryCard | null;
+              orderManageProposal?: OrderManageProposalCard | null;
               productCards?: ProductCardItem[] | null;
               trackingCard?: TrackingCardData | null;
               suggestedReplies?: string[] | null;
               sources?: KnowledgeSourceRef[] | null;
               diagnostics?: ChatDiagnosticsMeta | null;
               logId?: string | null;
+              ttsToken?: string | null;
               lockedLang?: 'bn' | 'en' | '' | null;
               isError?: boolean;
             };
@@ -754,6 +777,7 @@ export function ChatPanel({
             } else if (event.type === 'meta') {
               metaActions = event.actions || [];
               metaOrderSummary = event.orderSummary || undefined;
+              metaOrderManageProposal = event.orderManageProposal || undefined;
               metaProductCards =
                 event.productCards && event.productCards.length > 0
                   ? event.productCards
@@ -767,6 +791,7 @@ export function ChatPanel({
                 event.sources && event.sources.length > 0 ? event.sources : undefined;
               metaDiagnostics = event.diagnostics || undefined;
               metaLogId = event.logId || undefined;
+              metaTtsToken = event.ttsToken || undefined;
               metaIsError = Boolean(event.isError);
               if (event.lockedLang === 'bn' || event.lockedLang === 'en') {
                 setLang(event.lockedLang);
@@ -788,12 +813,14 @@ export function ChatPanel({
                   (bn ? chatbotConfig.fallbackMessageBn : chatbotConfig.fallbackMessageEn),
                 actions: metaActions,
                 orderSummary: metaOrderSummary,
+                orderManageProposal: metaOrderManageProposal,
                 productCards: metaProductCards,
                 trackingCard: metaTrackingCard,
                 suggestedReplies: metaSuggestedReplies,
                 sources: metaSources,
                 diagnostics: metaDiagnostics,
                 logId: metaLogId,
+                ttsToken: metaTtsToken,
                 isError: metaIsError,
                 retryPrompt: trimmed,
               }
@@ -994,6 +1021,131 @@ export function ChatPanel({
     setTimeout(() => inputRef.current?.focus(), 100);
   };
 
+  const handleConfirmOrderManage = async (
+    msgId: string,
+    proposal: OrderManageProposalCard
+  ) => {
+    if (!proposal.actionToken || confirmingManageMsgId || awaitingReply) return;
+    setConfirmingManageMsgId(msgId);
+    try {
+      const res = await fetch('/api/orders/manage', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+        },
+        body: JSON.stringify({
+          actionToken: proposal.actionToken,
+          sessionId,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.ok) {
+        const errText =
+          data.error ||
+          (bn
+            ? 'দুঃখিত, অর্ডার আপডেট নিশ্চিত করা যায়নি।'
+            : 'Could not complete that order update right now.');
+        setMessages((prev) => [
+          ...prev.map((m) =>
+            m.id === msgId && m.orderManageProposal
+              ? {
+                  ...m,
+                  orderManageProposal: {
+                    ...m.orderManageProposal,
+                    status: 'failed' as const,
+                    resultMessage: errText,
+                  },
+                }
+              : m
+          ),
+          {
+            id: `om_err_${Date.now()}`,
+            role: 'assistant',
+            text: errText,
+            timestamp: createTimeLabel(),
+            isError: true,
+          },
+        ]);
+        return;
+      }
+
+      const okText =
+        proposal.action === 'cancel'
+          ? bn
+            ? `আপনার অর্ডার ${proposal.orderNumber} সফলভাবে বাতিল করা হয়েছে।`
+            : `Order ${proposal.orderNumber} has been cancelled as confirmed.`
+          : bn
+            ? `আপনার অর্ডার ${proposal.orderNumber}-এর ডেলিভারি ঠিকানা সফলভাবে হালনাগাদ হয়েছে।${typeof data.updatedTotalBdt === 'number' ? ` নতুন সর্বমোট: ৳${data.updatedTotalBdt}।` : ''}`
+            : `Delivery address for order ${proposal.orderNumber} has been updated.${typeof data.updatedTotalBdt === 'number' ? ` Updated total: ৳${data.updatedTotalBdt}.` : ''}`;
+
+      setMessages((prev) => [
+        ...prev.map((m) =>
+          m.id === msgId && m.orderManageProposal
+            ? {
+                ...m,
+                orderManageProposal: {
+                  ...m.orderManageProposal,
+                  status: 'confirmed' as const,
+                  resultMessage: okText,
+                },
+              }
+            : m
+        ),
+        {
+          id: `om_ok_${Date.now()}`,
+          role: 'assistant',
+          text: okText,
+          timestamp: createTimeLabel(),
+          actions: [
+            {
+              type: 'track_order',
+              labelEn: `Track ${proposal.orderNumber}`,
+              labelBn: `অর্ডার ট্র্যাক করুন (${proposal.orderNumber})`,
+              value: proposal.orderNumber,
+              href: `/track?order=${encodeURIComponent(proposal.orderNumber)}`,
+            },
+          ],
+        },
+      ]);
+    } catch {
+      const netErr = bn
+        ? 'নেটওয়ার্ক সমস্যার কারণে অর্ডার আপডেট সম্পন্ন হয়নি। অনুগ্রহ করে আবার চেষ্টা করুন।'
+        : 'Network error while applying order update. Please try again.';
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `om_net_${Date.now()}`,
+          role: 'assistant',
+          text: netErr,
+          timestamp: createTimeLabel(),
+          isError: true,
+        },
+      ]);
+    } finally {
+      setConfirmingManageMsgId(null);
+    }
+  };
+
+  const handleDismissOrderManage = (msgId: string) => {
+    if (confirmingManageMsgId) return;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === msgId && m.orderManageProposal
+          ? {
+              ...m,
+              orderManageProposal: {
+                ...m.orderManageProposal,
+                status: 'dismissed' as const,
+              },
+            }
+          : m
+      )
+    );
+  };
+
   const handleSubmitFeedback = async (
     msgId: string,
     rating: 'up' | 'down',
@@ -1093,6 +1245,17 @@ export function ChatPanel({
     }
   };
 
+  useEffect(() => {
+    if (!open || minimized) return;
+    const onGlobalKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onGlobalKey);
+    return () => window.removeEventListener('keydown', onGlobalKey);
+  }, [open, minimized, onClose]);
+
   return (
     <div
       role="dialog"
@@ -1133,7 +1296,7 @@ export function ChatPanel({
           <button
             type="button"
             onClick={() => setLang((l) => (l === 'en' ? 'bn' : 'en'))}
-            className="min-h-[36px] rounded-md border border-[rgba(250,247,242,0.2)] px-2.5 py-1 text-[11px] font-medium text-[#FAF7F2] hover:bg-white/10"
+            className="min-h-[44px] min-w-[44px] rounded-lg border border-[rgba(250,247,242,0.2)] px-2.5 py-1 text-xs font-medium text-[#FAF7F2] hover:bg-white/10"
           >
             {lang === 'en' ? 'বাংলা' : 'EN'}
           </button>
@@ -1142,24 +1305,24 @@ export function ChatPanel({
             onClick={handleClearChat}
             title={bn ? 'চ্যাট পরিষ্কার করুন' : 'Clear conversation'}
             aria-label={bn ? 'চ্যাট পরিষ্কার করুন' : 'Clear conversation'}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[#E8DFC5]/80 hover:bg-white/10 hover:text-[#FAF7F2]"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-[#E8DFC5]/80 hover:bg-white/10 hover:text-[#FAF7F2]"
           >
-            <RotateCcw className="h-3.5 w-3.5" />
+            <RotateCcw className="h-4 w-4" />
           </button>
           <button
             type="button"
             onClick={onMinimize}
             title={bn ? 'মিনিমাইজ' : 'Minimize'}
             aria-label={bn ? 'মিনিমাইজ' : 'Minimize'}
-            className="hidden h-9 w-9 items-center justify-center rounded-lg text-[#E8DFC5]/80 hover:bg-white/10 hover:text-[#FAF7F2] sm:inline-flex"
+            className="hidden h-11 w-11 items-center justify-center rounded-lg text-[#E8DFC5]/80 hover:bg-white/10 hover:text-[#FAF7F2] sm:inline-flex"
           >
-            <Minimize2 className="h-3.5 w-3.5" />
+            <Minimize2 className="h-4 w-4" />
           </button>
           <button
             type="button"
             onClick={onClose}
             aria-label={bn ? 'চ্যাট বন্ধ করুন' : 'Close chat'}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[#E8DFC5]/80 hover:bg-white/10 hover:text-[#FAF7F2]"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-[#E8DFC5]/80 hover:bg-white/10 hover:text-[#FAF7F2]"
           >
             <X className="h-4 w-4" />
           </button>
@@ -1222,7 +1385,7 @@ export function ChatPanel({
                   key={q}
                   type="button"
                   onClick={() => sendMessage(q)}
-                  className="min-h-[38px] rounded-xl border border-[rgba(180,123,43,0.35)] bg-[#FFFDF9] px-3 py-1.5 text-left text-xs font-medium text-[#1E1710] transition-colors hover:border-[#B47B2B] hover:bg-[#F2ECE1]"
+                  className="min-h-[44px] rounded-xl border border-[rgba(180,123,43,0.35)] bg-[#FFFDF9] px-3.5 py-2 text-left text-xs font-medium text-[#1E1710] transition-colors hover:border-[#B47B2B] hover:bg-[#F2ECE1]"
                 >
                   {q}
                 </button>
@@ -1241,6 +1404,9 @@ export function ChatPanel({
             onConfirmOrder={handleConfirmOrder}
             onEditOrder={(id) => handleEditOrder(id)}
             confirmingOrderMsgId={confirmingOrderMsgId}
+            onConfirmOrderManage={handleConfirmOrderManage}
+            onDismissOrderManage={handleDismissOrderManage}
+            confirmingManageMsgId={confirmingManageMsgId}
             onNavigateTrack={onNavigateTrack}
             onSelectProductVariant={(weight) =>
               sendMessage(bn ? `${weight} জার অর্ডার করতে চাই` : `I want to order ${weight} jar`)

@@ -27,6 +27,10 @@ import {
 } from './chatbot/types';
 import { buildOverlappingChunks } from './chatbot/hybridRag';
 import { ALLOWED_ADMIN_GEMINI_MODELS } from './chatbot/schema';
+import {
+  sanitizeApprovedClaimsMetaForPublish,
+  sanitizeApprovedClaimsStringForPublish,
+} from './chatbot/storeFacts';
 import { OperationType, db, handleFirestoreError } from './firebase';
 
 function sanitizeConfigPayload(cfg: ChatbotConfigDoc): Record<string, unknown> {
@@ -57,6 +61,7 @@ function sanitizeConfigPayload(cfg: ChatbotConfigDoc): Record<string, unknown> {
         claim: String(item?.claim || '').trim().slice(0, 200),
         evidenceNote: String(item?.evidenceNote || '').trim().slice(0, 300),
         expiresAt: String(item?.expiresAt || '').trim().slice(0, 32),
+        status: (item?.status === 'draft' ? 'draft' : 'approved') as 'draft' | 'approved',
         updatedAt: String(item?.updatedAt || '').trim().slice(0, 40),
         updatedBy: String(item?.updatedBy || '').trim().slice(0, 120),
       }))
@@ -209,6 +214,13 @@ export async function publishChatbotChanges(
     }),
   };
 
+  const publishedPayload = {
+    ...payload,
+    // S0-09: Draft claim templates must NEVER enter the published chatbot config.
+    approvedClaims: sanitizeApprovedClaimsStringForPublish(cfg.approvedClaims),
+    approvedClaimsMeta: sanitizeApprovedClaimsMetaForPublish(cfg.approvedClaimsMeta),
+  };
+
   try {
     const batch = writeBatch(db);
     batch.set(doc(db, 'chatbot_config', 'draft'), {
@@ -216,7 +228,7 @@ export async function publishChatbotChanges(
       updatedAt: serverTimestamp(),
     });
     batch.set(doc(db, 'chatbot_config', 'published'), {
-      ...payload,
+      ...publishedPayload,
       updatedAt: serverTimestamp(),
     });
     const versionId = `v${nextVersion}_${Date.now()}`;
@@ -224,7 +236,7 @@ export async function publishChatbotChanges(
       version: nextVersion,
       publishedBy: adminEmail.slice(0, 160),
       summary: (summary || `Published v${nextVersion}`).slice(0, 200),
-      snapshot: payload,
+      snapshot: publishedPayload,
       createdAt: serverTimestamp(),
     });
     await batch.commit();

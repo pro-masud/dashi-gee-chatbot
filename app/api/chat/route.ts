@@ -27,6 +27,7 @@ import {
   classifyTurnIntent,
 } from '../../../src/lib/chatbot/intentRouter';
 import { generateLiveFallbackReply } from '../../../src/lib/chatbot/liveFallbackEngine';
+import { tryCreateSignedTtsToken } from '../../../src/lib/chatbot/orderToken';
 import { checkCompositeChatRateLimit } from '../../../src/lib/chatbot/rateLimit';
 import { validateChatbotResponse } from '../../../src/lib/chatbot/responseValidator';
 import { validateChatRequestPayload } from '../../../src/lib/chatbot/schema';
@@ -56,6 +57,7 @@ import type {
   ChatbotExecutionPath,
   KnowledgeSourceRef,
   OrderDraftDoc,
+  OrderManageProposalCard,
   OrderSummaryCard,
   ProductCardItem,
   TrackingCardData,
@@ -189,12 +191,14 @@ interface NdjsonReplyPayload {
   text: string;
   actions?: ChatActionItem[];
   orderSummary?: OrderSummaryCard;
+  orderManageProposal?: OrderManageProposalCard;
   productCards?: ProductCardItem[];
   trackingCard?: TrackingCardData;
   suggestedReplies?: string[];
   sources?: KnowledgeSourceRef[];
   diagnostics?: ChatDiagnosticsMeta;
   logId?: string;
+  ttsToken?: string;
   lockedLang?: 'bn' | 'en' | '';
   intent?: string;
   path?: ChatbotExecutionPath;
@@ -209,12 +213,14 @@ function encodeMetaEvent(payload: NdjsonReplyPayload): string {
     type: 'meta',
     actions: payload.actions || [],
     orderSummary: payload.orderSummary || null,
+    orderManageProposal: payload.orderManageProposal || null,
     productCards: payload.productCards || [],
     trackingCard: payload.trackingCard || null,
     suggestedReplies: payload.suggestedReplies || [],
     sources: payload.sources || [],
     diagnostics: payload.diagnostics || null,
     logId: payload.logId || '',
+    ttsToken: payload.ttsToken || '',
     lockedLang: payload.lockedLang || '',
     intent: payload.intent || 'general',
     path: payload.path || 'fallback',
@@ -1625,12 +1631,18 @@ export async function POST(request: Request) {
           factsVersion: facts.factsVersion,
         };
 
+        const signedTtsStream = tryCreateSignedTtsToken({
+          sessionId,
+          text: finalReply,
+        });
+
         controller.enqueue(
           encoder.encode(
             encodeMetaEvent({
               text: finalReply,
               actions: runtimeCtx.collectedActions,
               orderSummary: runtimeCtx.collectedOrderSummary,
+              orderManageProposal: runtimeCtx.collectedOrderManageProposal,
               productCards: runtimeCtx.collectedProductCards,
               trackingCard: runtimeCtx.collectedTrackingCard,
               suggestedReplies: buildContextualSuggestedReplies(
@@ -1641,6 +1653,7 @@ export async function POST(request: Request) {
               sources: ragResult.sources,
               diagnostics,
               logId,
+              ttsToken: signedTtsStream.ok ? signedTtsStream.token : '',
               lockedLang: sessionToSave.lockedLang,
               intent: runtimeCtx.detectedIntent,
               path: activePath,
@@ -1879,11 +1892,17 @@ export async function POST(request: Request) {
     })
   );
 
+  const signedTtsReply = tryCreateSignedTtsToken({
+    sessionId,
+    text: finalReply,
+  });
+
   return ndjsonReply(
     {
       text: finalReply,
       actions: runtimeCtx.collectedActions,
       orderSummary: runtimeCtx.collectedOrderSummary,
+      orderManageProposal: runtimeCtx.collectedOrderManageProposal,
       productCards: runtimeCtx.collectedProductCards,
       trackingCard: runtimeCtx.collectedTrackingCard,
       suggestedReplies: buildContextualSuggestedReplies(
@@ -1894,6 +1913,7 @@ export async function POST(request: Request) {
       sources: ragResult.sources,
       diagnostics,
       logId,
+      ttsToken: signedTtsReply.ok ? signedTtsReply.token : '',
       lockedLang: sessionToSave.lockedLang,
       intent: runtimeCtx.detectedIntent,
       path: activePath,

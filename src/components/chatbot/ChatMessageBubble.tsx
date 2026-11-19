@@ -31,6 +31,7 @@ import type {
   ChatActionItem,
   ChatMessageItem,
   FeedbackReason,
+  OrderManageProposalCard,
   OrderSummaryCard,
 } from '../../lib/chatbot/types';
 
@@ -101,6 +102,9 @@ export function ChatMessageBubble({
   onConfirmOrder,
   onEditOrder,
   confirmingOrderMsgId,
+  onConfirmOrderManage,
+  onDismissOrderManage,
+  confirmingManageMsgId,
   showDiagnostics = false,
   isLatestAssistant = false,
   onSelectProductVariant,
@@ -117,6 +121,9 @@ export function ChatMessageBubble({
   onConfirmOrder?: (msgId: string, summary: OrderSummaryCard) => void;
   onEditOrder?: (msgId: string, summary: OrderSummaryCard) => void;
   confirmingOrderMsgId?: string | null;
+  onConfirmOrderManage?: (msgId: string, proposal: OrderManageProposalCard) => void;
+  onDismissOrderManage?: (msgId: string) => void;
+  confirmingManageMsgId?: string | null;
   showDiagnostics?: boolean;
   isLatestAssistant?: boolean;
   onSelectProductVariant?: (weight: '250g' | '500g' | '1kg') => void;
@@ -126,7 +133,7 @@ export function ChatMessageBubble({
     rating: 'up' | 'down',
     reason?: FeedbackReason
   ) => Promise<void> | void;
-  onSpeakMessage?: (msgId: string, text: string) => Promise<void> | void;
+  onSpeakMessage?: (msgId: string, text: string, ttsToken?: string) => Promise<void> | void;
   speakingMsgId?: string | null;
   loadingAudioMsgId?: string | null;
 }) {
@@ -618,6 +625,158 @@ export function ChatMessageBubble({
           </div>
         )}
 
+        {/* Two-Step Explicit Confirmation Card for Cancel / Address Edit */}
+        {!isUser && msg.orderManageProposal && (() => {
+          const proposal = msg.orderManageProposal;
+          const isPending = !proposal.status || proposal.status === 'pending_confirm';
+          const isExpired = Boolean(proposal.expiresAt && nowMs > proposal.expiresAt);
+          const isBusy = confirmingManageMsgId === msg.id;
+          return (
+            <div className="mt-3 rounded-xl border border-[rgba(180,123,43,0.45)] bg-[#F2ECE1]/80 p-3 text-xs text-[#1E1710]">
+              <div className="flex items-center justify-between gap-2 border-b border-[rgba(30,23,16,0.1)] pb-1.5">
+                <span className="font-semibold">
+                  {proposal.action === 'cancel'
+                    ? bn
+                      ? `অর্ডার বাতিল নিশ্চিত করুন · ${proposal.orderNumber}`
+                      : `Confirm Order Cancellation · ${proposal.orderNumber}`
+                    : bn
+                      ? `ঠিকানা পরিবর্তন নিশ্চিত করুন · ${proposal.orderNumber}`
+                      : `Confirm Address Update · ${proposal.orderNumber}`}
+                </span>
+                <span className="font-mono text-[10.5px] uppercase text-[#8A5A17]">
+                  {proposal.currentStatus}
+                </span>
+              </div>
+
+              <div className="mt-2 space-y-1 text-[11px] text-[#635647]">
+                <p>
+                  <strong className="text-[#1E1710]">{bn ? 'ফোন:' : 'Phone:'}</strong>{' '}
+                  <span className="font-mono">{proposal.phoneMasked}</span>
+                </p>
+                {proposal.action === 'cancel' ? (
+                  <p>
+                    <strong className="text-[#1E1710]">{bn ? 'কারণ:' : 'Reason:'}</strong>{' '}
+                    {proposal.reason || (bn ? 'কাস্টমারের অনুরোধ' : 'Customer requested cancellation')}
+                  </p>
+                ) : (
+                  <>
+                    {proposal.proposedAddress && (
+                      <p>
+                        <strong className="text-[#1E1710]">
+                          {bn ? 'নতুন ঠিকানা:' : 'New Address:'}
+                        </strong>{' '}
+                        {proposal.proposedAddress}
+                      </p>
+                    )}
+                    {proposal.proposedDistrict && (
+                      <p>
+                        <strong className="text-[#1E1710]">
+                          {bn ? 'জেলা / এলাকা:' : 'District / Area:'}
+                        </strong>{' '}
+                        {proposal.proposedArea
+                          ? `${proposal.proposedArea}, ${proposal.proposedDistrict}`
+                          : proposal.proposedDistrict}
+                        {proposal.proposedDeliveryZone ? ` (${proposal.proposedDeliveryZone})` : ''}
+                      </p>
+                    )}
+                    {typeof proposal.newDeliveryFeeBdt === 'number' && (
+                      <p>
+                        <strong className="text-[#1E1710]">
+                          {bn ? 'নতুন ডেলিভারি চার্জ:' : 'Updated Delivery Fee:'}
+                        </strong>{' '}
+                        <span className="font-mono text-[#1E1710]">
+                          {proposal.newDeliveryFeeBdt === 0
+                            ? bn
+                              ? 'ফ্রি'
+                              : 'Free'
+                            : formatBdt(proposal.newDeliveryFeeBdt)}
+                        </span>
+                      </p>
+                    )}
+                    {typeof proposal.newTotalBdt === 'number' && (
+                      <p>
+                        <strong className="text-[#1E1710]">
+                          {bn ? 'নতুন সর্বমোট:' : 'Updated Total:'}
+                        </strong>{' '}
+                        <span className="font-mono font-semibold text-[#8A5A17]">
+                          {formatBdt(proposal.newTotalBdt)}
+                        </span>
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {isPending && onConfirmOrderManage && (
+                <div className="mt-3 space-y-1.5">
+                  {isExpired && (
+                    <p className="text-[11px] font-medium text-red-700">
+                      {bn
+                        ? 'এই নিশ্চিতকরণ টোকেনের মেয়াদ শেষ হয়েছে। অনুগ্রহ করে আবার অনুরোধ করুন।'
+                        : 'This confirmation token has expired. Please request the update again.'}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={Boolean(confirmingManageMsgId) || isExpired}
+                      onClick={() => onConfirmOrderManage(msg.id, proposal)}
+                      className={`inline-flex min-h-[42px] flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-[11px] font-semibold text-[#FFFDF9] transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
+                        proposal.action === 'cancel'
+                          ? 'bg-red-700 hover:bg-red-800'
+                          : 'bg-[#B47B2B] hover:bg-[#9D6820]'
+                      }`}
+                    >
+                      {isBusy ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                      )}
+                      <span>
+                        {proposal.action === 'cancel'
+                          ? bn
+                            ? 'বাতিল নিশ্চিত করুন'
+                            : 'Confirm Cancellation'
+                          : bn
+                            ? 'ঠিকানা পরিবর্তন নিশ্চিত করুন'
+                            : 'Confirm Address Change'}
+                      </span>
+                    </button>
+                    {onDismissOrderManage && (
+                      <button
+                        type="button"
+                        disabled={Boolean(confirmingManageMsgId)}
+                        onClick={() => onDismissOrderManage(msg.id)}
+                        className="inline-flex min-h-[42px] items-center justify-center rounded-xl border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-3 py-2 text-[11px] font-medium text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-50"
+                      >
+                        {bn ? 'থাক, বদলাব না' : 'Keep As Is'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {proposal.status === 'confirmed' && (
+                <p className="mt-2 text-[11px] font-medium text-emerald-800">
+                  {proposal.resultMessage ||
+                    (bn ? 'নিশ্চিত করা হয়েছে।' : 'Confirmed and applied.')}
+                </p>
+              )}
+              {proposal.status === 'dismissed' && (
+                <p className="mt-2 text-[11px] font-medium text-[#635647]">
+                  {bn ? 'কোনো পরিবর্তন করা হয়নি।' : 'Dismissed — no changes made.'}
+                </p>
+              )}
+              {proposal.status === 'failed' && (
+                <p className="mt-2 text-[11px] font-medium text-red-700">
+                  {proposal.resultMessage ||
+                    (bn ? 'হালনাগাদ সম্পন্ন করা যায়নি।' : 'Update could not be applied.')}
+                </p>
+              )}
+            </div>
+          );
+        })()}
+
         {/* Interactive Contact, Map & Order Action Buttons */}
         {!isUser && msg.actions && msg.actions.length > 0 && (
           <div className="mt-2.5 flex flex-wrap gap-1.5">
@@ -763,7 +922,7 @@ export function ChatMessageBubble({
                 setShowReasonPicker(false);
                 onSubmitFeedback(msg.id, 'down', r.id);
               }}
-              className="min-h-[34px] rounded-md border border-[rgba(30,23,16,0.16)] bg-[#FAF7F2] px-2.5 py-1 text-[#1E1710] hover:border-[#B47B2B] hover:bg-[#F2ECE1]"
+              className="min-h-[40px] rounded-lg border border-[rgba(30,23,16,0.16)] bg-[#FAF7F2] px-3 py-1.5 text-[#1E1710] hover:border-[#B47B2B] hover:bg-[#F2ECE1] sm:min-h-[34px]"
             >
               {bn ? r.labelBn : r.labelEn}
             </button>
@@ -783,7 +942,7 @@ export function ChatMessageBubble({
                 key={replyText}
                 type="button"
                 onClick={() => onSuggestedReply(replyText)}
-                className="min-h-[38px] rounded-lg border border-[rgba(180,123,43,0.35)] bg-[#FFFDF9] px-3 py-1.5 text-left text-[11px] font-medium text-[#1E1710] transition-colors hover:border-[#B47B2B] hover:bg-[#F2ECE1]"
+                className="min-h-[44px] rounded-xl border border-[rgba(180,123,43,0.35)] bg-[#FFFDF9] px-3.5 py-2 text-left text-xs font-medium text-[#1E1710] transition-colors hover:border-[#B47B2B] hover:bg-[#F2ECE1]"
               >
                 {replyText}
               </button>
@@ -792,34 +951,34 @@ export function ChatMessageBubble({
         )}
 
       {/* Footer metadata & Copy / Retry / Feedback actions */}
-      <div className="mt-1 flex flex-wrap items-center gap-2.5 px-1 text-[10px] text-[#635647]">
+      <div className="mt-1 flex flex-wrap items-center gap-2 px-1 text-[11px] text-[#635647]">
         <span>{msg.timestamp}</span>
         {!isUser && msg.text.length > 0 && (
           <>
             <button
               type="button"
               onClick={() => handleCopyText('msg', msg.text)}
-              className="inline-flex min-h-[28px] items-center gap-1 hover:text-[#1E1710]"
+              className="inline-flex min-h-[40px] items-center gap-1 rounded-lg px-2 hover:bg-[#F2ECE1] hover:text-[#1E1710] sm:min-h-[32px]"
               aria-label={bn ? 'উত্তর কপি করুন' : 'Copy reply'}
             >
               {copiedId === 'msg' ? (
                 <>
-                  <Check className="h-3 w-3 text-emerald-700" />
+                  <Check className="h-3.5 w-3.5 text-emerald-700" />
                   <span>{bn ? 'কপি' : 'Copied'}</span>
                 </>
               ) : (
                 <>
-                  <Copy className="h-3 w-3" />
+                  <Copy className="h-3.5 w-3.5" />
                   <span>{bn ? 'কপি' : 'Copy'}</span>
                 </>
               )}
             </button>
-            {onSpeakMessage && (
+            {onSpeakMessage && msg.ttsToken && (
               <button
                 type="button"
-                onClick={() => onSpeakMessage(msg.id, msg.text)}
+                onClick={() => onSpeakMessage(msg.id, msg.text, msg.ttsToken)}
                 disabled={loadingAudioMsgId === msg.id}
-                className={`inline-flex min-h-[28px] items-center gap-1 hover:text-[#1E1710] disabled:opacity-60 ${
+                className={`inline-flex min-h-[40px] items-center gap-1 rounded-lg px-2 hover:bg-[#F2ECE1] hover:text-[#1E1710] disabled:opacity-60 sm:min-h-[32px] ${
                   speakingMsgId === msg.id ? 'font-semibold text-[#8A5A17]' : ''
                 }`}
                 aria-label={
@@ -834,17 +993,17 @@ export function ChatMessageBubble({
               >
                 {loadingAudioMsgId === msg.id ? (
                   <>
-                    <Loader2 className="h-3 w-3 animate-spin text-[#B47B2B]" />
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-[#B47B2B]" />
                     <span>{bn ? 'তৈরি হচ্ছে...' : 'Loading...'}</span>
                   </>
                 ) : speakingMsgId === msg.id ? (
                   <>
-                    <Square className="h-3 w-3 fill-current" />
+                    <Square className="h-3.5 w-3.5 fill-current" />
                     <span>{bn ? 'থামান' : 'Stop'}</span>
                   </>
                 ) : (
                   <>
-                    <Volume2 className="h-3 w-3" />
+                    <Volume2 className="h-3.5 w-3.5" />
                     <span>{bn ? 'শুনুন' : 'Listen'}</span>
                   </>
                 )}
@@ -854,17 +1013,17 @@ export function ChatMessageBubble({
               <button
                 type="button"
                 onClick={() => onRetry(msg.retryPrompt!)}
-                className="inline-flex min-h-[28px] items-center gap-1 hover:text-[#1E1710]"
+                className="inline-flex min-h-[40px] items-center gap-1 rounded-lg px-2 hover:bg-[#F2ECE1] hover:text-[#1E1710] sm:min-h-[32px]"
                 aria-label={bn ? 'পুনরায় উত্তর নিন' : 'Regenerate response'}
               >
-                <RotateCcw className="h-3 w-3" />
+                <RotateCcw className="h-3.5 w-3.5" />
                 <span>{bn ? 'আবার দেখুন' : 'Retry'}</span>
               </button>
             )}
             {!msg.isError && onSubmitFeedback && (
               <div className="inline-flex items-center gap-1">
                 {msg.feedback ? (
-                  <span className="text-[10px] font-medium text-[#8A5A17]">
+                  <span className="text-[11px] font-medium text-[#8A5A17]">
                     {bn ? 'মতামতের জন্য ধন্যবাদ' : 'Thanks for your feedback'}
                   </span>
                 ) : (
@@ -873,17 +1032,17 @@ export function ChatMessageBubble({
                       type="button"
                       onClick={() => onSubmitFeedback(msg.id, 'up')}
                       aria-label={bn ? 'উত্তর ভালো লেগেছে' : 'Helpful reply'}
-                      className="inline-flex min-h-[32px] min-w-[32px] items-center justify-center rounded hover:bg-[#F2ECE1] hover:text-emerald-800"
+                      className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg hover:bg-[#F2ECE1] hover:text-emerald-800 sm:min-h-[32px] sm:min-w-[32px]"
                     >
-                      <ThumbsUp className="h-3 w-3" />
+                      <ThumbsUp className="h-3.5 w-3.5" />
                     </button>
                     <button
                       type="button"
                       onClick={() => setShowReasonPicker((v) => !v)}
                       aria-label={bn ? 'উত্তর সহায়ক নয়' : 'Unhelpful reply'}
-                      className="inline-flex min-h-[32px] min-w-[32px] items-center justify-center rounded hover:bg-[#F2ECE1] hover:text-red-700"
+                      className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg hover:bg-[#F2ECE1] hover:text-red-700 sm:min-h-[32px] sm:min-w-[32px]"
                     >
-                      <ThumbsDown className="h-3 w-3" />
+                      <ThumbsDown className="h-3.5 w-3.5" />
                     </button>
                   </>
                 )}

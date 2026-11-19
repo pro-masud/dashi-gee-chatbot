@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server';
-import { recordPaymentGatewayEvent } from '../../../../src/lib/chatbot/firestoreRest';
+import {
+  applyValidatedCourierStatusToOrder,
+  checkAndIncrementFirestoreRateLimit,
+  fetchServerOrderForPaymentValidation,
+  recordPaymentGatewayEvent,
+} from '../../../../src/lib/chatbot/firestoreRest';
+import { extractClientIp, hashIdentifier } from '../../../../src/lib/chatbot/rateLimit';
 import {
   normalizeCourierWebhookPayload,
   verifyCourierWebhookAuth,
@@ -9,6 +15,15 @@ import { dispatchWebhookWithRetry, notificationLogs } from '../../../../src/lib/
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
+  const ipHash = hashIdentifier(`courier_wh_ip:${extractClientIp(request)}`);
+  const ipLimit = await checkAndIncrementFirestoreRateLimit(`courier_wh_min_${ipHash}`, 60, 60_000);
+  if (!ipLimit.allowed) {
+    return NextResponse.json(
+      { ok: false, code: 'rate_limited', error: 'Too many courier webhook requests.' },
+      { status: 429, headers: { 'Retry-After': String(Math.max(15, ipLimit.retryAfterSec)) } }
+    );
+  }
+
   const rawBody = await request.text().catch(() => '');
   const authCheck = verifyCourierWebhookAuth({
     rawBody,
@@ -46,6 +61,24 @@ export async function POST(request: Request) {
   const provider =
     event.partner === 'pathao' || event.partner === 'redx' ? event.partner : 'steadfast';
 
+  // S0-07: Validate server-side order & consignment match BEFORE applying any status transition.
+  const serverOrder = await fetchServerOrderForPaymentValidation(event.orderNumber);
+  if (
+    serverOrder &&
+    serverOrder.consignmentId &&
+    event.consignmentId &&
+    String(serverOrder.consignmentId).trim() !== String(event.consignmentId).trim()
+  ) {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: 'consignment_mismatch',
+        error: 'Webhook consignment ID does not match the booked consignment for this order.',
+      },
+      { status: 409 }
+    );
+  }
+
   const recorded = await recordPaymentGatewayEvent({
     eventId: `courier_${event.eventId}`,
     provider,
@@ -58,6 +91,23 @@ export async function POST(request: Request) {
     auditSummary: `${provider.toUpperCase()} webhook: ${event.rawStatus}${event.mappedOrderStatus ? ` -> ${event.mappedOrderStatus}` : ''} (${event.trackingMessage})`,
   });
 
+  let orderStatusUpdated = false;
+  let statusUpdateDetail = 'no_status_transition_mapped';
+  if (!recorded.duplicate && event.mappedOrderStatus && serverOrder) {
+    const applied = await applyValidatedCourierStatusToOrder({
+      orderNumber: event.orderNumber,
+      phone: serverOrder.phone,
+      nextStatus: event.mappedOrderStatus,
+      courierPartner: provider,
+      consignmentId: event.consignmentId || serverOrder.consignmentId || '',
+      rawStatus: event.rawStatus,
+    });
+    orderStatusUpdated = applied.ok;
+    statusUpdateDetail = applied.detail;
+  } else if (!serverOrder) {
+    statusUpdateDetail = 'order_lookup_requires_admin_sdk_or_missing';
+  }
+
   if (!recorded.duplicate && process.env.OWNER_WEBHOOK_URL) {
     const alert = await dispatchWebhookWithRetry(
       process.env.OWNER_WEBHOOK_URL,
@@ -69,6 +119,7 @@ export async function POST(request: Request) {
         consignmentId: event.consignmentId,
         rawStatus: event.rawStatus,
         mappedOrderStatus: event.mappedOrderStatus,
+        orderStatusUpdated,
         trackingMessage: event.trackingMessage,
       },
       1
@@ -86,6 +137,8 @@ export async function POST(request: Request) {
       consignmentId: event.consignmentId,
       rawStatus: event.rawStatus,
       mappedOrderStatus: event.mappedOrderStatus,
+      orderStatusUpdated,
+      statusUpdateDetail,
     },
     { status: 200 }
   );

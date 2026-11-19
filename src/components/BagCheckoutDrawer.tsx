@@ -3,8 +3,10 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
 import {
   AlertCircle,
+  Check,
   CheckCircle2,
   ChevronLeft,
+  Copy,
   CreditCard,
   Loader2,
   MessageCircle,
@@ -25,8 +27,6 @@ import {
   PaymentMethod,
   StoreSettingsDoc,
   WeightKey,
-  createOrderAtomically,
-  fetchCouponByCode,
 } from '../lib/firebase';
 import {
   BANGLADESH_DISTRICTS,
@@ -59,6 +59,8 @@ interface BagCheckoutDrawerProps {
 }
 
 type DrawerStep = 'bag' | 'checkout' | 'confirmed';
+
+const STORAGE_CHECKOUT_DRAFT_KEY = 'deshi_gee_checkout_draft_v1';
 
 export function BagCheckoutDrawer({
   open,
@@ -96,8 +98,69 @@ export function BagCheckoutDrawer({
   }>({ sslcommerz: false, bkash: false });
   const [gatewayBusy, setGatewayBusy] = useState<'sslcommerz' | 'bkash' | null>(null);
   const [gatewayError, setGatewayError] = useState('');
+  const [copiedMfs, setCopiedMfs] = useState(false);
+  const [draftHydrated, setDraftHydrated] = useState(false);
 
   const bn = lang === 'bn';
+
+  useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem(STORAGE_CHECKOUT_DRAFT_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<{
+          customerName: string;
+          phone: string;
+          district: string;
+          area: string;
+          address: string;
+          note: string;
+          paymentMethod: PaymentMethod;
+        }>;
+        if (typeof parsed.customerName === 'string') setCustomerName(parsed.customerName);
+        if (typeof parsed.phone === 'string') setPhone(parsed.phone);
+        if (
+          typeof parsed.district === 'string' &&
+          BANGLADESH_DISTRICTS.includes(parsed.district)
+        ) {
+          setDistrict(parsed.district);
+        }
+        if (typeof parsed.area === 'string') setArea(parsed.area);
+        if (typeof parsed.address === 'string') setAddress(parsed.address);
+        if (typeof parsed.note === 'string') setNote(parsed.note);
+        if (
+          parsed.paymentMethod === 'cod' ||
+          parsed.paymentMethod === 'bkash' ||
+          parsed.paymentMethod === 'nagad'
+        ) {
+          setPaymentMethod(parsed.paymentMethod);
+        }
+      }
+    } catch {
+      // Ignore unavailable sessionStorage
+    } finally {
+      setDraftHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!draftHydrated) return;
+    try {
+      window.sessionStorage.setItem(
+        STORAGE_CHECKOUT_DRAFT_KEY,
+        JSON.stringify({
+          customerName,
+          phone,
+          district,
+          area,
+          address,
+          note,
+          paymentMethod,
+        })
+      );
+    } catch {
+      // Ignore quota / privacy mode errors
+    }
+  }, [draftHydrated, customerName, phone, district, area, address, note, paymentMethod]);
 
   useEffect(() => {
     if (!open) return;
@@ -247,47 +310,41 @@ export function BagCheckoutDrawer({
     setCouponLoading(true);
     setCouponFeedback('');
     try {
-      const found = await fetchCouponByCode(code);
-      const isExpired = Boolean(
-        found?.expiresAt && Number.isFinite(Date.parse(found.expiresAt)) && Date.parse(found.expiresAt) < Date.now()
-      );
-      const limitReached = Boolean(
-        found?.maxUses && found.maxUses > 0 && (found.usedCount || 0) >= found.maxUses
-      );
-      if (!found || !found.active) {
+      const res = await fetch('/api/coupons/validate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+        },
+        body: JSON.stringify({
+          code,
+          subtotalBdt: subtotal,
+          paymentMethod,
+          uiLang: lang,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const msg =
+        (bn ? data.messageBn : data.messageEn) ||
+        data.message ||
+        data.error ||
+        (bn ? 'কুপন যাচাই করতে সমস্যা হয়েছে।' : 'Unable to verify coupon right now.');
+
+      if (!res.ok) {
         setAppliedCoupon(null);
-        setCouponFeedback(
-          bn ? 'কুপন কোডটি সঠিক নয় বা নিষ্ক্রিয়।' : 'Coupon code is invalid or inactive.'
-        );
-      } else if (isExpired) {
-        setAppliedCoupon(null);
-        setCouponFeedback(bn ? 'এই কুপনের মেয়াদ শেষ হয়ে গেছে।' : 'This coupon has expired.');
-      } else if (limitReached) {
-        setAppliedCoupon(null);
-        setCouponFeedback(
-          bn ? 'এই কুপনের সর্বোচ্চ ব্যবহারসীমা পূর্ণ হয়েছে।' : 'This coupon has reached its usage limit.'
-        );
-      } else if (subtotal < found.minSubtotalBdt) {
-        setAppliedCoupon(null);
-        setCouponFeedback(
-          bn
-            ? `এই কুপনের জন্য ন্যূনতম ${formatBdt(found.minSubtotalBdt)} অর্ডার প্রয়োজন।`
-            : `Minimum ${formatBdt(found.minSubtotalBdt)} subtotal required for this coupon.`
-        );
-      } else if (paymentMethod !== 'cod' && found.stackableWithAdvance === false) {
-        setAppliedCoupon(found);
-        setCouponFeedback(
-          bn
-            ? `কুপন গৃহীত, তবে ${found.discountPct}% কোডটি বিকাশ/নগদ অগ্রিম ডিসকাউন্টের সাথে একত্রে প্রযোজ্য নয়।`
-            : `Coupon saved, note ${found.discountPct}% cannot stack with advance MFS discount.`
-        );
+        setCouponFeedback(msg);
+        return;
+      }
+
+      if (data.valid && data.coupon) {
+        setAppliedCoupon(data.coupon as CouponRecord);
+        setCouponFeedback(msg);
+      } else if (data.reason === 'non_stackable_with_advance' && data.coupon) {
+        setAppliedCoupon(data.coupon as CouponRecord);
+        setCouponFeedback(msg);
       } else {
-        setAppliedCoupon(found);
-        setCouponFeedback(
-          bn
-            ? `${found.discountPct}% ছাড় প্রযোজ্য হয়েছে।`
-            : `${found.discountPct}% discount applied.`
-        );
+        setAppliedCoupon(null);
+        setCouponFeedback(msg);
       }
     } catch {
       setCouponFeedback(
@@ -295,6 +352,16 @@ export function BagCheckoutDrawer({
       );
     } finally {
       setCouponLoading(false);
+    }
+  };
+
+  const handleCopyMfsNumber = async (num: string) => {
+    try {
+      await navigator.clipboard.writeText(num);
+      setCopiedMfs(true);
+      window.setTimeout(() => setCopiedMfs(false), 1800);
+    } catch {
+      // Clipboard blocked in some embedded contexts
     }
   };
 
@@ -339,6 +406,14 @@ export function BagCheckoutDrawer({
     setStep('checkout');
   };
 
+  const focusCheckoutField = (id: string) => {
+    const el = document.getElementById(id) as HTMLElement | null;
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.focus();
+    }
+  };
+
   const handleSubmitOrder = async (e: FormEvent) => {
     e.preventDefault();
     if (!primaryItem || submitting) return;
@@ -346,6 +421,7 @@ export function BagCheckoutDrawer({
     const cleanPhone = phone.replace(/[\s-]/g, '');
     if (customerName.trim().length < 2) {
       setFormError(bn ? 'আপনার পূর্ণ নাম লিখুন।' : 'Please enter your full name.');
+      focusCheckoutField('co-name');
       return;
     }
     if (!/^01[3-9]\d{8}$/.test(cleanPhone)) {
@@ -354,10 +430,12 @@ export function BagCheckoutDrawer({
           ? 'সঠিক ১১ সংখ্যার মোবাইল নম্বর দিন (যেমন 017XXXXXXXX)।'
           : 'Enter a valid 11-digit Bangladesh mobile number (01XXXXXXXXX).'
       );
+      focusCheckoutField('co-phone');
       return;
     }
     if (area.trim().length < 2) {
       setFormError(bn ? 'আপনার এলাকার নাম লিখুন।' : 'Please enter your area or thana.');
+      focusCheckoutField('co-area');
       return;
     }
     const addrValid = clientAssessAddressCompleteness(address, area, district);
@@ -367,6 +445,7 @@ export function BagCheckoutDrawer({
           ? 'কুরিয়ার ডেলিভারির জন্য অনুগ্রহ করে সম্পূর্ণ বাড়ি, সড়ক বা ফ্ল্যাট নম্বরসহ ঠিকানা লিখুন।'
           : 'Please enter a full delivery street/house/road address so the courier can locate you.'
       );
+      focusCheckoutField('co-address');
       return;
     }
     if ((paymentMethod === 'bkash' || paymentMethod === 'nagad') && txnId.trim().length < 4) {
@@ -375,6 +454,7 @@ export function BagCheckoutDrawer({
           ? 'সঠিক বিকাশ/নগদ ট্রানজেকশন আইডি (TxnID) লিখুন।'
           : 'Please enter a valid bKash or Nagad Transaction ID (TxnID).'
       );
+      focusCheckoutField('co-txnid');
       return;
     }
 
@@ -401,7 +481,9 @@ export function BagCheckoutDrawer({
 
       const combinedNote = note.trim();
 
-      const prepareRes = await fetch('/api/orders/prepare', {
+      // S0-05: Route storefront checkout through server API so order persistence
+      // and owner notifications run server-side without reopening /api/orders/notify to browsers.
+      const checkoutRes = await fetch('/api/orders/storefront', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -420,67 +502,24 @@ export function BagCheckoutDrawer({
           qty1kg,
           paymentMethod,
           txnId: paymentMethod === 'cod' ? '' : txnId.trim(),
+          paymentProofData: paymentMethod === 'cod' ? '' : paymentProofData.slice(0, 180000),
           couponCode: appliedCoupon?.code || '',
+          uiLang: lang,
         }),
       });
 
-      const prepared = await prepareRes.json();
-      if (!prepareRes.ok) {
+      const checkoutData = await checkoutRes.json().catch(() => ({}));
+      if (!checkoutRes.ok || !checkoutData.ok || !checkoutData.order) {
         setFormError(
-          prepared.error ||
-            (bn ? 'অর্ডার যাচাই করতে ব্যর্থ হয়েছে।' : 'Failed to validate order.')
+          (bn ? checkoutData.messageBn : checkoutData.messageEn) ||
+            checkoutData.error ||
+            (bn ? 'অর্ডার সম্পন্ন করতে ব্যর্থ হয়েছে।' : 'Failed to submit order.')
         );
         setSubmitting(false);
         return;
       }
 
-      const resolvedDistrict = String(prepared.district || district);
-      const resolvedZone = (prepared.deliveryZone || deliveryZone) as DeliveryZone;
-      const estDelivery = String(prepared.estimatedDelivery || estimatedDeliveryWindow);
-
-      const orderPayload: Omit<OrderRecord, 'createdAt' | 'updatedAt'> = {
-        orderNumber: prepared.orderNumber,
-        customerName: customerName.trim().slice(0, 100),
-        phone: cleanPhone,
-        district: resolvedDistrict,
-        area: area.trim().slice(0, 100),
-        address: address.trim().slice(0, 300),
-        note: combinedNote.slice(0, 240),
-        deliveryZone: resolvedZone,
-        weight: prepared.weight,
-        qty: prepared.qty,
-        qty250g: prepared.qty250g,
-        qty500g: prepared.qty500g,
-        qty1kg: prepared.qty1kg,
-        itemsSummary: prepared.itemsSummary,
-        unitPriceBdt: prepared.unitPriceBdt,
-        subtotalBdt: prepared.subtotalBdt,
-        deliveryFeeBdt: prepared.deliveryFeeBdt,
-        discountBdt: prepared.discountBdt,
-        totalBdt: prepared.totalBdt,
-        couponCode: appliedCoupon?.code || '',
-        paymentMethod,
-        paymentStatus: prepared.paymentStatus,
-        txnId: paymentMethod === 'cod' ? '' : txnId.trim().slice(0, 64),
-        paymentProofData: paymentMethod === 'cod' ? '' : paymentProofData.slice(0, 180000),
-        status: 'pending',
-        estimatedDelivery: estDelivery,
-        webhookStatus: 'pending',
-        ...(typeof prepared.riskScore === 'number' ? { riskScore: prepared.riskScore } : {}),
-        ...(Array.isArray(prepared.riskSignals) && prepared.riskSignals.length > 0
-          ? { riskSignals: prepared.riskSignals }
-          : {}),
-        ...(prepared.reviewStatus ? { reviewStatus: prepared.reviewStatus } : {}),
-        ...(prepared.duplicateWarning ? { duplicateWarning: prepared.duplicateWarning } : {}),
-        ...(prepared.codVerificationStatus
-          ? { codVerificationStatus: prepared.codVerificationStatus }
-          : {}),
-      };
-
-      // Atomic Firestore persistence (orders + PII-safe order_tracking + audit log + stock decrement)
-      await createOrderAtomically(orderPayload);
-
-      // S0-05: /api/orders/notify is server-internal/admin-only (never triggered by unauthenticated client headers).
+      const orderPayload = checkoutData.order as OrderRecord;
 
       trackStoreEvent('Purchase', {
         transaction_id: orderPayload.orderNumber,
@@ -488,6 +527,11 @@ export function BagCheckoutDrawer({
         value: orderPayload.totalBdt,
       });
 
+      try {
+        window.sessionStorage.removeItem(STORAGE_CHECKOUT_DRAFT_KEY);
+      } catch {
+        // Ignore storage error
+      }
       onOrderConfirmed(orderPayload);
       onClearCart();
       setStep('confirmed');
@@ -542,7 +586,7 @@ export function BagCheckoutDrawer({
                   setStep('bag');
                 }}
                 aria-label={bn ? 'ব্যাগে ফিরে যান' : 'Back to bag'}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(30,23,16,0.16)] bg-[#FAF7F2] text-[#1E1710] hover:bg-[#F2ECE1] transition-colors shadow-xs"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[rgba(30,23,16,0.16)] bg-[#FAF7F2] text-[#1E1710] hover:bg-[#F2ECE1] transition-colors shadow-xs"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
@@ -568,7 +612,7 @@ export function BagCheckoutDrawer({
             type="button"
             onClick={onClose}
             aria-label={bn ? 'বন্ধ করুন' : 'Close drawer'}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(30,23,16,0.16)] bg-[#FAF7F2] text-[#1E1710] hover:bg-[#F2ECE1] transition-colors shadow-xs"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[rgba(30,23,16,0.16)] bg-[#FAF7F2] text-[#1E1710] hover:bg-[#F2ECE1] transition-colors shadow-xs"
           >
             <X className="h-4 w-4" />
           </button>
@@ -818,14 +862,14 @@ export function BagCheckoutDrawer({
                                   onRemoveItem(item.weight);
                                   setConfirmRemoveWeight(null);
                                 }}
-                                className="rounded-lg bg-red-700 px-2.5 py-1 text-[11px] font-bold text-white shadow-xs"
+                                className="min-h-[40px] rounded-lg bg-red-700 px-3 py-1.5 text-xs font-bold text-white shadow-xs"
                               >
                                 {bn ? 'মুছুন' : 'Delete'}
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setConfirmRemoveWeight(null)}
-                                className="rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-2 py-1 text-[11px]"
+                                className="min-h-[40px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-3 py-1.5 text-xs"
                               >
                                 {bn ? 'বাতিল' : 'Cancel'}
                               </button>
@@ -835,20 +879,20 @@ export function BagCheckoutDrawer({
                               type="button"
                               onClick={() => setConfirmRemoveWeight(item.weight)}
                               aria-label={bn ? 'সরান' : 'Remove item'}
-                              className="p-1.5 text-[#8A7867] hover:text-red-700 transition-colors"
+                              className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-[#8A7867] hover:bg-red-50 hover:text-red-700 transition-colors"
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
                           )}
                         </div>
 
-                        <div className="mt-3.5 flex items-center justify-between">
+                        <div className="mt-3 flex items-center justify-between">
                           <div className="inline-flex items-center rounded-xl border border-[rgba(30,23,16,0.16)] bg-[#FAF7F2]">
                             <button
                               type="button"
                               onClick={() => onUpdateQty(item.weight, -1)}
                               aria-label="Decrease quantity"
-                              className="flex h-9 w-9 items-center justify-center text-[#1E1710] hover:bg-[#F2ECE1] transition-colors"
+                              className="flex h-11 w-11 items-center justify-center text-[#1E1710] hover:bg-[#F2ECE1] transition-colors"
                             >
                               <Minus className="h-3.5 w-3.5" />
                             </button>
@@ -860,7 +904,7 @@ export function BagCheckoutDrawer({
                               disabled={item.qty >= stockAvail}
                               onClick={() => onUpdateQty(item.weight, 1)}
                               aria-label="Increase quantity"
-                              className="flex h-9 w-9 items-center justify-center text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                              className="flex h-11 w-11 items-center justify-center text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                             >
                               <Plus className="h-3.5 w-3.5" />
                             </button>
@@ -892,13 +936,13 @@ export function BagCheckoutDrawer({
                     value={couponInput}
                     onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
                     placeholder="DESHI10"
-                    className="min-h-[42px] flex-1 rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 font-mono text-base uppercase text-[#1E1710] focus:border-[#B47B2B] focus:outline-none sm:text-xs"
+                    className="min-h-[44px] flex-1 rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 font-mono text-base uppercase text-[#1E1710] focus:border-[#B47B2B] focus:outline-none sm:text-xs"
                   />
                   <button
                     type="button"
                     disabled={couponLoading}
                     onClick={handleApplyCoupon}
-                    className="min-h-[42px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#F2ECE1] px-4 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#EAE1D2] disabled:opacity-50"
+                    className="min-h-[44px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#F2ECE1] px-4 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#EAE1D2] disabled:opacity-50"
                   >
                     {couponLoading ? '...' : bn ? 'প্রয়োগ' : 'Apply'}
                   </button>
@@ -1093,14 +1137,39 @@ export function BagCheckoutDrawer({
                         : `Send ${formatBdt(grandTotal)} to our ${paymentMethod === 'bkash' ? 'bKash' : 'Nagad'} number below, then submit your Transaction ID. Payment remains pending verification until confirmed by admin.`}
                     </p>
                     <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[#FFFDF9] px-3 py-2">
-                      <span className="text-[#635647]">
-                        {paymentMethod === 'bkash' ? 'bKash' : 'Nagad'} Number
-                      </span>
-                      <span className="font-mono text-sm font-semibold text-[#1E1710]">
-                        {paymentMethod === 'bkash'
-                          ? settings.bkashNumber
-                          : settings.nagadNumber}
-                      </span>
+                      <div>
+                        <span className="block text-[11px] text-[#635647]">
+                          {paymentMethod === 'bkash' ? 'bKash' : 'Nagad'} Number
+                        </span>
+                        <span className="font-mono text-sm font-semibold text-[#1E1710] tabular-nums">
+                          {paymentMethod === 'bkash'
+                            ? settings.bkashNumber
+                            : settings.nagadNumber}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleCopyMfsNumber(
+                            paymentMethod === 'bkash'
+                              ? settings.bkashNumber
+                              : settings.nagadNumber
+                          )
+                        }
+                        className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.16)] bg-[#FAF7F2] px-3 py-1.5 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+                      >
+                        {copiedMfs ? (
+                          <>
+                            <Check className="h-3.5 w-3.5 text-[#2D6A4F]" />
+                            <span className="text-[#2D6A4F]">{bn ? 'কপি হয়েছে' : 'Copied'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3.5 w-3.5 text-[#8A5A17]" />
+                            <span>{bn ? 'কপি' : 'Copy'}</span>
+                          </>
+                        )}
+                      </button>
                     </div>
 
                     <div>
@@ -1176,6 +1245,16 @@ export function BagCheckoutDrawer({
                 </span>
               </div>
             </div>
+
+            {step === 'checkout' && formError && (
+              <div
+                role="alert"
+                className="mt-3 flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-medium text-red-800"
+              >
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>{formError}</span>
+              </div>
+            )}
 
             {step === 'bag' ? (
               <button

@@ -79,7 +79,7 @@ export function BatchVerifyView({
       <button
         type="button"
         onClick={onBackHome}
-        className="inline-flex min-h-[40px] items-center gap-2 text-sm font-medium text-[#635647] hover:text-[#1E1710]"
+        className="inline-flex min-h-[44px] items-center gap-2 text-sm font-medium text-[#635647] hover:text-[#1E1710]"
       >
         <ArrowLeft className="h-4 w-4" />
         <span>{bn ? 'স্টোরফ্রন্টে ফিরে যান' : 'Back to Deshi Gee'}</span>
@@ -211,7 +211,7 @@ export function BatchVerifyView({
                 href={batch.labReportUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-lg bg-[#1E1710] px-5 py-2.5 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E]"
+                className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-[#1E1710] px-5 py-2.5 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E]"
               >
                 <span>{bn ? 'ল্যাব রিপোর্ট PDF খুলুন' : 'View / Download Lab Report PDF'}</span>
                 <ExternalLink className="h-3.5 w-3.5" />

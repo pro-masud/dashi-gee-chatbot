@@ -17,14 +17,17 @@ import {
   ArrowLeftRight,
   ArrowRight,
   Award,
+  Box,
+  Camera,
   Check,
   ChevronDown,
   Clock,
   ExternalLink,
   FileCheck2,
   Leaf,
+  Lightbulb,
   Loader2,
-  MessageCircle,
+  MessageSquareText,
   Minus,
   Plus,
   ShieldCheck,
@@ -70,6 +73,8 @@ export function HomeStorefrontView() {
     setCart,
     drawerOpen,
     setDrawerOpen,
+    chatbotConfig,
+    openChatAssistant,
   } = useStorefront();
 
   const [selectedWeight, setSelectedWeight] = useState<WeightKey>('500g');
@@ -117,24 +122,12 @@ export function HomeStorefrontView() {
 
   const bn = lang === 'bn';
 
-  const [showMobileSticky, setShowMobileSticky] = useState<boolean>(false);
-
   // Wireframe Jar Seal Canvas
   useEffect(() => {
     if (!showBlueprint) return;
     const cleanup = initSpecsCanvas(specsCanvasRef.current);
     return () => cleanup();
   }, [showBlueprint]);
-
-  // Show mobile sticky CTA bar only after scrolling past the top hero
-  useEffect(() => {
-    const onScrollSticky = () => {
-      setShowMobileSticky(window.scrollY > 340);
-    };
-    window.addEventListener('scroll', onScrollSticky, { passive: true });
-    onScrollSticky();
-    return () => window.removeEventListener('scroll', onScrollSticky);
-  }, []);
 
   // Desktop-only Hero WebGL, Lenis Smooth Scroll, 3D Tilt & Responsive GSAP Pinned Storytelling
   useEffect(() => {
@@ -512,18 +505,11 @@ export function HomeStorefrontView() {
       ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1)
       : null;
 
-  const whatsappDigits = settings.whatsappNumber.replace(/[^0-9]/g, '');
-  const whatsappChatHref = whatsappDigits
-    ? `https://wa.me/${whatsappDigits}?text=${encodeURIComponent(
-        bn
-          ? 'আসসালামু আলাইকুম, দেশী ঘি সম্পর্কে জানতে চাই।'
-          : 'Assalamu Alaikum, I would like to inquire about Deshi Gee.'
-      )}`
-    : `https://wa.me/?text=${encodeURIComponent('Hello Deshi Gee')}`;
+  const previewScale = Math.min(1.04, Math.max(0.86, selectedVariantMeta.scale * 0.94));
 
   return (
     <>
-      <main className="pb-20 md:pb-0">
+      <main className="pb-24 md:pb-0">
         {/* SECTION 01: LUXURY EDITORIAL HERO */}
         <section className="relative overflow-hidden border-b border-[rgba(30,23,16,0.08)] bg-gradient-to-b from-[#FAF7F2] via-[#FAF7F2] to-[#F5EFE6]">
           {/* Subtle Ambient Radial Glow */}
@@ -724,19 +710,23 @@ export function HomeStorefrontView() {
                   <button
                     type="button"
                     onClick={() => setShowBlueprint((v) => !v)}
-                    className="min-h-[38px] cursor-pointer rounded-full border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-3.5 py-1.5 text-xs font-medium text-[#1E1710] hover:bg-[#EAE1D2] hover:border-[#B47B2B] transition-colors whitespace-nowrap shrink-0 shadow-xs"
+                    className="inline-flex min-h-[44px] cursor-pointer items-center gap-1.5 rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-3.5 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#EAE1D2] hover:border-[#B47B2B] transition-colors whitespace-nowrap shrink-0 shadow-xs"
                   >
-                    {showBlueprint
-                      ? bn
-                        ? '📷 জারের আসল ছবি'
-                        : '📷 Jar Photograph'
-                      : bn
-                        ? '🔍 সিল ডায়াগ্রাম (3D)'
-                        : '🔍 Brass Seal (3D)'}
+                    {showBlueprint ? (
+                      <>
+                        <Camera className="h-3.5 w-3.5 text-[#8A5A17]" />
+                        <span>{bn ? 'জারের আসল ছবি' : 'Jar Photograph'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Box className="h-3.5 w-3.5 text-[#8A5A17]" />
+                        <span>{bn ? 'সিল ডায়াগ্রাম (3D)' : 'Brass Seal (3D)'}</span>
+                      </>
+                    )}
                   </button>
                 </div>
 
-                <div className="my-4 flex flex-1 items-center justify-center overflow-hidden p-2 sm:p-4">
+                <div className="my-4 flex flex-1 items-center justify-center overflow-hidden p-4 sm:p-6">
                   {showBlueprint ? (
                     <div className="h-64 w-full sm:h-80">
                       <canvas
@@ -747,8 +737,8 @@ export function HomeStorefrontView() {
                     </div>
                   ) : (
                     <div
-                      className="aspect-[4/3] w-full max-w-[440px] overflow-hidden rounded-2xl border border-[rgba(30,23,16,0.10)] bg-[#FAF7F2] shadow-sm transition-transform duration-300 ease-out"
-                      style={{ transform: `scale(${selectedVariantMeta.scale})` }}
+                      className="aspect-[4/3] w-full max-w-[420px] overflow-hidden rounded-2xl border border-[rgba(30,23,16,0.10)] bg-[#FAF7F2] shadow-sm transition-transform duration-300 ease-out"
+                      style={{ transform: `scale(${previewScale})` }}
                     >
                       <ResilientImage
                         key={activeGallery.src}
@@ -784,10 +774,6 @@ export function HomeStorefrontView() {
                       onClick={() => {
                         setShowBlueprint(false);
                         setGalleryIdx(idx);
-                        galleryPreviewRef.current?.scrollIntoView({
-                          behavior: 'smooth',
-                          block: 'nearest',
-                        });
                       }}
                       className={`group cursor-pointer touch-manipulation select-none overflow-hidden rounded-xl border text-left transition-all ${
                         active
@@ -821,7 +807,7 @@ export function HomeStorefrontView() {
             {/* Right Contiguous Purchase Panel */}
             <div className="flex flex-col justify-center lg:col-span-6">
               <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 rounded-full bg-[#2D6A4F]/10 px-2.5 py-0.5 font-mono text-[11px] font-semibold text-[#2D6A4F]">
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-[#2D6A4F]/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-[#2D6A4F]">
                   <span className="h-1.5 w-1.5 rounded-full bg-[#2D6A4F]" />
                   {isOutOfStock
                     ? bn
@@ -831,7 +817,6 @@ export function HomeStorefrontView() {
                       ? `স্টকে আছে (${activeStock}টি জার)`
                       : `In Stock (${activeStock} jars)`}
                 </span>
-                <span className="text-xs text-[#8A5A17]">· {activeBatch.batchCode}</span>
               </div>
 
               <div className="mt-2.5 flex flex-wrap items-baseline justify-between gap-3">
@@ -860,7 +845,7 @@ export function HomeStorefrontView() {
                   </span>
                 </div>
 
-                <div className="mt-3 grid grid-cols-3 gap-2.5 sm:gap-3">
+                <div className="mt-3.5 grid grid-cols-3 gap-2 sm:gap-3">
                   {WEIGHT_VARIANTS.map((v) => {
                     const active = v.key === selectedWeight;
                     const price = getPriceForWeight(v.key);
@@ -872,23 +857,23 @@ export function HomeStorefrontView() {
                         key={v.key}
                         type="button"
                         onClick={() => setSelectedWeight(v.key)}
-                        className={`relative flex min-h-[72px] flex-col items-start justify-center rounded-2xl border p-3 text-left transition-all ${
+                        className={`relative flex min-h-[76px] flex-col items-start justify-center rounded-2xl border px-2.5 pb-3 pt-4 text-left transition-all sm:p-3.5 ${
                           active
                             ? 'border-[#B47B2B] bg-[#FFFDF9] ring-2 ring-[#B47B2B]/35 shadow-sm'
                             : 'border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] text-[#635647] hover:border-[rgba(30,23,16,0.28)] hover:text-[#1E1710]'
                         }`}
                       >
                         {isPopular && (
-                          <span className="absolute -top-2.5 right-2 rounded-full bg-gradient-to-r from-[#B47B2B] to-[#D4AF37] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#FFFDF9] shadow-xs">
+                          <span className="absolute -top-2.5 right-1.5 rounded-md bg-gradient-to-r from-[#B47B2B] to-[#D4AF37] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#FFFDF9] shadow-xs sm:right-2 sm:px-2">
                             {bn ? 'জনপ্রিয়' : 'Popular'}
                           </span>
                         )}
                         {isBestValue && (
-                          <span className="absolute -top-2.5 right-2 rounded-full bg-[#1A120B] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#F5D692] shadow-xs">
+                          <span className="absolute -top-2.5 right-1.5 rounded-md bg-[#1A120B] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#F5D692] shadow-xs sm:right-2 sm:px-2">
                             {bn ? 'সাশ্রয়ী' : 'Value'}
                           </span>
                         )}
-                        <span className="font-mono text-sm font-bold text-[#1E1710]">
+                        <span className="font-mono text-xs font-bold text-[#1E1710] sm:text-sm">
                           {bn ? v.labelBn : v.labelEn}
                         </span>
                         <span className="mt-1 font-mono text-xs font-semibold tabular-nums text-[#8A5A17]">
@@ -971,8 +956,8 @@ export function HomeStorefrontView() {
                 <Truck className="h-4 w-4 text-[#B47B2B] shrink-0" />
                 <span>
                   {bn
-                    ? 'ঢাকার ভেতরে ৪৮ ঘণ্টা ও বাইরে ৩-৫ দিনে ক্যাশ অন ডেলিভারি।'
-                    : '48h delivery inside Dhaka; 3-5 days nationwide. Cash on Delivery.'}
+                    ? `ঢাকার ভেতরে ${settings.estimatedDhakaDays} ও বাইরে ${settings.estimatedOutsideDays} সময়ে ক্যাশ অন ডেলিভারি।`
+                    : `Delivery in ${settings.estimatedDhakaDays} inside Dhaka; ${settings.estimatedOutsideDays} nationwide. Cash on Delivery.`}
                 </span>
               </div>
 
@@ -1059,15 +1044,15 @@ export function HomeStorefrontView() {
                 </p>
                 <dl className="mt-3 space-y-2 text-xs">
                   <div className="flex justify-between border-b border-[rgba(30,23,16,0.06)] pb-1.5">
-                    <dt className="text-[#635647]">Active Batch</dt>
+                    <dt className="text-[#635647]">{bn ? 'সক্রিয় ব্যাচ' : 'Active Batch'}</dt>
                     <dd className="font-mono font-bold text-[#1E1710]">{activeBatch.batchCode}</dd>
                   </div>
                   <div className="flex justify-between border-b border-[rgba(30,23,16,0.06)] pb-1.5">
-                    <dt className="text-[#635647]">Produced</dt>
+                    <dt className="text-[#635647]">{bn ? 'উৎপাদনের তারিখ' : 'Produced'}</dt>
                     <dd className="font-mono">{activeBatch.productionDate}</dd>
                   </div>
                   <div className="flex justify-between">
-                    <dt className="text-[#635647]">Best Before</dt>
+                    <dt className="text-[#635647]">{bn ? 'মেয়াদোত্তীর্ণ' : 'Best Before'}</dt>
                     <dd className="font-mono">{activeBatch.expiryDate}</dd>
                   </div>
                 </dl>
@@ -1306,8 +1291,11 @@ export function HomeStorefrontView() {
                   : 'Natural pasture butterfat gently crystallizes into coarse danadar grains in cool environments (around 18°C) and melts into translucent liquid amber above 36°C.'}
               </p>
               <div className="mt-6 rounded-2xl border border-[rgba(30,23,16,0.08)] bg-[#F4EFE6]/70 p-4 text-xs text-[#635647]">
-                <p className="font-semibold text-[#1E1710]">{bn ? '💡 বিশুদ্ধতার গুরুত্বপূর্ণ তথ্য:' : '💡 Authenticity Insight:'}</p>
-                <p className="mt-1 leading-relaxed">
+                <p className="flex items-center gap-1.5 font-semibold text-[#1E1710]">
+                  <Lightbulb className="h-4 w-4 shrink-0 text-[#B47B2B]" />
+                  <span>{bn ? 'বিশুদ্ধতার গুরুত্বপূর্ণ তথ্য:' : 'Authenticity Insight:'}</span>
+                </p>
+                <p className="mt-1.5 leading-relaxed">
                   {bn
                     ? 'কৃত্রিম রাসায়নিক বা ডালডা দিয়ে দানাদার রূপ নকল করা যায়। তাই কেবল দানাদার হওয়া নয়—সঠিক বিলোনা উৎস ও ল্যাব টেস্টই খাঁটি ঘিয়ের আসল নিশ্চয়তা।'
                     : 'Authenticity is verified by curd-churned sourcing and laboratory acid value, not grain size alone.'}
@@ -1476,11 +1464,17 @@ export function HomeStorefrontView() {
               </h2>
             </div>
 
-            <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-5">
-              {WAYS_TO_ENJOY.map((dish) => (
+            <div className="mt-10 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-6">
+              {WAYS_TO_ENJOY.map((dish, idx) => (
                 <article
                   key={dish.id}
-                  className="group luxury-card flex flex-col overflow-hidden rounded-2xl"
+                  className={`group luxury-card flex flex-col overflow-hidden rounded-2xl ${
+                    idx < 3
+                      ? 'lg:col-span-2'
+                      : idx === 3
+                        ? 'lg:col-span-3'
+                        : 'sm:col-span-2 lg:col-span-3'
+                  }`}
                 >
                   <div className="aspect-[4/3] w-full overflow-hidden bg-[#EAE1D2]">
                     <ResilientImage
@@ -1590,14 +1584,14 @@ export function HomeStorefrontView() {
                         />
                       )}
 
-                      <div className="mt-4 flex items-center justify-end border-t border-[rgba(30,23,16,0.06)] pt-3">
+                      <div className="mt-4 flex items-center justify-end border-t border-[rgba(30,23,16,0.06)] pt-2">
                         <button
                           type="button"
                           onClick={() => handleHelpfulVote(rev)}
-                          className="inline-flex items-center gap-1.5 text-xs text-[#635647] hover:text-[#1E1710] transition-colors"
+                          className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-3 text-xs text-[#635647] hover:bg-[#F2ECE1] hover:text-[#1E1710] transition-colors"
                         >
                           <ThumbsUp className="h-3.5 w-3.5 text-[#B47B2B]" />
-                          <span>
+                          <span className="tabular-nums">
                             {bn ? 'সহায়ক' : 'Helpful'} ({rev.helpfulCount})
                           </span>
                         </button>
@@ -1649,7 +1643,7 @@ export function HomeStorefrontView() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="block text-xs font-semibold text-[#635647]">
                     {bn ? 'রেটিং' : 'Rating'}
@@ -1659,11 +1653,11 @@ export function HomeStorefrontView() {
                     onChange={(e) => setRevRating(Number(e.target.value))}
                     className="mt-1 w-full rounded-xl border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3.5 py-2.5 text-base sm:text-sm shadow-xs focus:border-[#B47B2B] focus:outline-none"
                   >
-                    <option value={5}>⭐⭐⭐⭐⭐ (5 / 5)</option>
-                    <option value={4}>⭐⭐⭐⭐ (4 / 5)</option>
-                    <option value={3}>⭐⭐⭐ (3 / 5)</option>
-                    <option value={2}>⭐⭐ (2 / 5)</option>
-                    <option value={1}>⭐ (1 / 5)</option>
+                    <option value={5}>{bn ? '৫ / ৫ — অসাধারণ' : '5 / 5 — Excellent'}</option>
+                    <option value={4}>{bn ? '৪ / ৫ — খুব ভালো' : '4 / 5 — Very Good'}</option>
+                    <option value={3}>{bn ? '৩ / ৫ — ভালো' : '3 / 5 — Good'}</option>
+                    <option value={2}>{bn ? '২ / ৫ — মোটামুটি' : '2 / 5 — Fair'}</option>
+                    <option value={1}>{bn ? '১ / ৫ — উন্নতি প্রয়োজন' : '1 / 5 — Needs Work'}</option>
                   </select>
                 </div>
                 <div>
@@ -1827,50 +1821,53 @@ export function HomeStorefrontView() {
         </section>
       </main>
 
-      {/* MOBILE STICKY ADD TO BAG BAR */}
-      {showMobileSticky && !drawerOpen && (
-        <div className="no-print fixed inset-x-0 bottom-0 z-30 border-t border-[rgba(30,23,16,0.12)] bg-[#FAF7F2]/95 px-4 py-2.5 backdrop-blur-md pb-[max(0.6rem,env(safe-area-inset-bottom))] md:hidden shadow-[0_-8px_24px_rgba(30,23,16,0.08)]">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-baseline gap-1.5">
+      {/* UNIFIED MOBILE BOTTOM BAR (AI ASSISTANT + WEIGHT/PRICE + BUY NOW) */}
+      {!drawerOpen && (
+        <div className="no-print fixed inset-x-0 bottom-0 z-30 border-t border-[rgba(30,23,16,0.12)] bg-[#FAF7F2]/95 px-3 py-2 backdrop-blur-md pb-[max(0.5rem,env(safe-area-inset-bottom))] md:hidden shadow-[0_-8px_24px_rgba(30,23,16,0.08)]">
+          <div className="flex items-center justify-between gap-2.5">
+            {chatbotConfig.enabled && (
+              <button
+                type="button"
+                onClick={openChatAssistant}
+                aria-label={bn ? 'দেশী ঘি এআই সহকারী খুলুন' : 'Open Deshi Gee AI Assistant'}
+                className="relative inline-flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-xl bg-[#1A120B] px-3 text-xs font-semibold text-[#FAF7F2] shadow-xs active:scale-95 transition-transform"
+              >
+                <span className="relative flex h-4 w-4 items-center justify-center">
+                  <MessageSquareText className="h-4 w-4 text-[#F5D692]" />
+                  <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full border border-[#1A120B] bg-emerald-400" />
+                </span>
+                <span className="whitespace-nowrap">{bn ? 'সহকারী' : 'Ask AI'}</span>
+              </button>
+            )}
+
+            <div className="min-w-0 flex-1 text-center">
+              <div className="flex items-baseline justify-center gap-1">
                 <span className="font-mono text-sm font-bold tabular-nums text-[#1E1710]">
                   {formatBdt(activePrice)}
                 </span>
-                <span className="font-mono text-xs text-[#8A5A17] font-semibold">
+                <span className="font-mono text-[11px] font-semibold text-[#8A5A17]">
                   ({selectedWeight})
                 </span>
               </div>
-              <p className="truncate text-[11px] text-[#635647]">
-                {bn ? 'খাঁটি কাঠের বিলোনা ঘি' : 'Pure Pabna Bilona Ghee'}
+              <p className="truncate text-[10px] text-[#635647]">
+                {bn ? 'পাবনার বিলোনা ঘি' : 'Pabna Bilona Ghee'}
               </p>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              <a
-                href={whatsappChatHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={bn ? 'হোয়াটসঅ্যাপ সাপোর্ট' : 'WhatsApp Support'}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] text-[#1E1710] shadow-xs active:scale-95 transition-transform"
-              >
-                <MessageCircle className="h-4 w-4 text-[#8A5A17]" />
-              </a>
-
-              <button
-                type="button"
-                disabled={isOutOfStock}
-                onClick={() => handleAddToCart(true)}
-                className="min-h-[42px] rounded-xl bg-gradient-to-r from-[#B47B2B] to-[#96621B] px-5 text-xs font-bold text-[#FFFDF9] shadow-sm disabled:opacity-45 whitespace-nowrap active:scale-95 transition-transform"
-              >
-                {isOutOfStock
-                  ? bn
-                    ? 'স্টক শেষ'
-                    : 'Out of Stock'
-                  : bn
-                    ? 'অর্ডার করুন'
-                    : 'Buy Now'}
-              </button>
-            </div>
+            <button
+              type="button"
+              disabled={isOutOfStock}
+              onClick={() => handleAddToCart(true)}
+              className="min-h-[44px] shrink-0 rounded-xl bg-gradient-to-r from-[#B47B2B] to-[#96621B] px-4 text-xs font-bold text-[#FFFDF9] shadow-sm disabled:opacity-45 whitespace-nowrap active:scale-95 transition-transform"
+            >
+              {isOutOfStock
+                ? bn
+                  ? 'স্টক শেষ'
+                  : 'Out of Stock'
+                : bn
+                  ? 'অর্ডার করুন'
+                  : 'Buy Now'}
+            </button>
           </div>
         </div>
       )}

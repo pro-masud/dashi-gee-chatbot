@@ -9,6 +9,7 @@ import {
   getMissingOrderDraftFields,
   getNextOrderSlotQuestion,
 } from './sessionStore';
+import { resolveConfiguredDistrictAndZone } from './orderToken';
 import {
   buildStoreFactsSnapshot,
   getActiveApprovedClaimsText,
@@ -254,6 +255,34 @@ export function generateLiveFallbackReply(params: {
     /(delivery|shipping|courier|ডেলিভারি|কুরিয়ার|কুরিয়ার|পৌঁছাবে|পৌছাবে|pathaben)/i.test(clean) ||
     (clean.includes('চার্জ') && !clean.includes('দাম'))
   ) {
+    // Check if the customer mentioned a misspelled district (e.g. "Chitagong")
+    const candidateTokens = userMessage
+      .replace(/[^A-Za-z\u0980-\u09FF\s'-]/g, ' ')
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 4);
+    for (const token of candidateTokens) {
+      const check = resolveConfiguredDistrictAndZone(token);
+      if (check.needsClarification && check.suggestedDistrict) {
+        addOrderAction();
+        addWhatsAppAction();
+        return {
+          replyText: isBn
+            ? `আপনি কি **${check.suggestedDistrict}** জেলা বোঝাতে চেয়েছেন? সঠিক ডেলিভারি জোন ও চার্জ নিশ্চিত করার আগে অনুগ্রহ করে জেলার নামটি নিশ্চিত করুন।`
+            : `Did you mean **${check.suggestedDistrict}**? Please confirm your district name so I can verify the exact delivery zone and fee.`,
+          intent: 'delivery_clarification',
+          actions,
+          suggestedReplies: [
+            isBn
+              ? `হ্যাঁ, ${check.suggestedDistrict}`
+              : `Yes, ${check.suggestedDistrict}`,
+            ...(buildContextualSuggestedReplies('delivery', replyLang, params.activeDraft) || []).slice(0, 2),
+          ],
+          factsVersion: facts.factsVersion,
+        };
+      }
+    }
+
     addOrderAction();
     addWhatsAppAction();
     return {

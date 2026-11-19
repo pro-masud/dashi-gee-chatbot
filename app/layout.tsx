@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import './globals.css';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { StorefrontProvider } from '../src/components/StorefrontProvider';
+import { fetchServerStoreSettingsWithMeta } from '../src/lib/chatbot/firestoreRest';
+import { buildStorefrontStructuredData } from '../src/lib/seo';
 
 export const metadata: Metadata = {
   metadataBase: new URL(
@@ -35,84 +37,10 @@ export const metadata: Metadata = {
   },
 };
 
-const structuredData = {
-  '@context': 'https://schema.org',
-  '@graph': [
-    {
-      '@type': 'Organization',
-      name: 'Deshi Gee',
-      description:
-        'Bangladeshi artisanal single-product bilona cow ghee house sourcing from Pabna grass-fed farms.',
-    },
-    {
-      '@type': 'Product',
-      name: 'Deshi Gee — Pabna Grass-Fed Bilona Cow Ghee',
-      description:
-        'Single-origin cultured cow milkfat churned using traditional wooden bilona and clarified slowly in earthen pots.',
-      brand: {
-        '@type': 'Brand',
-        name: 'Deshi Gee',
-      },
-      offers: {
-        '@type': 'AggregateOffer',
-        priceCurrency: 'BDT',
-        lowPrice: '680',
-        highPrice: '2480',
-        offerCount: '3',
-        availability: 'https://schema.org/InStock',
-        offers: [
-          {
-            '@type': 'Offer',
-            name: 'Deshi Gee 250g Sealed Glass Jar',
-            sku: 'DG-250G',
-            price: '680',
-            priceCurrency: 'BDT',
-            availability: 'https://schema.org/InStock',
-          },
-          {
-            '@type': 'Offer',
-            name: 'Deshi Gee 500g Sealed Glass Jar',
-            sku: 'DG-500G',
-            price: '1290',
-            priceCurrency: 'BDT',
-            availability: 'https://schema.org/InStock',
-          },
-          {
-            '@type': 'Offer',
-            name: 'Deshi Gee 1kg Sealed Glass Jar',
-            sku: 'DG-1KG',
-            price: '2480',
-            priceCurrency: 'BDT',
-            availability: 'https://schema.org/InStock',
-          },
-        ],
-      },
-    },
-    {
-      '@type': 'FAQPage',
-      mainEntity: [
-        {
-          '@type': 'Question',
-          name: 'Is this authentic Deshi Ghee?',
-          acceptedAnswer: {
-            '@type': 'Answer',
-            text: 'Yes. Each batch is prepared exclusively from cultured whole cow milk sourced in Pabna, churned by wooden bilona, and sealed in glass jars with batch traceability.',
-          },
-        },
-        {
-          '@type': 'Question',
-          name: 'What weight options are available?',
-          acceptedAnswer: {
-            '@type': 'Answer',
-            text: 'Deshi Gee is offered in 250g, 500g, and 1kg sealed apothecary glass jars.',
-          },
-        },
-      ],
-    },
-  ],
-};
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const { settings, confirmedFromDb } = await fetchServerStoreSettingsWithMeta();
+  const structuredData = buildStorefrontStructuredData({ settings, confirmedFromDb });
 
-export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" data-theme="light" suppressHydrationWarning>
       <head>
@@ -123,7 +51,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           crossOrigin="anonymous"
         />
         <link
-          href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400..700&family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..600&family=Hind+Siliguri:wght@400;500;600;700&family=Noto+Serif+Bengali:wght@500;600;700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..600&family=Hind+Siliguri:wght@400;500;600;700&family=Noto+Serif+Bengali:wght@500;600;700&display=swap"
           rel="stylesheet"
         />
         <script
@@ -133,7 +61,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body>
         <ErrorBoundary>
-          <StorefrontProvider>{children}</StorefrontProvider>
+          <StorefrontProvider initialSettings={settings}>{children}</StorefrontProvider>
         </ErrorBoundary>
       </body>
     </html>

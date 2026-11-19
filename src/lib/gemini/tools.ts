@@ -30,6 +30,7 @@ import {
   normalizeVariantQuantities,
   resolveConfiguredDistrictAndZone,
   resolveZoneDeliveryFeeAndEta,
+  tryCreateSignedOrderManageToken,
   tryCreateSignedOrderToken,
 } from '../chatbot/orderToken';
 import { getBusinessHoursStatus } from '../chatbot/security';
@@ -48,6 +49,7 @@ import type {
   ChatbotFaqDoc,
   ChatbotKbDocRecord,
   KnowledgeChunkRecord,
+  OrderManageProposalCard,
   OrderStatePhase,
   OrderSummaryCard,
   ProductCardItem,
@@ -440,7 +442,7 @@ export const CHATBOT_FUNCTION_DECLARATIONS: FunctionDeclaration[] = [
   {
     name: 'request_cancel',
     description:
-      'Cancel a customer order before dispatch (only when status is pending or confirmed) after verifying Order ID and checkout phone number. Automatically restores jar stock.',
+      'Prepare a two-step cancellation confirmation card for a customer order before dispatch (only when status is pending or confirmed) after verifying Order ID and checkout phone number. Never mutates immediately; requires the customer to click Confirm Cancellation.',
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -454,7 +456,7 @@ export const CHATBOT_FUNCTION_DECLARATIONS: FunctionDeclaration[] = [
   {
     name: 'request_address_change',
     description:
-      'Update delivery district/area/address on an existing order before dispatch (only when status is pending or confirmed) and recalculate delivery fee and total.',
+      'Prepare a two-step address-update confirmation card for an existing order before dispatch (only when status is pending or confirmed) with recalculated delivery fee and total. Never mutates immediately; requires the customer to click Confirm Update.',
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -484,6 +486,7 @@ export interface ToolRuntimeContext {
   isTestPlayground: boolean;
   collectedActions: ChatActionItem[];
   collectedOrderSummary?: OrderSummaryCard;
+  collectedOrderManageProposal?: OrderManageProposalCard;
   collectedProductCards?: ProductCardItem[];
   collectedTrackingCard?: TrackingCardData;
   priceQuoteVersion?: number;
@@ -716,11 +719,19 @@ export async function executeChatbotTool(
             valid: true,
             district: zoneCheck.canonicalDistrict,
             matchedBy: zoneCheck.matchedBy,
-            suggestedDistrict: zoneCheck.suggestedDistrict,
             zone: zoneCheck.deliveryZone,
             feeBdt: free ? 0 : zInfo.feeBdt,
             freeDeliveryApplied: free,
             estimatedDelivery: zInfo.etaText,
+          };
+        } else if (zoneCheck.needsClarification && zoneCheck.suggestedDistrict) {
+          queriedResult = {
+            valid: false,
+            needsClarification: true,
+            district: districtArg,
+            suggestedDistrict: zoneCheck.suggestedDistrict,
+            clarificationQuestionEn: `Did you mean ${zoneCheck.suggestedDistrict}? Please confirm the district name before I calculate your delivery charge.`,
+            clarificationQuestionBn: `আপনি কি ${zoneCheck.suggestedDistrict} বোঝাতে চেয়েছেন? ডেলিভারি চার্জ হিসাব করার আগে অনুগ্রহ করে জেলার নাম নিশ্চিত করুন।`,
           };
         } else {
           queriedResult = { valid: false, district: districtArg };
@@ -728,6 +739,15 @@ export async function executeChatbotTool(
       }
 
       if (name === 'quote_delivery') {
+        if (queriedResult?.needsClarification) {
+          return {
+            ...queriedResult,
+            message:
+              ctx.replyLang === 'bn'
+                ? queriedResult.clarificationQuestionBn
+                : queriedResult.clarificationQuestionEn,
+          };
+        }
         return {
           ...(queriedResult || { valid: false, district: districtArg }),
           freeDeliveryThresholdBdt: settings.freeDeliveryThreshold,
@@ -769,6 +789,18 @@ export async function executeChatbotTool(
         undefined,
         String(args.area || '')
       );
+      if (!zRes.valid && zRes.needsClarification && zRes.suggestedDistrict) {
+        return {
+          ok: false,
+          needsClarification: true,
+          district: String(args.district || ''),
+          suggestedDistrict: zRes.suggestedDistrict,
+          message:
+            ctx.replyLang === 'bn'
+              ? `আপনি কি ${zRes.suggestedDistrict} বোঝাতে চেয়েছেন? সঠিক ডেলিভারি চার্জ ও মোট দাম হিসাব করার আগে জেলার নাম নিশ্চিত করুন।`
+              : `Did you mean ${zRes.suggestedDistrict}? Please confirm your district before I calculate the delivery charge and total.`,
+        };
+      }
       const pmRaw = String(args.payment_method || 'cod').toLowerCase();
       const paymentMethod: PaymentMethod =
         pmRaw === 'bkash' ? 'bkash' : pmRaw === 'nagad' ? 'nagad' : 'cod';
@@ -1056,31 +1088,80 @@ export async function executeChatbotTool(
       ctx.detectedIntent = 'order_manage';
       const orderId = convertBanglaDigitsToEnglish(String(args.order_id || '')).trim().toUpperCase();
       const phone = normalizeBangladeshPhone(String(args.phone || ''));
+      const reason = String(args.reason || 'Customer requested cancel via assistant').trim().slice(0, 220);
       ctx.customerPhoneInTurn = phone;
-      const res = await manageServerOrder({
+
+      // Item 5: NEVER cancel directly inside chat tool execution — check eligibility & emit Confirm-button proposal.
+      const checkRes = await manageServerOrder({
+        action: 'check',
+        orderNumber: orderId,
+        phone,
+      });
+
+      if (!checkRes.ok || !checkRes.eligible) {
+        if (checkRes.supportRequired || !checkRes.eligible) {
+          pushUniqueAction(ctx.collectedActions, {
+            type: 'track_order',
+            labelEn: 'Open Order Tracker',
+            labelBn: 'অর্ডার ট্র্যাকার খুলুন',
+            value: orderId,
+            href: `/track?order=${encodeURIComponent(orderId)}`,
+          });
+        }
+        return {
+          ok: false,
+          eligible: false,
+          supportRequired: Boolean(checkRes.supportRequired || checkRes.ok),
+          orderNumber: checkRes.orderNumber || orderId,
+          currentStatus: checkRes.currentStatus,
+          message: ctx.replyLang === 'bn' ? checkRes.messageBn : checkRes.messageEn,
+        };
+      }
+
+      const signed = tryCreateSignedOrderManageToken({
+        sessionId: ctx.sessionId,
         action: 'cancel',
         orderNumber: orderId,
         phone,
-        reason: String(args.reason || 'Customer requested cancel via assistant'),
+        reason,
       });
-      if (!res.ok && res.supportRequired) {
-        pushUniqueAction(ctx.collectedActions, {
-          type: 'track_order',
-          labelEn: 'Open Order Tracker',
-          labelBn: 'অর্ডার ট্র্যাকার খুলুন',
-          value: orderId,
-          href: `/track?order=${encodeURIComponent(orderId)}`,
-        });
+      if (!signed.ok) {
+        return {
+          ok: false,
+          eligible: true,
+          code: 'order_secret_missing',
+          message:
+            ctx.replyLang === 'bn'
+              ? 'এই মুহূর্তে চ্যাট থেকে বাতিল কনফার্মেশন তৈরি করা যাচ্ছে না। অনুগ্রহ করে অর্ডার ট্র্যাকার পেজ ব্যবহার করুন।'
+              : 'Chat cancellation confirmation is temporarily unavailable. Please use the Order Tracker page.',
+        };
       }
+
+      const phoneMasked =
+        phone.length >= 11 ? `${phone.slice(0, 3)}*****${phone.slice(-3)}` : phone;
+      ctx.collectedOrderManageProposal = {
+        action: 'cancel',
+        orderNumber: orderId,
+        phoneMasked,
+        currentStatus: checkRes.currentStatus || 'pending',
+        currentTotalBdt: Number(checkRes.currentTotalBdt || 0),
+        reason,
+        actionToken: signed.token,
+        expiresAt: signed.payload.exp,
+        status: 'pending_confirm',
+      };
+
       return {
-        ok: res.ok,
-        eligible: res.eligible,
-        supportRequired: res.supportRequired,
-        orderNumber: res.orderNumber,
-        currentStatus: res.currentStatus,
-        nextStatus: res.nextStatus,
-        stockRestored: res.stockRestored,
-        message: ctx.replyLang === 'bn' ? res.messageBn : res.messageEn,
+        ok: true,
+        eligible: true,
+        requiresConfirmation: true,
+        proposalReady: true,
+        orderNumber: orderId,
+        currentStatus: checkRes.currentStatus,
+        message:
+          ctx.replyLang === 'bn'
+            ? `অর্ডার ${orderId} বাতিল করার জন্য যোগ্য। নিচের কার্ডে **বাতিল নিশ্চিত করুন** বাটনে ক্লিক করলে অর্ডারটি বাতিল হবে।`
+            : `Order ${orderId} is eligible for cancellation. Please review the card below and click **Confirm Cancellation** to finalize.`,
       };
     }
 
@@ -1088,33 +1169,142 @@ export async function executeChatbotTool(
       ctx.detectedIntent = 'order_manage';
       const orderId = convertBanglaDigitsToEnglish(String(args.order_id || '')).trim().toUpperCase();
       const phone = normalizeBangladeshPhone(String(args.phone || ''));
+      const districtInput = String(args.district || '').trim();
+      const areaInput = String(args.area || '').trim();
+      const addressInput = String(args.address || '').trim();
       ctx.customerPhoneInTurn = phone;
-      const res = await manageServerOrder({
+
+      const resolvedDistrict = resolveConfiguredDistrictAndZone(
+        districtInput,
+        undefined,
+        `${areaInput} ${addressInput}`
+      );
+      if (!resolvedDistrict.valid) {
+        if (resolvedDistrict.needsClarification && resolvedDistrict.suggestedDistrict) {
+          return {
+            ok: false,
+            eligible: true,
+            needsClarification: true,
+            suggestedDistrict: resolvedDistrict.suggestedDistrict,
+            orderNumber: orderId,
+            message:
+              ctx.replyLang === 'bn'
+                ? `আপনি কি ${resolvedDistrict.suggestedDistrict} বোঝাতে চেয়েছেন? ঠিকানা পরিবর্তনের আগে অনুগ্রহ করে জেলার নাম নিশ্চিত করুন।`
+                : `Did you mean ${resolvedDistrict.suggestedDistrict}? Please confirm the district name before updating your delivery address.`,
+          };
+        }
+        return {
+          ok: false,
+          eligible: true,
+          orderNumber: orderId,
+          message:
+            ctx.replyLang === 'bn'
+              ? 'জেলার নামটি সঠিক নয়। অনুগ্রহ করে বাংলাদেশের ৬৪ জেলার একটি বৈধ নাম দিন।'
+              : 'Could not match that Bangladesh district. Please provide one of the 64 valid districts.',
+        };
+      }
+
+      const addrCheck = assessAddressCompleteness(
+        addressInput,
+        areaInput,
+        resolvedDistrict.canonicalDistrict
+      );
+      if (!addrCheck.complete || areaInput.length < 2) {
+        return {
+          ok: false,
+          eligible: true,
+          orderNumber: orderId,
+          message:
+            ctx.replyLang === 'bn'
+              ? addrCheck.suggestionBn || 'অনুগ্রহ করে এলাকা ও পূর্ণাঙ্গ বাসা/রোডের ঠিকানা দিন।'
+              : addrCheck.suggestionEn || 'Please share a complete area and house/road address.',
+        };
+      }
+
+      // Item 5: NEVER mutate address directly inside chat tool execution — check eligibility & emit Confirm-button proposal.
+      const checkRes = await manageServerOrder({
+        action: 'check',
+        orderNumber: orderId,
+        phone,
+      });
+
+      if (!checkRes.ok || !checkRes.eligible) {
+        return {
+          ok: false,
+          eligible: false,
+          supportRequired: Boolean(checkRes.supportRequired || checkRes.ok),
+          orderNumber: checkRes.orderNumber || orderId,
+          currentStatus: checkRes.currentStatus,
+          message: ctx.replyLang === 'bn' ? checkRes.messageBn : checkRes.messageEn,
+        };
+      }
+
+      const subtotalBdt = Number(checkRes.currentSubtotalBdt ?? checkRes.currentTotalBdt ?? 0);
+      const discountBdt = Number(checkRes.currentDiscountBdt ?? 0);
+      const zoneInfo = resolveZoneDeliveryFeeAndEta(settings, resolvedDistrict.deliveryZone);
+      const freeDelivery = subtotalBdt >= Math.round(settings.freeDeliveryThreshold);
+      const proposedDeliveryFeeBdt = freeDelivery ? 0 : zoneInfo.feeBdt;
+      const proposedTotalBdt = Math.max(1, subtotalBdt + proposedDeliveryFeeBdt - discountBdt);
+
+      ctx.verifiedMonetaryAmounts.add(proposedDeliveryFeeBdt);
+      ctx.verifiedMonetaryAmounts.add(proposedTotalBdt);
+
+      const signed = tryCreateSignedOrderManageToken({
+        sessionId: ctx.sessionId,
         action: 'edit_address',
         orderNumber: orderId,
         phone,
-        district: String(args.district || ''),
-        area: String(args.area || ''),
-        address: String(args.address || ''),
+        district: resolvedDistrict.canonicalDistrict,
+        area: areaInput,
+        address: addressInput,
       });
-      if (typeof res.updatedTotalBdt === 'number') {
-        ctx.verifiedMonetaryAmounts.add(res.updatedTotalBdt);
+      if (!signed.ok) {
+        return {
+          ok: false,
+          eligible: true,
+          code: 'order_secret_missing',
+          message:
+            ctx.replyLang === 'bn'
+              ? 'এই মুহূর্তে ঠিকানা পরিবর্তনের কনফার্মেশন তৈরি করা যাচ্ছে না।'
+              : 'Chat address update confirmation is temporarily unavailable.',
+        };
       }
-      if (typeof res.updatedDeliveryFeeBdt === 'number') {
-        ctx.verifiedMonetaryAmounts.add(res.updatedDeliveryFeeBdt);
-      }
+
+      const phoneMasked =
+        phone.length >= 11 ? `${phone.slice(0, 3)}*****${phone.slice(-3)}` : phone;
+      ctx.collectedOrderManageProposal = {
+        action: 'edit_address',
+        orderNumber: orderId,
+        phoneMasked,
+        currentStatus: checkRes.currentStatus || 'pending',
+        currentTotalBdt: Number(checkRes.currentTotalBdt || 0),
+        newDeliveryFeeBdt: proposedDeliveryFeeBdt,
+        newTotalBdt: proposedTotalBdt,
+        proposedDistrict: resolvedDistrict.canonicalDistrict,
+        proposedArea: areaInput,
+        proposedAddress: addressInput,
+        proposedDeliveryZone: resolvedDistrict.deliveryZone,
+        actionToken: signed.token,
+        expiresAt: signed.payload.exp,
+        status: 'pending_confirm',
+      };
+
       return {
-        ok: res.ok,
-        eligible: res.eligible,
-        supportRequired: res.supportRequired,
-        orderNumber: res.orderNumber,
-        currentStatus: res.currentStatus,
-        updatedDistrict: res.updatedDistrict,
-        updatedZone: res.updatedZone,
-        updatedDeliveryFeeBdt: res.updatedDeliveryFeeBdt,
-        updatedTotalBdt: res.updatedTotalBdt,
-        estimatedDelivery: res.estimatedDelivery,
-        message: ctx.replyLang === 'bn' ? res.messageBn : res.messageEn,
+        ok: true,
+        eligible: true,
+        requiresConfirmation: true,
+        proposalReady: true,
+        orderNumber: orderId,
+        currentStatus: checkRes.currentStatus,
+        proposedDistrict: resolvedDistrict.canonicalDistrict,
+        proposedZone: resolvedDistrict.deliveryZone,
+        proposedDeliveryFeeBdt,
+        proposedTotalBdt,
+        estimatedDelivery: zoneInfo.etaText,
+        message:
+          ctx.replyLang === 'bn'
+            ? `নতুন ঠিকানা (${areaInput}, ${resolvedDistrict.canonicalDistrict}) অনুযায়ী ডেলিভারি চার্জ ৳${proposedDeliveryFeeBdt} ও নতুন সর্বমোট ৳${proposedTotalBdt}। পরিবর্তনটি কার্যকর করতে নিচের কার্ডে **ঠিকানা আপডেট নিশ্চিত করুন** বাটনে ক্লিক করুন।`
+            : `Updated delivery to ${areaInput}, ${resolvedDistrict.canonicalDistrict} sets delivery fee to ৳${proposedDeliveryFeeBdt} and new total to ৳${proposedTotalBdt}. Click **Confirm Address Change** on the card below to apply.`,
       };
     }
 
@@ -1182,6 +1372,18 @@ export async function executeChatbotTool(
       const districtRaw = String(args.district || '').trim().slice(0, 80);
       const zoneRes = resolveConfiguredDistrictAndZone(districtRaw, undefined, `${area} ${address}`);
       if (!zoneRes.valid) {
+        if (zoneRes.needsClarification && zoneRes.suggestedDistrict) {
+          return {
+            ready: false,
+            reason: 'district_typo_confirmation_required',
+            needsClarification: true,
+            suggestedDistrict: zoneRes.suggestedDistrict,
+            message:
+              ctx.replyLang === 'bn'
+                ? `আপনি কি ${zoneRes.suggestedDistrict} বোঝাতে চেয়েছেন? অর্ডার সারাংশ ও ডেলিভারি চার্জ ঠিক করার আগে অনুগ্রহ করে জেলার নাম নিশ্চিত করুন।`
+                : `Did you mean ${zoneRes.suggestedDistrict}? Please confirm the district spelling before I prepare your order summary.`,
+          };
+        }
         return {
           ready: false,
           reason: 'unsupported_delivery_area',

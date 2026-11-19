@@ -12,9 +12,11 @@ import {
   clearMemoryGatewayEventsForTests,
   getOrderStorageMemoryStateForTests,
   setAdminAuthOverrideForTests,
+  setCostLedgerOverrideForTests,
   setOrderStorageMemoryModeForTests,
   setRateLimitMemoryModeForTests,
 } from '../src/lib/chatbot/firestoreRest';
+import { tryCreateSignedTtsToken } from '../src/lib/chatbot/orderToken';
 import { setGeminiClientFactoryForTests } from '../src/lib/gemini/client';
 import {
   bookCourierParcel,
@@ -70,6 +72,26 @@ describe('Phase 6 — Gemini TTS, Payment Gateways (SSLCommerz/bKash), Live Cour
     }
     setRateLimitMemoryModeForTests(true);
     setOrderStorageMemoryModeForTests(true);
+    setCostLedgerOverrideForTests({
+      get: async (dateKey) => ({
+        dateKey,
+        totalUsd: 0,
+        requestCount: 0,
+        promptTokens: 0,
+        outputTokens: 0,
+        capHit: false,
+        source: 'fallback_memory',
+      }),
+      record: async (dateKey, add) => ({
+        dateKey,
+        totalUsd: add.costUsd,
+        requestCount: 1,
+        promptTokens: add.promptTokens,
+        outputTokens: add.outputTokens,
+        capHit: false,
+        source: 'fallback_memory',
+      }),
+    });
     clearMemoryGatewayEventsForTests();
     setGeminiClientFactoryForTests(null);
   });
@@ -79,6 +101,7 @@ describe('Phase 6 — Gemini TTS, Payment Gateways (SSLCommerz/bKash), Live Cour
     setGeminiClientFactoryForTests(null);
     setRateLimitMemoryModeForTests(false);
     setOrderStorageMemoryModeForTests(false);
+    setCostLedgerOverrideForTests(null);
     clearMemoryGatewayEventsForTests();
     for (const key of ENV_KEYS) {
       if (savedEnv[key] === undefined) delete process.env[key];
@@ -86,94 +109,129 @@ describe('Phase 6 — Gemini TTS, Payment Gateways (SSLCommerz/bKash), Live Cour
     }
   });
 
-  it('Gemini TTS route calls gemini-3.8-flash-lite-tts, returns audio/wav base64, and never fakes audio on missing key', async () => {
-    // 1. Rejects missing storefront origin header
-    const badOrigin = await chatTtsPost(
-      new Request('http://localhost:3000/api/chat/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: 'Hello Deshi Gee' }),
-      })
-    );
-    assert.equal(badOrigin.status, 403);
+  it('Gemini TTS route enforces signed ttsToken (S0-08), calls gemini-3.8-flash-lite-tts, returns audio/wav base64, and never fakes audio on missing key', async () => {
+    const prevSecret = process.env.ORDER_TOKEN_SECRET;
+    process.env.ORDER_TOKEN_SECRET = 'phase6_tts_signing_secret_32_chars_min';
+    try {
+      // 1. Rejects missing storefront origin header
+      const badOrigin = await chatTtsPost(
+        new Request('http://localhost:3000/api/chat/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: 'Hello Deshi Gee' }),
+        })
+      );
+      assert.equal(badOrigin.status, 403);
 
-    // 2. Returns 503 cleanly when Gemini client is unavailable (no simulated audio)
-    setGeminiClientFactoryForTests(() => null);
-    const noKey = await chatTtsPost(
-      new Request('http://localhost:3000/api/chat/tts', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-requested-with': 'DeshiGeeStorefront',
-        },
-        body: JSON.stringify({ text: 'আসসালামু আলাইকুম', lang: 'bn', sessionId: 'tts_s1' }),
-      })
-    );
-    assert.equal(noKey.status, 503);
-    const noKeyBody = (await noKey.json()) as { ok: boolean; code?: string };
-    assert.equal(noKeyBody.ok, false);
-    assert.equal(noKeyBody.code, 'gemini_api_key_missing');
-
-    // 3. Successful unary WAV synthesis with gemini-3.8-flash-lite-tts
-    let capturedModel = '';
-    let capturedModalities: string[] = [];
-    setGeminiClientFactoryForTests(
-      () =>
-        ({
-          models: {
-            generateContent: async (args: {
-              model: string;
-              config?: { responseModalities?: string[] };
-            }) => {
-              capturedModel = args.model;
-              capturedModalities = args.config?.responseModalities || [];
-              return {
-                candidates: [
-                  {
-                    content: {
-                      parts: [
-                        {
-                          inlineData: {
-                            mimeType: 'audio/wav',
-                            data: Buffer.from('RIFF_FAKE_WAV_BYTES').toString('base64'),
-                          },
-                        },
-                      ],
-                    },
-                  },
-                ],
-              };
-            },
+      // 1b. S0-08: Rejects arbitrary text without a valid server-signed ttsToken
+      const noToken = await chatTtsPost(
+        new Request('http://localhost:3000/api/chat/tts', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-requested-with': 'DeshiGeeStorefront',
           },
-        }) as never
-    );
+          body: JSON.stringify({ text: 'Arbitrary attacker prompt', lang: 'en', sessionId: 'tts_s0' }),
+        })
+      );
+      assert.equal(noToken.status, 403);
 
-    const okRes = await chatTtsPost(
-      new Request('http://localhost:3000/api/chat/tts', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-requested-with': 'DeshiGeeStorefront',
-        },
-        body: JSON.stringify({
-          text: '**দেশী ঘি** ৫০০ গ্রাম জারের দাম ১২৯০ টাকা।',
-          lang: 'bn',
-          sessionId: 'tts_s2',
-        }),
-      })
-    );
-    assert.equal(okRes.status, 200);
-    const okData = (await okRes.json()) as {
-      ok: boolean;
-      model: string;
-      mimeType: string;
-      audioBase64: string;
-    };
-    assert.equal(okData.ok, true);
-    assert.equal(capturedModel, 'gemini-3.8-flash-lite-tts');
-    assert.deepEqual(capturedModalities, ['AUDIO']);
-    assert.equal(okData.mimeType, 'audio/wav');
-    assert.ok(okData.audioBase64.length > 10);
+      // 2. Returns 503 cleanly when Gemini client is unavailable (no simulated audio)
+      setGeminiClientFactoryForTests(() => null);
+      const tok1 = tryCreateSignedTtsToken({
+        sessionId: 'tts_s1',
+        text: 'আসসালামু আলাইকুম',
+      });
+      assert.equal(tok1.ok, true);
+      const noKey = await chatTtsPost(
+        new Request('http://localhost:3000/api/chat/tts', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-requested-with': 'DeshiGeeStorefront',
+          },
+          body: JSON.stringify({
+            text: 'আসসালামু আলাইকুম',
+            lang: 'bn',
+            sessionId: 'tts_s1',
+            ttsToken: tok1.ok ? tok1.token : '',
+          }),
+        })
+      );
+      assert.equal(noKey.status, 503);
+      const noKeyBody = (await noKey.json()) as { ok: boolean; code?: string };
+      assert.equal(noKeyBody.ok, false);
+      assert.equal(noKeyBody.code, 'gemini_api_key_missing');
+
+      // 3. Successful unary WAV synthesis with gemini-3.8-flash-lite-tts
+      let capturedModel = '';
+      let capturedModalities: string[] = [];
+      setGeminiClientFactoryForTests(
+        () =>
+          ({
+            models: {
+              generateContent: async (args: {
+                model: string;
+                config?: { responseModalities?: string[] };
+              }) => {
+                capturedModel = args.model;
+                capturedModalities = args.config?.responseModalities || [];
+                return {
+                  candidates: [
+                    {
+                      content: {
+                        parts: [
+                          {
+                            inlineData: {
+                              mimeType: 'audio/wav',
+                              data: Buffer.from('RIFF_FAKE_WAV_BYTES').toString('base64'),
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  ],
+                };
+              },
+            },
+          }) as never
+      );
+
+      const replyText = '**দেশী ঘি** ৫০০ গ্রাম জারের দাম ১২৯০ টাকা।';
+      const tok2 = tryCreateSignedTtsToken({ sessionId: 'tts_s2', text: replyText });
+      assert.equal(tok2.ok, true);
+
+      const okRes = await chatTtsPost(
+        new Request('http://localhost:3000/api/chat/tts', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-requested-with': 'DeshiGeeStorefront',
+          },
+          body: JSON.stringify({
+            text: replyText,
+            lang: 'bn',
+            sessionId: 'tts_s2',
+            ttsToken: tok2.ok ? tok2.token : '',
+          }),
+        })
+      );
+      assert.equal(okRes.status, 200);
+      const okData = (await okRes.json()) as {
+        ok: boolean;
+        model: string;
+        mimeType: string;
+        audioBase64: string;
+      };
+      assert.equal(okData.ok, true);
+      assert.equal(capturedModel, 'gemini-3.8-flash-lite-tts');
+      assert.deepEqual(capturedModalities, ['AUDIO']);
+      assert.equal(okData.mimeType, 'audio/wav');
+      assert.ok(okData.audioBase64.length > 10);
+    } finally {
+      if (prevSecret === undefined) delete process.env.ORDER_TOKEN_SECRET;
+      else process.env.ORDER_TOKEN_SECRET = prevSecret;
+    }
   });
 
   it('SSLCommerz & bKash gateways initiate sessions, validate amounts strictly, and record idempotent callbacks', async () => {
@@ -429,6 +487,7 @@ describe('Phase 6 — Gemini TTS, Payment Gateways (SSLCommerz/bKash), Live Cour
       recipientArea: 'Uttara',
       codAmountBdt: 1290,
       weightGrams: 500,
+      deliveryAreaId: 12,
     });
     assert.equal(rxBook.ok, true);
     assert.equal(rxBook.consignmentId, 'RX-DG60002');
@@ -438,6 +497,58 @@ describe('Phase 6 — Gemini TTS, Payment Gateways (SSLCommerz/bKash), Live Cour
     assert.equal(mapCourierRawStatusToOrderStatus('in_transit'), 'shipped');
     assert.equal(mapCourierRawStatusToOrderStatus('returned'), 'cancelled');
     assert.equal(mapCourierRawStatusToOrderStatus('in_review'), 'processing');
+
+    // Seed authoritative order + tracking with consignmentId SF-DG60002 for webhook validation (S0-07)
+    const memCourier = getOrderStorageMemoryStateForTests()!;
+    memCourier.orders.set('DG-60002', {
+      orderNumber: 'DG-60002',
+      customerName: 'Karim',
+      phone: '01812345678',
+      district: 'Dhaka',
+      area: 'Uttara',
+      address: 'House 12, Sector 7',
+      note: '',
+      deliveryZone: 'dhaka',
+      weight: '500g',
+      qty: 1,
+      qty250g: 0,
+      qty500g: 1,
+      qty1kg: 0,
+      itemsSummary: '500g × 1',
+      unitPriceBdt: 1290,
+      subtotalBdt: 1290,
+      deliveryFeeBdt: 80,
+      discountBdt: 0,
+      totalBdt: 1370,
+      couponCode: '',
+      paymentMethod: 'cod',
+      paymentStatus: 'cod_due',
+      txnId: '',
+      paymentProofData: '',
+      status: 'shipped',
+      estimatedDelivery: 'Within 24 hours',
+      webhookStatus: 'delivered',
+      courierPartner: 'steadfast',
+      consignmentId: 'SF-DG60002',
+      courierTrackingUrl: 'https://steadfast.com.bd/t/SF-DG60002',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    memCourier.tracking.set('DG-60002_01812345678', {
+      orderNumber: 'DG-60002',
+      weight: '500g',
+      qty: 1,
+      itemsSummary: '500g × 1',
+      totalBdt: 1370,
+      status: 'shipped',
+      paymentMethod: 'cod',
+      paymentStatus: 'cod_due',
+      district: 'Dhaka',
+      estimatedDelivery: 'Within 24 hours',
+      courierPartner: 'steadfast',
+      consignmentId: 'SF-DG60002',
+      updatedAt: Date.now(),
+    });
 
     // Webhook HMAC verification
     const payloadStr = JSON.stringify({
@@ -468,9 +579,15 @@ describe('Phase 6 — Gemini TTS, Payment Gateways (SSLCommerz/bKash), Live Cour
       })
     );
     assert.equal(webhookRes.status, 200);
-    const whData = (await webhookRes.json()) as { ok: boolean; mappedOrderStatus: string };
+    const whData = (await webhookRes.json()) as {
+      ok: boolean;
+      mappedOrderStatus: string;
+      orderStatusUpdated: boolean;
+    };
     assert.equal(whData.ok, true);
     assert.equal(whData.mappedOrderStatus, 'delivered');
+    assert.equal(whData.orderStatusUpdated, true);
+    assert.equal(memCourier.tracking.get('DG-60002_01812345678')?.status, 'delivered');
 
     // Unauthenticated /api/courier/book rejected
     const unauthBook = await courierBookPost(
@@ -494,10 +611,16 @@ describe('Phase 6 — Gemini TTS, Payment Gateways (SSLCommerz/bKash), Live Cour
     process.env.OWNER_NOTIFICATION_EMAIL = 'owner@deshigee.com';
 
     const hitUrls: string[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const hitMethods: Record<string, string> = {};
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       hitUrls.push(url);
+      hitMethods[url] = init?.method || 'GET';
       if (url.includes('bulksmsbd.net/api/smsapi')) {
+        // S0-12: BulkSMSBD MUST send api_key in POST body, NEVER in URL query string
+        assert.equal(init?.method, 'POST');
+        assert.equal(url.includes('api_key='), false);
+        assert.equal(url.includes('bulk_api_key_secret_999'), false);
         return new Response('{"response_code":202,"success_message":"SMS Submitted Successfully"}', {
           status: 200,
         });
@@ -515,6 +638,7 @@ describe('Phase 6 — Gemini TTS, Payment Gateways (SSLCommerz/bKash), Live Cour
     });
     assert.equal(smsRes.status, 'sent');
     assert.equal(smsRes.channel, 'bulksmsbd');
+    assert.equal(hitMethods['https://bulksmsbd.net/api/smsapi'], 'POST');
 
     const emailRes = await sendDirectEmail({
       toEmail: 'owner@deshigee.com',

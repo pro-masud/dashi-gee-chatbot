@@ -392,13 +392,19 @@ export function resolveConfiguredDistrictAndZone(
   canonicalDistrict: string;
   deliveryZone: DeliveryZone;
   matchedBy?: 'exact' | 'alias' | 'fuzzy';
+  needsClarification?: boolean;
   suggestedDistrict?: string;
 } {
   const clean = convertBanglaDigitsToEnglish(districtInput || '')
     .replace(/['’`]/g, "'")
     .trim();
   if (!clean || clean.length < 2) {
-    return { valid: false, canonicalDistrict: '', deliveryZone: 'nationwide' };
+    return {
+      valid: false,
+      canonicalDistrict: '',
+      deliveryZone: 'nationwide',
+      needsClarification: false,
+    };
   }
   const lower = clean.toLowerCase();
   const areaLower = convertBanglaDigitsToEnglish(areaOrAddressInput || '').toLowerCase();
@@ -426,7 +432,8 @@ export function resolveConfiguredDistrictAndZone(
     }
   }
 
-  // Fuzzy Levenshtein (<= 2 edits) for common typos like "Daka", "Chitagong", "Shylet"
+  // Case #60: Fuzzy Levenshtein (<= 2 edits) for typos like "Daka", "Chitagong", "Shylet"
+  // MUST ask for confirmation ("Did you mean Chattogram?") instead of silently accepting/pricing.
   let suggestedDistrict: string | undefined;
   if (!canonical && /^[a-z'\s-]+$/.test(lower)) {
     let bestDist = 99;
@@ -451,15 +458,25 @@ export function resolveConfiguredDistrictAndZone(
     }
     const maxAllowed = lower.length <= 5 ? 1 : 2;
     if (bestDistrict && bestDist <= maxAllowed) {
-      canonical = bestDistrict;
-      matchedBy = 'fuzzy';
       suggestedDistrict = bestDistrict;
-      if (lower === 'savar') suburbanFromAlias = true;
+      return {
+        valid: false,
+        canonicalDistrict: '',
+        deliveryZone: 'nationwide',
+        matchedBy: 'fuzzy',
+        needsClarification: true,
+        suggestedDistrict,
+      };
     }
   }
 
   if (!canonical) {
-    return { valid: false, canonicalDistrict: '', deliveryZone: 'nationwide' };
+    return {
+      valid: false,
+      canonicalDistrict: '',
+      deliveryZone: 'nationwide',
+      needsClarification: false,
+    };
   }
 
   const areaSaysSuburb = DHAKA_SUBURBAN_AREA_KEYWORDS.some((kw) => areaLower.includes(kw));
@@ -488,7 +505,6 @@ export function resolveConfiguredDistrictAndZone(
     canonicalDistrict: canonical,
     deliveryZone,
     matchedBy,
-    ...(suggestedDistrict ? { suggestedDistrict } : {}),
   };
 }
 
@@ -1259,3 +1275,259 @@ export function verifySignedOrderToken(
     return { ok: false, reason: 'invalid_token' };
   }
 }
+
+// ---------------------------------------------------------------------------
+// S0-08: Signed HMAC Speech Token for /api/chat/tts (prevents arbitrary text TTS abuse)
+// ---------------------------------------------------------------------------
+
+export interface SignedTtsTokenPayload {
+  kind: 'tts_v1';
+  sessionId: string;
+  textHash: string;
+  iat: number;
+  exp: number;
+}
+
+export function normalizeTextForTtsHash(raw: string): string {
+  return String(raw || '')
+    .replace(/[*_`#>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 600);
+}
+
+export function computeTtsTextHash(text: string): string {
+  return createHash('sha256').update(normalizeTextForTtsHash(text), 'utf8').digest('hex').slice(0, 32);
+}
+
+export function tryCreateSignedTtsToken(params: {
+  sessionId: string;
+  text: string;
+  ttlMs?: number;
+}): { ok: true; token: string; expiresAt: number } | { ok: false; errorCode: 'order_secret_missing' } {
+  const resolvedKey = resolveOrderTokenSecretKey();
+  if (!resolvedKey.ok) {
+    return { ok: false, errorCode: 'order_secret_missing' };
+  }
+  const now = Date.now();
+  const ttl = Math.max(60_000, Math.min(2 * 60 * 60_000, params.ttlMs ?? 30 * 60_000));
+  const payload: SignedTtsTokenPayload = {
+    kind: 'tts_v1',
+    sessionId: String(params.sessionId || '').trim().slice(0, 80),
+    textHash: computeTtsTextHash(params.text),
+    iat: now,
+    exp: now + ttl,
+  };
+  const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const sig = createHmac('sha256', resolvedKey.key).update(`tts:${encoded}`).digest('base64url');
+  return { ok: true, token: `${encoded}.${sig}`, expiresAt: payload.exp };
+}
+
+export function verifySignedTtsToken(params: {
+  token: string;
+  text: string;
+  sessionId?: string;
+}):
+  | { ok: true; payload: SignedTtsTokenPayload }
+  | {
+      ok: false;
+      reason: 'invalid_token' | 'expired_token' | 'text_mismatch' | 'session_mismatch' | 'order_secret_missing';
+    } {
+  const resolvedKey = resolveOrderTokenSecretKey();
+  if (!resolvedKey.ok) {
+    return { ok: false, reason: 'order_secret_missing' };
+  }
+  if (!params.token || typeof params.token !== 'string' || !params.token.includes('.')) {
+    return { ok: false, reason: 'invalid_token' };
+  }
+  const parts = params.token.split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    return { ok: false, reason: 'invalid_token' };
+  }
+  const [encoded, sig] = parts;
+  try {
+    const expectedSig = createHmac('sha256', resolvedKey.key)
+      .update(`tts:${encoded}`)
+      .digest('base64url');
+    const a = Buffer.from(sig, 'utf8');
+    const b = Buffer.from(expectedSig, 'utf8');
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      return { ok: false, reason: 'invalid_token' };
+    }
+    const parsed = JSON.parse(
+      Buffer.from(encoded, 'base64url').toString('utf8')
+    ) as SignedTtsTokenPayload;
+    if (!parsed || parsed.kind !== 'tts_v1' || !parsed.textHash || !parsed.sessionId) {
+      return { ok: false, reason: 'invalid_token' };
+    }
+    if (Date.now() > Number(parsed.exp || 0)) {
+      return { ok: false, reason: 'expired_token' };
+    }
+    if (params.sessionId && parsed.sessionId !== params.sessionId.trim()) {
+      return { ok: false, reason: 'session_mismatch' };
+    }
+    if (computeTtsTextHash(params.text) !== parsed.textHash) {
+      return { ok: false, reason: 'text_mismatch' };
+    }
+    return { ok: true, payload: parsed };
+  } catch {
+    return { ok: false, reason: 'invalid_token' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Item 5: Signed Single-Use HMAC Action Token for Chat Cancel & Address-Edit Confirm Card
+// ---------------------------------------------------------------------------
+
+export interface SignedOrderManageActionPayload {
+  kind: 'order_manage_v1';
+  tokenId: string;
+  sessionId: string;
+  action: 'cancel' | 'edit_address';
+  orderNumber: string;
+  phone: string;
+  district?: string;
+  area?: string;
+  address?: string;
+  reason?: string;
+  iat: number;
+  exp: number;
+}
+
+const usedManageActionTokenHolder = globalThis as unknown as {
+  __deshiGeeUsedManageActionTokens?: Map<string, number>;
+};
+
+function getUsedManageActionTokenMap(): Map<string, number> {
+  if (!usedManageActionTokenHolder.__deshiGeeUsedManageActionTokens) {
+    usedManageActionTokenHolder.__deshiGeeUsedManageActionTokens = new Map();
+  }
+  const map = usedManageActionTokenHolder.__deshiGeeUsedManageActionTokens;
+  if (map.size > 500) {
+    const now = Date.now();
+    for (const [k, exp] of map.entries()) {
+      if (exp < now) map.delete(k);
+    }
+  }
+  return map;
+}
+
+export function resetUsedOrderManageTokensForTests(): void {
+  if (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') {
+    usedManageActionTokenHolder.__deshiGeeUsedManageActionTokens?.clear();
+  }
+}
+
+export function tryCreateSignedOrderManageToken(params: {
+  sessionId: string;
+  action: 'cancel' | 'edit_address';
+  orderNumber: string;
+  phone: string;
+  district?: string;
+  area?: string;
+  address?: string;
+  reason?: string;
+  ttlMs?: number;
+}):
+  | { ok: true; token: string; payload: SignedOrderManageActionPayload }
+  | { ok: false; errorCode: 'order_secret_missing' } {
+  const resolvedKey = resolveOrderTokenSecretKey();
+  if (!resolvedKey.ok) {
+    return { ok: false, errorCode: 'order_secret_missing' };
+  }
+  const now = Date.now();
+  const ttl = Math.max(60_000, Math.min(15 * 60_000, params.ttlMs ?? 10 * 60_000));
+  const payload: SignedOrderManageActionPayload = {
+    kind: 'order_manage_v1',
+    tokenId: randomUUID(),
+    sessionId: String(params.sessionId || '').trim().slice(0, 80),
+    action: params.action,
+    orderNumber: String(params.orderNumber || '').trim().toUpperCase(),
+    phone: normalizeBangladeshPhone(params.phone),
+    ...(params.district ? { district: String(params.district).trim().slice(0, 60) } : {}),
+    ...(params.area ? { area: String(params.area).trim().slice(0, 80) } : {}),
+    ...(params.address ? { address: String(params.address).trim().slice(0, 220) } : {}),
+    ...(params.reason ? { reason: String(params.reason).trim().slice(0, 220) } : {}),
+    iat: now,
+    exp: now + ttl,
+  };
+  const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const sig = createHmac('sha256', resolvedKey.key)
+    .update(`manage:${encoded}`)
+    .digest('base64url');
+  return { ok: true, token: `${encoded}.${sig}`, payload };
+}
+
+export function verifySignedOrderManageToken(params: {
+  token: string;
+  sessionId?: string;
+}):
+  | { ok: true; payload: SignedOrderManageActionPayload }
+  | {
+      ok: false;
+      reason:
+        | 'invalid_token'
+        | 'expired_token'
+        | 'session_mismatch'
+        | 'token_already_used'
+        | 'order_secret_missing';
+    } {
+  const resolvedKey = resolveOrderTokenSecretKey();
+  if (!resolvedKey.ok) {
+    return { ok: false, reason: 'order_secret_missing' };
+  }
+  if (!params.token || typeof params.token !== 'string' || !params.token.includes('.')) {
+    return { ok: false, reason: 'invalid_token' };
+  }
+  const parts = params.token.split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    return { ok: false, reason: 'invalid_token' };
+  }
+  const [encoded, sig] = parts;
+  try {
+    const expectedSig = createHmac('sha256', resolvedKey.key)
+      .update(`manage:${encoded}`)
+      .digest('base64url');
+    const a = Buffer.from(sig, 'utf8');
+    const b = Buffer.from(expectedSig, 'utf8');
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      return { ok: false, reason: 'invalid_token' };
+    }
+    const parsed = JSON.parse(
+      Buffer.from(encoded, 'base64url').toString('utf8')
+    ) as SignedOrderManageActionPayload;
+    if (
+      !parsed ||
+      parsed.kind !== 'order_manage_v1' ||
+      !parsed.tokenId ||
+      !parsed.sessionId ||
+      !parsed.orderNumber ||
+      !parsed.phone ||
+      (parsed.action !== 'cancel' && parsed.action !== 'edit_address')
+    ) {
+      return { ok: false, reason: 'invalid_token' };
+    }
+    if (Date.now() > Number(parsed.exp || 0)) {
+      return { ok: false, reason: 'expired_token' };
+    }
+    if (params.sessionId && parsed.sessionId !== params.sessionId.trim()) {
+      return { ok: false, reason: 'session_mismatch' };
+    }
+    if (getUsedManageActionTokenMap().has(parsed.tokenId)) {
+      return { ok: false, reason: 'token_already_used' };
+    }
+    return { ok: true, payload: parsed };
+  } catch {
+    return { ok: false, reason: 'invalid_token' };
+  }
+}
+
+export function consumeSignedOrderManageToken(payload: SignedOrderManageActionPayload): boolean {
+  const map = getUsedManageActionTokenMap();
+  if (map.has(payload.tokenId)) {
+    return false;
+  }
+  map.set(payload.tokenId, payload.exp + 60_000);
+  return true;
+}
+

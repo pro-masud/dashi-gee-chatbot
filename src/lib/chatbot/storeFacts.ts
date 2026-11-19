@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import type { BatchRecord, StoreSettingsDoc } from '../storeTypes';
-import type { ChatbotConfigDoc } from './types';
+import type { ApprovedClaimMeta, ChatbotConfigDoc } from './types';
 import { convertBanglaDigitsToEnglish } from './domain-guard';
 
 export interface StoreFactsSnapshot {
@@ -263,12 +263,45 @@ export function getSeededVerifiedMonetaryAmounts(facts: StoreFactsSnapshot): Set
   return seeded;
 }
 
+export function sanitizeApprovedClaimsStringForPublish(rawClaims?: string): string {
+  return String(rawClaims || '')
+    .split(/[;\n]+/)
+    .map((part) => part.trim())
+    .filter((part) => {
+      if (!part) return false;
+      if (/\[draft\b/i.test(part)) return false;
+      if (/enter\s+verified|template\s+draft|placeholder|\[add\s+/i.test(part)) return false;
+      return true;
+    })
+    .join('; ');
+}
+
+export function sanitizeApprovedClaimsMetaForPublish(
+  metaList?: ApprovedClaimMeta[]
+): ApprovedClaimMeta[] {
+  if (!Array.isArray(metaList)) return [];
+  return metaList
+    .filter((m) => m && m.status !== 'draft')
+    .filter((m) => {
+      const claim = String(m.claim || '').trim();
+      return (
+        claim.length > 0 &&
+        !/\[draft\b/i.test(claim) &&
+        !/enter\s+verified|template\s+draft|placeholder|\[add\s+/i.test(claim)
+      );
+    })
+    .map((m) => ({
+      ...m,
+      status: 'approved' as const,
+    }));
+}
+
 export function getActiveApprovedClaimsText(config: ChatbotConfigDoc): string {
   const todayIso = new Date().toISOString().slice(0, 10);
-  const metaList = Array.isArray(config.approvedClaimsMeta) ? config.approvedClaimsMeta : [];
-  const activeMetaClaims = metaList
+  const safeLegacyClaims = sanitizeApprovedClaimsStringForPublish(config.approvedClaims);
+  const activeMetaClaims = sanitizeApprovedClaimsMetaForPublish(config.approvedClaimsMeta)
     .filter((m) => !m.expiresAt || m.expiresAt >= todayIso)
     .map((m) => m.claim)
     .filter(Boolean);
-  return [config.approvedClaims || '', ...activeMetaClaims].join('; ').toLowerCase();
+  return [safeLegacyClaims, ...activeMetaClaims].filter(Boolean).join('; ').toLowerCase();
 }

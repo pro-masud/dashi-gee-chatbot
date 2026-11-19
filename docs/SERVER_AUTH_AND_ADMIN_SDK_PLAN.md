@@ -161,8 +161,7 @@
        - Project-level `roles/datastore.user` covers **every Firestore database** in `qualified-transit-lpd8p`.
        - The grant applies to **preview only** — a published/production app runs under a different service account and must be configured separately.
 
-> **Required Owner Question Before Any Admin SDK Work:**
-> **Is Firebase project `qualified-transit-lpd8p` a project that you own (with Cloud Billing & IAM access), or is it an AI Studio Google-hosted (Starter Tier) project?**
+> **Owner Confirmation Recorded:** Owner confirmed `qualified-transit-lpd8p` is a **user-owned GCP project with Cloud Billing and IAM access**. Admin SDK implementation remains deferred until explicitly authorized; zero IAM grants or deploys have been made in this pass.
 
 ### Hosting Alternatives & Trade-Offs (For Production Deployment)
 
@@ -179,8 +178,34 @@
 
 > **ZERO documents were deleted.** All checks below were strictly **read-only HTTP `GET`** requests against `qualified-transit-lpd8p` / `ai-studio-deshigee-20fc0392-83a6-4282-be32-68447c38436f`.
 
-### Root Cause
-`npm test` sets `DESHI_GEE_TEST_MODE=1`, which activates in-memory maps (`setSessionDraftMemoryModeForTests`, `setOrderStorageMemoryModeForTests`, `setChannelMemoryModeForTests`, `setRateLimitMemoryModeForTests`, `setRetentionMemoryModeForTests`). However, during `S0-03` debugging on `2026-11-19` (`~04:57–05:04 UTC`), `npx tsx --test tests/phase5-channels-retention.test.ts tests/stage1-p0-security.test.ts` was invoked directly **without** `DESHI_GEE_TEST_MODE=1` (and with `NODE_ENV` unset). Because the test-mode toggles silently no-op when `NODE_ENV !== 'test' && DESHI_GEE_TEST_MODE !== '1'`, those test runs sent real REST writes to the live Firestore database. (Timestamps also show earlier pre-Stage-0 runs on `2026-11-18T10:00Z` had previously created several of the same Phase 5 draft docs.)
+### Root Cause (Two Separate Pre-Guard Leak Paths)
+1. **Direct `tsx --test` invocations without `DESHI_GEE_TEST_MODE=1`:** During `S0-03` debugging on `2026-11-19` (`~04:57–05:04 UTC`), `npx tsx --test tests/phase5-channels-retention.test.ts tests/stage1-p0-security.test.ts` ran without `DESHI_GEE_TEST_MODE=1` or `NODE_ENV=test`, causing in-memory toggles to no-op and issue real REST writes to live Firestore.
+2. **Pre-guard `tests/chatbot-runtime-health.test.ts` runs (every `npm test` before commit `50945b1`):** Before the fail-closed live-write guard (`S0-14`) was added, `tests/chatbot-runtime-health.test.ts` executed 5+ real `POST /api/chat` requests per run while only overriding `setChatLogObserverForTests` (leaving `chatbot_rate_buckets`, `chat_sessions`, `order_drafts`, and `chatbot_cost_ledger` hitting live Firestore on every `npm test` run!). That file now enables in-memory overrides in `beforeEach` AND `src/lib/chatbot/firestoreRest.ts` now throws `LiveFirestoreWriteInTestError` if any test attempts a live Firestore write without an emulator/mock, plus throws `ProductionTestModeForbiddenError` (logging `[SECURITY_FATAL]`) if `DESHI_GEE_TEST_MODE=1` is ever set under `NODE_ENV=production`.
+
+### Collections Polluted by Earlier Pre-Guard `chatbot-runtime-health` & Test Runs
+| Collection | Written By Pre-Guard Runs? | Observed / Expected Test Doc Pattern |
+|---|---|---|
+| `chatbot_rate_buckets` | **Yes** (every pre-guard `npm test`) | Time-windowed buckets for `unknown` / `203.0.113.*` IPs |
+| `chat_sessions` | **Yes** (every pre-guard `npm test` + Phase 5) | `test_sess_fallback_01`, `test_sess_gemini_01`, `test_sess_gemini_err_01`, `test_sess_stream_greet_01`, `test_sess_stream_failover_01`, `test_sess_round1_failover`, `sess_501`, `sess_502`, `ch_wa_c38bd0e07613010419afeb16`, `dg_<32hex>` |
+| `order_drafts` | **Yes** (every pre-guard `npm test` + Phase 5) | `draft_test_sess_*`, `draft_sess_501`, `draft_sess_502`, `draft_ch_wa_c38bd0e07613010419afeb16`, `draft_dg_<32hex>` |
+| `chatbot_cost_ledger` | **Yes** (every pre-guard `npm test`) | `chatbot_cost_ledger/2026-11-18` and `chatbot_cost_ledger/2026-11-19` (exact live read-only values below) |
+| `chatbot_logs` | **Partial** (non-mocked turns, e.g. Phase 5 webhook) | 1–2 random-ID logs from `T5.1/T5.2b` WhatsApp turn (runtime-health mocked `setChatLogObserverForTests`) |
+| `marketing_consents` | **Yes** (direct unguarded `S0-03` / Phase 5 runs) | `01711223344`, `01811000501`, `01811000502`, `01711888999` |
+| `channel_webhook_events` | **Yes** (direct unguarded Phase 5 run) | `whatsapp_wamid_001`, `whatsapp_wamid_stop_002` |
+
+### `chatbot_cost_ledger` Live Inspection & Test-Traffic Pollution Estimate (Read-Only `GET`, Zero Writes/Deletes)
+Read-only REST `GET` executed against live Firestore on `2026-11-19`:
+
+| Document | HTTP Status | `requestCount` | `promptTokens` | `outputTokens` | `totalUsd` | `capHit` | `updatedAt` (UTC) |
+|---|---|---|---|---|---|---|---|
+| `chatbot_cost_ledger/2026-11-17` | `404` | — | — | — | — | — | — |
+| `chatbot_cost_ledger/2026-11-18` | `200` | `108` | `85,331` | `2,556` | `0` | `false` | `2026-11-18T10:03:05.808Z` |
+| `chatbot_cost_ledger/2026-11-19` | `200` | `128` | `210,594` | `4,963` | `0` | `false` | `2026-11-19T05:31:40.146Z` |
+
+**Pollution estimate:**
+- Each pre-guard run of `tests/chatbot-runtime-health.test.ts` executes **6 `POST /api/chat` requests**, of which **4 mocked Gemini turns** log synthetic usage (`120+28`, `410+16`, `200+24`, and `900+12 + 950+30` = **`2,580` prompt tokens + `110` output tokens per run**, estimated cost `~$0.0004` per run, which rounds to `0` at integer precision / very small USD delta).
+- Across ~15–20 pre-guard `npm test` runs on `2026-11-18` and `2026-11-19` (plus regression/preview traffic), roughly **90–120 requests (`~40%–55%` of `requestCount`) and `~40,000–55,000` prompt tokens / `~1,800–2,200` output tokens** in `2026-11-18` + `2026-11-19` came from automated test traffic.
+- **Financial / quota impact:** `totalUsd` recorded in both documents is **`0`** (`capHit: false`), and **zero** real Gemini API billing occurred from those mocked test turns because `setGeminiClientFactoryForTests` stubbed the Gemini SDK; the pollution is purely counter inflation in `requestCount`, `promptTokens`, and `outputTokens`.
 
 ### 1. Confirmed Existing Test Documents in Live DB (Verified via Read-Only `GET` → HTTP `200`)
 
@@ -196,8 +221,8 @@
 | `marketing_consents/01811000501` | `2026-11-19T04:58:24.153993Z` | `2026-11-19T04:58:24.153993Z` | `tests/phase5-channels-retention.test.ts` (`T5.3` opt-in) |
 | `marketing_consents/01811000502` | `2026-11-19T04:58:24.530472Z` | `2026-11-19T04:58:24.530472Z` | `tests/phase5-channels-retention.test.ts` (`T5.3` unsubscribe) |
 | `marketing_consents/01711888999` | `2026-11-19T04:57:48.796269Z` | `2026-11-19T05:04:20.457895Z` | `tests/stage1-p0-security.test.ts` (`S0-03` consent/unsubscribe) |
-| `chatbot_cost_ledger/2026-11-19` | `2026-11-19T03:21:17.438186Z` | `2026-11-19T05:22:59.220361Z` | Live preview / chatbot runs (may include test turns) |
-| `chatbot_cost_ledger/2026-11-18` | `2026-11-18T06:35:06.712554Z` | `2026-11-18T10:03:05.824988Z` | Pre-Stage-0 runs (`2026-11-18`) |
+| `chatbot_cost_ledger/2026-11-19` | `2026-11-19T03:21:17.438186Z` | `2026-11-19T05:31:40.146Z` | `requestCount=128`, `promptTokens=210594`, `outputTokens=4963`, `totalUsd=0` |
+| `chatbot_cost_ledger/2026-11-18` | `2026-11-18T06:35:06.712554Z` | `2026-11-18T10:03:05.808Z` | `requestCount=108`, `promptTokens=85331`, `outputTokens=2556`, `totalUsd=0` |
 
 ### 2. Confirmed ABSENT (Read-Only `GET` → HTTP `404`)
 - `test/connection` (`404`)
@@ -205,14 +230,16 @@
 - `order_tracking/DG-771234_01711888999`, `refill_reminders/DG-771234_01711888999` (`404`)
 - `order_tracking/DG-88001_01711000111`, `order_tracking/DG-60001_01711000111`, `order_tracking/DG-50001_01711223344`, `refill_reminders/DG-50001_01711223344` (`404`)
 - `marketing_consents/01811222333` (`404`)
+- `chatbot_cost_ledger/2026-11-17` (`404`)
 
 ### 3. Possible Additional Test Documents Not Directly Enumerable Without Admin `list`
 Because `list` is `isAdmin()`-only on these collections and some IDs are random or time-bucketed, the owner can inspect (and decide whether to delete) the following in the Firebase Console:
+- `chat_sessions/test_sess_*` & `order_drafts/draft_test_sess_*` (`test_sess_fallback_01`, `test_sess_gemini_01`, `test_sess_gemini_err_01`, `test_sess_stream_greet_01`, `test_sess_stream_failover_01`, `test_sess_round1_failover`) from pre-guard `chatbot-runtime-health.test.ts` runs.
 - `chat_sessions/dg_<32hex>` and `order_drafts/draft_dg_<32hex>` (1–2 random IDs minted during `stage1-p0-security.test.ts` `S0-02` run at `2026-11-19T04:57–05:04Z`, containing `customerName: "Victim Customer"`, `phone: "01711000999"`).
 - `channel_webhook_events/whatsapp_wamid_001` and `channel_webhook_events/whatsapp_wamid_stop_002` (admin-only `get`/`list`, written during `phase5-channels-retention.test.ts` `T5.1/T5.2b` at `2026-11-19T04:58Z`).
 - `chatbot_logs/*` (1–2 random-ID logs from the `T5.1/T5.2b` WhatsApp turn `"500g Deshi Gee er dam koto? Amar number 01711223344"` at `2026-11-19T04:58Z`).
-- `chatbot_rate_buckets/*` (time-windowed IP buckets for `203.0.113.30` / `unknown` from `2026-11-19T04:57–05:04Z`).
-- Note on `T5.4` (`orderPost` for `Salma Begum`, `01911000601`): in `phase5-channels-retention.test.ts`, the test failed earlier on `T5.3` or `getOrderStorageMemoryStateForTests()!` — check `orders` in Firebase Console for any `customerName == "Salma Begum"` / `phone == "01911000601"` around `2026-11-19T04:58Z` just in case a single test order was committed before assertion failure.
+- `chatbot_rate_buckets/*` (time-windowed IP buckets for `203.0.113.30` / `unknown` from `2026-11-18`–`2026-11-19`).
+- Note on `T5.4` (`orderPost` for `Salma Begum`, `01911000601`): check `orders` in Firebase Console for any `customerName == "Salma Begum"` / `phone == "01911000601"` around `2026-11-19T04:58Z` just in case a single test order was committed before assertion failure.
 
 ---
 
