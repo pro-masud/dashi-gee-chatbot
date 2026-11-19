@@ -102,13 +102,13 @@ export function BagCheckoutDrawer({
   useEffect(() => {
     if (!open) return;
     let active = true;
-    fetch('/api/integrations/status')
+    fetch('/api/payments/methods')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!active || !data?.payments) return;
+        if (!active || !data?.onlineGateways) return;
         setOnlineGateways({
-          sslcommerz: Boolean(data.payments.sslcommerz?.configured),
-          bkash: Boolean(data.payments.bkash?.configured),
+          sslcommerz: Boolean(data.onlineGateways.sslcommerz),
+          bkash: Boolean(data.onlineGateways.bkash),
         });
       })
       .catch(() => {});
@@ -480,28 +480,7 @@ export function BagCheckoutDrawer({
       // Atomic Firestore persistence (orders + PII-safe order_tracking + audit log + stock decrement)
       await createOrderAtomically(orderPayload);
 
-      // Fire non-blocking owner notification webhook (failure never erases saved order)
-      try {
-        await fetch('/api/orders/notify', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Requested-With': 'DeshiGeeStorefront',
-          },
-          body: JSON.stringify({
-            orderNumber: orderPayload.orderNumber,
-            customerName: orderPayload.customerName,
-            phone: orderPayload.phone,
-            weight: orderPayload.itemsSummary,
-            qty: orderPayload.qty,
-            totalBdt: orderPayload.totalBdt,
-            paymentMethod: orderPayload.paymentMethod,
-            address: `${orderPayload.address}, ${orderPayload.area}, ${orderPayload.district}`,
-          }),
-        });
-      } catch {
-        // notification log handled server-side without blocking user confirmation
-      }
+      // S0-05: /api/orders/notify is server-internal/admin-only (never triggered by unauthenticated client headers).
 
       trackStoreEvent('Purchase', {
         transaction_id: orderPayload.orderNumber,

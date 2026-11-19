@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { verifyServerAdminToken } from '../../../../src/lib/chatbot/firestoreRest';
 import {
   isGeminiApiKeyConfigured,
   isOrderTokenSecretConfigured,
@@ -9,7 +10,15 @@ import { getPaymentGatewayReadiness } from '../../../../src/lib/integrations/pay
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
+  const adminCheck = await verifyServerAdminToken(request.headers.get('authorization'));
+  if (!adminCheck.ok) {
+    return NextResponse.json(
+      { ok: false, error: 'Admin authorization required.' },
+      { status: 401, headers: { 'Cache-Control': 'no-store' } }
+    );
+  }
+
   const payments = getPaymentGatewayReadiness();
   const couriers = getCourierApiReadiness();
   const messaging = getMessagingGatewayReadiness();

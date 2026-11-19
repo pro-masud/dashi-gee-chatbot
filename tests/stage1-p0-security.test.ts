@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -7,16 +8,27 @@ import {
   GET as chatSessionGet,
   POST as chatSessionPost,
 } from '../app/api/chat/session/route';
+import { GET as integrationsStatusGet } from '../app/api/integrations/status/route';
+import { GET as notificationsStatusGet } from '../app/api/notifications/status/route';
+import { POST as ordersNotifyPost } from '../app/api/orders/notify/route';
 import { POST as paymentCallbackPost } from '../app/api/payments/callback/route';
 import { POST as paymentInitiatePost } from '../app/api/payments/initiate/route';
+import { GET as paymentMethodsGet } from '../app/api/payments/methods/route';
 import { POST as retentionCampaignsPost } from '../app/api/retention/campaigns/route';
 import {
+  LiveFirestoreWriteBlockedInTestError,
+  checkAndIncrementFirestoreRateLimit,
   clearMemoryGatewayEventsForTests,
   getOrderStorageMemoryStateForTests,
+  recordPaymentGatewayEvent,
+  setAdminAuthOverrideForTests,
+  setChannelMemoryModeForTests,
   setOrderStorageMemoryModeForTests,
   setRateLimitMemoryModeForTests,
   setRetentionMemoryModeForTests,
   setSessionDraftMemoryModeForTests,
+  upsertMarketingConsent,
+  upsertServerChatSession,
 } from '../src/lib/chatbot/firestoreRest';
 import {
   SESSION_COOKIE_NAME,
@@ -51,6 +63,7 @@ describe('Stage 1 P0 Security — S0-01..S0-06', () => {
     setRateLimitMemoryModeForTests(true);
     setOrderStorageMemoryModeForTests(true);
     setRetentionMemoryModeForTests(true);
+    setChannelMemoryModeForTests(true);
   });
 
   afterEach(() => {
@@ -58,6 +71,7 @@ describe('Stage 1 P0 Security — S0-01..S0-06', () => {
     setRateLimitMemoryModeForTests(false);
     setOrderStorageMemoryModeForTests(false);
     setRetentionMemoryModeForTests(false);
+    setChannelMemoryModeForTests(false);
   });
 
   it('S0-01: public/assets/aistudio does not exist and no internal markdown/spec/backlog docs are inside public/', () => {
@@ -193,10 +207,16 @@ describe('Stage 1 P0 Security — S0-01..S0-06', () => {
     assert.equal(okData.orderDraft?.customerName, 'Victim Customer');
     assert.equal(okData.session?.agentReplies?.length, 1);
 
-    // 7. firestore.rules forbids anonymous/client reads on chat_sessions & order_drafts
-    const rules = fs.readFileSync(path.join(ROOT, 'firestore.rules'), 'utf8');
-    assert.match(rules, /match \/chat_sessions\/\{sessionId\}\s*\{\s*allow get, list: if isAdmin\(\);/);
-    assert.match(rules, /match \/order_drafts\/\{draftId\}\s*\{\s*allow get, list: if isAdmin\(\);/);
+    // 7. master firestore.rules is explicitly marked DEPLOY-BLOCKED while staged branch enforces isAdmin()-only
+    const masterRules = fs.readFileSync(path.join(ROOT, 'firestore.rules'), 'utf8');
+    assert.match(masterRules, /DEPLOY-BLOCKED NOTICE/);
+    assert.equal(fs.existsSync(path.join(ROOT, 'DEPLOY_BLOCKED.md')), true);
+    const stagedRules = execFileSync('git', ['show', 'rules-admin-only-pending-sdk:firestore.rules'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    });
+    assert.match(stagedRules, /match \/chat_sessions\/\{sessionId\}\s*\{\s*allow get, list: if isAdmin\(\);/);
+    assert.match(stagedRules, /match \/order_drafts\/\{draftId\}\s*\{\s*allow get, list: if isAdmin\(\);/);
   });
 
   it('S0-03: marketing_consents & refill_reminders are server-only in firestore.rules and consent/unsubscribe requires phone ownership proof', async () => {
@@ -328,10 +348,13 @@ describe('Stage 1 P0 Security — S0-01..S0-06', () => {
     assert.equal(tokenProofJson.ok, true);
     assert.equal(tokenProofJson.unsubscribed, true);
 
-    // 7. firestore.rules forbids anonymous/client get/list/create/update/delete on refill_reminders & marketing_consents
-    const rules = fs.readFileSync(path.join(ROOT, 'firestore.rules'), 'utf8');
-    assert.match(rules, /match \/refill_reminders\/\{reminderId\}\s*\{\s*allow get, list: if isAdmin\(\);/);
-    assert.match(rules, /match \/marketing_consents\/\{phoneKey\}\s*\{\s*allow get, list: if isAdmin\(\);/);
+    // 7. staged branch `rules-admin-only-pending-sdk` forbids anonymous/client reads & writes on refill_reminders & marketing_consents
+    const stagedRules = execFileSync('git', ['show', 'rules-admin-only-pending-sdk:firestore.rules'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    });
+    assert.match(stagedRules, /match \/refill_reminders\/\{reminderId\}\s*\{\s*allow get, list: if isAdmin\(\);/);
+    assert.match(stagedRules, /match \/marketing_consents\/\{phoneKey\}\s*\{\s*allow get, list: if isAdmin\(\);/);
   });
 
   it('S0-04: payment routes return Not configured when env missing, reject forged IPN hash, never fall back to expectedAmountBdt=1, ignore unauth fail/cancel, and update order paymentStatus only after validation', async () => {
@@ -485,7 +508,7 @@ describe('Stage 1 P0 Security — S0-01..S0-06', () => {
         totalBdt: 1550,
         status: 'pending',
         paymentMethod: 'bkash',
-        paymentStatus: 'pending',
+        paymentStatus: 'pending_verification',
         district: 'Dhaka',
         estimatedDelivery: 'Within 24 hours',
         updatedAt: Date.now(),
@@ -505,7 +528,7 @@ describe('Stage 1 P0 Security — S0-01..S0-06', () => {
       assert.equal(unauthCancel.status, 200);
       const unauthCancelJson = (await unauthCancel.json()) as { recorded: boolean };
       assert.equal(unauthCancelJson.recorded, false);
-      assert.equal(mem.tracking.get('DG-88001_01711000111')?.paymentStatus, 'pending');
+      assert.equal(mem.tracking.get('DG-88001_01711000111')?.paymentStatus, 'pending_verification');
 
       // 5. Client spoofs amount=10 with valid IPN hash -> server still checks against 1550 BDT -> rejected (400) & paymentStatus stays pending
       const underpaidFields: Record<string, string> = {
@@ -529,7 +552,7 @@ describe('Stage 1 P0 Security — S0-01..S0-06', () => {
         )
       );
       assert.equal(underpaidRes.status, 400);
-      assert.equal(mem.tracking.get('DG-88001_01711000111')?.paymentStatus, 'pending');
+      assert.equal(mem.tracking.get('DG-88001_01711000111')?.paymentStatus, 'pending_verification');
 
       // 6. bKash execute MUST reject empty merchantInvoiceNumber
       const bkEmptyInv = await executeBkashCheckout({
@@ -580,6 +603,216 @@ describe('Stage 1 P0 Security — S0-01..S0-06', () => {
       else process.env.BKASH_USERNAME = prevBkUser;
       if (prevBkPass === undefined) delete process.env.BKASH_PASSWORD;
       else process.env.BKASH_PASSWORD = prevBkPass;
+    }
+  });
+
+  it('S0-05: /api/orders/notify rejects client x-requested-with header, requires Admin or internal secret, and rate-limits callers', async () => {
+    const prevInternal = process.env.INTERNAL_NOTIFY_SECRET;
+    try {
+      process.env.INTERNAL_NOTIFY_SECRET = 'internal_notify_secret_at_least_24_chars';
+      setAdminAuthOverrideForTests(async (authHeader) =>
+        authHeader === 'Bearer admin-s005-token'
+          ? { ok: true, email: 'admin@deshigee.com', uid: 'admin-s005' }
+          : { ok: false, email: '', uid: '' }
+      );
+
+      // 1. Spoofed browser header alone -> 401
+      const clientHeaderRes = await ordersNotifyPost(
+        new Request('http://localhost:3000/api/orders/notify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-requested-with': 'DeshiGeeStorefront',
+            'x-forwarded-for': '203.0.113.55',
+          },
+          body: JSON.stringify({ orderNumber: 'DG-90001', phone: '01711000111', totalBdt: 1290 }),
+        })
+      );
+      assert.equal(clientHeaderRes.status, 401);
+
+      // 2. Wrong internal secret -> 401
+      const badSecretRes = await ordersNotifyPost(
+        new Request('http://localhost:3000/api/orders/notify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-internal-notify-secret': 'wrong-secret',
+            'x-forwarded-for': '203.0.113.55',
+          },
+          body: JSON.stringify({ orderNumber: 'DG-90001' }),
+        })
+      );
+      assert.equal(badSecretRes.status, 401);
+
+      // 3. Valid internal secret -> 200
+      const okInternalRes = await ordersNotifyPost(
+        new Request('http://localhost:3000/api/orders/notify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-internal-notify-secret': process.env.INTERNAL_NOTIFY_SECRET,
+            'x-forwarded-for': '203.0.113.56',
+          },
+          body: JSON.stringify({ orderNumber: 'DG-90001', customerName: 'Test', totalBdt: 1290 }),
+        })
+      );
+      assert.equal(okInternalRes.status, 200);
+
+      // 4. Valid Admin Bearer token -> 200
+      const okAdminRes = await ordersNotifyPost(
+        new Request('http://localhost:3000/api/orders/notify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer admin-s005-token',
+            'x-forwarded-for': '203.0.113.57',
+          },
+          body: JSON.stringify({ orderNumber: 'DG-90002', customerName: 'Test', totalBdt: 1290 }),
+        })
+      );
+      assert.equal(okAdminRes.status, 200);
+
+      // 5. Rate limit triggers 429 after 20 calls from same IP
+      let hit429 = false;
+      for (let i = 0; i < 22; i++) {
+        const r = await ordersNotifyPost(
+          new Request('http://localhost:3000/api/orders/notify', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: 'Bearer admin-s005-token',
+              'x-forwarded-for': '203.0.113.58',
+            },
+            body: JSON.stringify({ orderNumber: `DG-900${i}` }),
+          })
+        );
+        if (r.status === 429) {
+          hit429 = true;
+          break;
+        }
+      }
+      assert.equal(hit429, true, 'Expected 429 rate limit on /api/orders/notify');
+    } finally {
+      setAdminAuthOverrideForTests(null);
+      if (prevInternal === undefined) delete process.env.INTERNAL_NOTIFY_SECRET;
+      else process.env.INTERNAL_NOTIFY_SECRET = prevInternal;
+    }
+  });
+
+  it('S0-06: /api/integrations/status and /api/notifications/status are admin-only (zero public recentLogs) and /api/payments/methods exposes only minimal checkout payment flags', async () => {
+    setAdminAuthOverrideForTests(async (authHeader) =>
+      authHeader === 'Bearer admin-s006-token'
+        ? { ok: true, email: 'admin@deshigee.com', uid: 'admin-s006' }
+        : { ok: false, email: '', uid: '' }
+    );
+    try {
+      // 1. Unauthenticated callers get 401 and zero recentLogs / internal status
+      const unauthInt = await integrationsStatusGet(
+        new Request('http://localhost:3000/api/integrations/status')
+      );
+      assert.equal(unauthInt.status, 401);
+
+      const unauthNotif = await notificationsStatusGet(
+        new Request('http://localhost:3000/api/notifications/status')
+      );
+      assert.equal(unauthNotif.status, 401);
+      assert.equal((await unauthNotif.text()).includes('recentLogs'), false);
+
+      // 2. Admin callers succeed (200)
+      const adminInt = await integrationsStatusGet(
+        new Request('http://localhost:3000/api/integrations/status', {
+          headers: { Authorization: 'Bearer admin-s006-token' },
+        })
+      );
+      assert.equal(adminInt.status, 200);
+
+      const adminNotif = await notificationsStatusGet(
+        new Request('http://localhost:3000/api/notifications/status', {
+          headers: { Authorization: 'Bearer admin-s006-token' },
+        })
+      );
+      assert.equal(adminNotif.status, 200);
+
+      // 3. Minimal public /api/payments/methods returns ONLY enabled payment method names/flags
+      const pubMethods = await paymentMethodsGet();
+      assert.equal(pubMethods.status, 200);
+      const raw = await pubMethods.text();
+      assert.equal(raw.includes('recentLogs'), false);
+      assert.equal(raw.includes('gemini'), false);
+      assert.equal(raw.includes('webhook'), false);
+      const parsed = JSON.parse(raw) as {
+        ok: boolean;
+        enabledMethods: string[];
+        onlineGateways: { sslcommerz: boolean; bkash: boolean };
+      };
+      assert.equal(parsed.ok, true);
+      assert.ok(parsed.enabledMethods.includes('cod'));
+      assert.equal(typeof parsed.onlineGateways.sslcommerz, 'boolean');
+      assert.equal(typeof parsed.onlineGateways.bkash, 'boolean');
+    } finally {
+      setAdminAuthOverrideForTests(null);
+    }
+  });
+
+  it('S0-14: Fail-closed test guard throws LiveFirestoreWriteBlockedInTestError on any live Firestore write when mocks/emulator are inactive', async () => {
+    const prevEmulator = process.env.FIRESTORE_EMULATOR_HOST;
+    try {
+      delete process.env.FIRESTORE_EMULATOR_HOST;
+      // Disable ALL in-memory stores while leaving globalThis.fetch as unmocked native fetch
+      setSessionDraftMemoryModeForTests(false);
+      setOrderStorageMemoryModeForTests(false);
+      setChannelMemoryModeForTests(false);
+      setRateLimitMemoryModeForTests(false);
+      setRetentionMemoryModeForTests(false);
+
+      await assert.rejects(
+        () =>
+          upsertServerChatSession({
+            sessionId: 'dg_fail_closed_probe_01',
+            language: 'en',
+            lockedLang: '',
+            scriptPreference: 'en',
+            consent: false,
+            currentIntent: 'general',
+            orderDraftId: 'draft_fail_closed_probe_01',
+            turnCount: 1,
+          }),
+        (err: unknown) => err instanceof LiveFirestoreWriteBlockedInTestError
+      );
+
+      await assert.rejects(
+        () =>
+          upsertMarketingConsent({
+            phone: '01711999888',
+            channel: 'web',
+            optIn: false,
+            unsubscribed: true,
+            source: 'chat',
+          }),
+        (err: unknown) => err instanceof LiveFirestoreWriteBlockedInTestError
+      );
+
+      await assert.rejects(
+        () =>
+          recordPaymentGatewayEvent({
+            eventId: 'fail_closed_evt_1',
+            provider: 'sslcommerz',
+            eventType: 'payment_failed',
+            orderNumber: 'DG-99991',
+            externalRef: 'ref_1',
+            rawStatus: 'FAILED',
+            verified: false,
+          }),
+        (err: unknown) => err instanceof LiveFirestoreWriteBlockedInTestError
+      );
+
+      await assert.rejects(
+        () => checkAndIncrementFirestoreRateLimit('fail_closed_bucket_1', 10, 60_000),
+        (err: unknown) => err instanceof LiveFirestoreWriteBlockedInTestError
+      );
+    } finally {
+      if (prevEmulator === undefined) delete process.env.FIRESTORE_EMULATOR_HOST;
+      else process.env.FIRESTORE_EMULATOR_HOST = prevEmulator;
     }
   });
 });

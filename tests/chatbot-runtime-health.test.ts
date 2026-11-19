@@ -11,7 +11,10 @@ import {
 } from '../src/lib/gemini/client';
 import {
   setChatLogObserverForTests,
+  setCostLedgerOverrideForTests,
   setFirestoreHealthOverrideForTests,
+  setRateLimitMemoryModeForTests,
+  setSessionDraftMemoryModeForTests,
 } from '../src/lib/chatbot/firestoreRest';
 
 const ORIGINAL_ENV = {
@@ -57,7 +60,29 @@ describe('T0.1 Gemini runtime configuration & health diagnostics', () => {
   beforeEach(() => {
     clearGeminiHealthCacheForTests();
     setGeminiClientFactoryForTests(null);
-    setChatLogObserverForTests(null);
+    setChatLogObserverForTests(() => {});
+    setRateLimitMemoryModeForTests(true);
+    setSessionDraftMemoryModeForTests(true);
+    setCostLedgerOverrideForTests({
+      get: async (dateKey: string) => ({
+        dateKey,
+        totalUsd: 0,
+        requestCount: 0,
+        promptTokens: 0,
+        outputTokens: 0,
+        capHit: false,
+        source: 'fallback_memory',
+      }),
+      record: async (dateKey, add) => ({
+        dateKey,
+        totalUsd: add.costUsd,
+        requestCount: 1,
+        promptTokens: add.promptTokens,
+        outputTokens: add.outputTokens,
+        capHit: add.capUsd !== null && add.costUsd >= add.capUsd,
+        source: 'fallback_memory',
+      }),
+    });
     setFirestoreHealthOverrideForTests(async () => ({
       reachable: true,
       latencyMs: 12,
@@ -70,6 +95,9 @@ describe('T0.1 Gemini runtime configuration & health diagnostics', () => {
     clearGeminiHealthCacheForTests();
     setGeminiClientFactoryForTests(null);
     setChatLogObserverForTests(null);
+    setRateLimitMemoryModeForTests(false);
+    setSessionDraftMemoryModeForTests(false);
+    setCostLedgerOverrideForTests(null);
     setFirestoreHealthOverrideForTests(null);
   });
 

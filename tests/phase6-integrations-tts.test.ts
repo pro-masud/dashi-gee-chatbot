@@ -11,6 +11,7 @@ import { POST as paymentInitiatePost } from '../app/api/payments/initiate/route'
 import {
   clearMemoryGatewayEventsForTests,
   getOrderStorageMemoryStateForTests,
+  setAdminAuthOverrideForTests,
   setOrderStorageMemoryModeForTests,
   setRateLimitMemoryModeForTests,
 } from '../src/lib/chatbot/firestoreRest';
@@ -306,7 +307,7 @@ describe('Phase 6 — Gemini TTS, Payment Gateways (SSLCommerz/bKash), Live Cour
       totalBdt: 1370,
       status: 'pending',
       paymentMethod: 'bkash',
-      paymentStatus: 'pending',
+      paymentStatus: 'pending_verification',
       district: 'Dhaka',
       estimatedDelivery: 'Within 24-48 hours',
       updatedAt: Date.now(),
@@ -524,41 +525,72 @@ describe('Phase 6 — Gemini TTS, Payment Gateways (SSLCommerz/bKash), Live Cour
     assert.equal(emailRes.status, 'sent');
     assert.equal(emailRes.channel, 'resend_email');
 
-    const notifyRes = await ordersNotifyPost(
-      new Request('http://localhost:3000/api/orders/notify', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-requested-with': 'DeshiGeeStorefront',
-        },
-        body: JSON.stringify({
-          orderNumber: 'DG-60003',
-          customerName: 'Nadia',
-          phone: '01711223344',
-          totalBdt: 1290,
-          itemsSummary: '500g × 1',
-          paymentMethod: 'cod',
-        }),
-      })
+    setAdminAuthOverrideForTests(async (authHeader) =>
+      authHeader === 'Bearer admin-phase6-token'
+        ? { ok: true, email: 'admin@deshigee.com', uid: 'admin-p6' }
+        : { ok: false, email: '', uid: '' }
     );
-    assert.equal(notifyRes.status, 200);
-    const notifyData = (await notifyRes.json()) as { webhookStatus: string };
-    assert.equal(notifyData.webhookStatus, 'delivered');
-    assert.ok(hitUrls.some((u) => u.includes('bulksmsbd.net')));
-    assert.ok(hitUrls.some((u) => u.includes('api.resend.com/emails')));
+    try {
+      // S0-05: Static x-requested-with header alone is rejected (401)
+      const unauthNotify = await ordersNotifyPost(
+        new Request('http://localhost:3000/api/orders/notify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-requested-with': 'DeshiGeeStorefront',
+          },
+          body: JSON.stringify({ orderNumber: 'DG-60003' }),
+        })
+      );
+      assert.equal(unauthNotify.status, 401);
 
-    // /api/integrations/status exposes ONLY booleans and zero raw secret strings
-    const statusRes = await integrationsStatusGet();
-    assert.equal(statusRes.status, 200);
-    const rawJson = await statusRes.text();
-    assert.equal(rawJson.includes('bulk_api_key_secret_999'), false);
-    assert.equal(rawJson.includes('re_test_secret_999'), false);
-    const parsed = JSON.parse(rawJson) as {
-      ok: boolean;
-      messaging: { bulksmsbd: boolean; resendEmail: boolean };
-    };
-    assert.equal(parsed.ok, true);
-    assert.equal(parsed.messaging.bulksmsbd, true);
-    assert.equal(parsed.messaging.resendEmail, true);
+      const notifyRes = await ordersNotifyPost(
+        new Request('http://localhost:3000/api/orders/notify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer admin-phase6-token',
+          },
+          body: JSON.stringify({
+            orderNumber: 'DG-60003',
+            customerName: 'Nadia',
+            phone: '01711223344',
+            totalBdt: 1290,
+            itemsSummary: '500g × 1',
+            paymentMethod: 'cod',
+          }),
+        })
+      );
+      assert.equal(notifyRes.status, 200);
+      const notifyData = (await notifyRes.json()) as { webhookStatus: string };
+      assert.equal(notifyData.webhookStatus, 'delivered');
+      assert.ok(hitUrls.some((u) => u.includes('bulksmsbd.net')));
+      assert.ok(hitUrls.some((u) => u.includes('api.resend.com/emails')));
+
+      // S0-06: /api/integrations/status requires Admin auth and exposes ONLY booleans (zero raw secrets)
+      const unauthStatus = await integrationsStatusGet(
+        new Request('http://localhost:3000/api/integrations/status')
+      );
+      assert.equal(unauthStatus.status, 401);
+
+      const statusRes = await integrationsStatusGet(
+        new Request('http://localhost:3000/api/integrations/status', {
+          headers: { Authorization: 'Bearer admin-phase6-token' },
+        })
+      );
+      assert.equal(statusRes.status, 200);
+      const rawJson = await statusRes.text();
+      assert.equal(rawJson.includes('bulk_api_key_secret_999'), false);
+      assert.equal(rawJson.includes('re_test_secret_999'), false);
+      const parsed = JSON.parse(rawJson) as {
+        ok: boolean;
+        messaging: { bulksmsbd: boolean; resendEmail: boolean };
+      };
+      assert.equal(parsed.ok, true);
+      assert.equal(parsed.messaging.bulksmsbd, true);
+      assert.equal(parsed.messaging.resendEmail, true);
+    } finally {
+      setAdminAuthOverrideForTests(null);
+    }
   });
 });

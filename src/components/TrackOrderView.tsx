@@ -142,13 +142,13 @@ export function TrackOrderView({
       }
     }
     let active = true;
-    fetch('/api/integrations/status')
+    fetch('/api/payments/methods')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!active || !data?.payments) return;
+        if (!active || !data?.onlineGateways) return;
         setOnlineGateways({
-          sslcommerz: Boolean(data.payments.sslcommerz?.configured),
-          bkash: Boolean(data.payments.bkash?.configured),
+          sslcommerz: Boolean(data.onlineGateways.sslcommerz),
+          bkash: Boolean(data.onlineGateways.bkash),
         });
       })
       .catch(() => {});

@@ -206,15 +206,19 @@ describe('T0.15 Firestore Security Rules — Dirty Dozen Adversarial Verificatio
     assert.match(chunksBlock, /allow create, update: if isValidId\(chunkId\) && isAdmin\(\) && isValidKnowledgeChunk\(incoming\(\)\);/);
     assert.match(chunksBlock, /allow delete: if isValidId\(chunkId\) && isAdmin\(\);/);
 
-    // 4. chat_sessions & order_drafts (S0-02): server/admin-only, zero anonymous client read/write
+    // 4. chat_sessions & order_drafts on master stay aligned with running REST code until Admin SDK lands
+    //    (admin-only S0-02 rules are staged on branch `rules-admin-only-pending-sdk`; see DEPLOY_BLOCKED.md).
+    assert.match(rulesText, /DEPLOY-BLOCKED NOTICE/);
+    assert.equal(fs.existsSync(path.resolve(process.cwd(), 'DEPLOY_BLOCKED.md')), true);
     const sessBlock = extractMatchBlock('/chat_sessions/{sessionId}');
-    assert.match(sessBlock, /allow get, list: if isAdmin\(\);/);
-    assert.match(sessBlock, /allow create, update: if isValidId\(sessionId\)\s+&& isAdmin\(\)/);
+    assert.match(sessBlock, /allow get: if isValidId\(sessionId\);/);
+    assert.match(sessBlock, /allow list: if isAdmin\(\);/);
+    assert.match(sessBlock, /incoming\(\)\.sessionId == sessionId/);
 
     const draftBlock = extractMatchBlock('/order_drafts/{draftId}');
     const draftFn = extractFunctionBody('isValidOrderDraft');
-    assert.match(draftBlock, /allow get, list: if isAdmin\(\);/);
-    assert.match(draftBlock, /allow create, update: if isValidId\(draftId\)\s+&& isAdmin\(\)/);
+    assert.match(draftBlock, /allow get: if isValidId\(draftId\);/);
+    assert.match(draftBlock, /allow list: if isAdmin\(\);/);
     assert.match(draftBlock, /incoming\(\)\.draftId == draftId/);
     assert.match(draftFn, /data\.expiresAt is number/);
 
@@ -318,10 +322,10 @@ describe('T0.15 Firestore Security Rules — Dirty Dozen Adversarial Verificatio
     assert.match(replyBlock, /allow get, list: if isAdmin\(\);/);
     assert.match(replyBlock, /allow create: if isValidId\(replyId\) && isAdmin\(\) && isValidSupportAgentReply\(incoming\(\)\);/);
 
-    // 3. chat_sessions (S0-02): zero visitor direct read/write — only verified admin/server can touch session docs
+    // 3. chat_sessions: visitor cannot tamper with aiPaused / activeTicketId / assignedAgentName / agentReplies
     const sessBlock = extractMatchBlock('/chat_sessions/{sessionId}');
-    assert.match(sessBlock, /allow get, list: if isAdmin\(\);/);
-    assert.match(sessBlock, /allow create, update: if isValidId\(sessionId\)\s+&& isAdmin\(\)/);
+    assert.match(sessBlock, /'aiPaused', 'activeTicketId', 'assignedAgentName', 'agentReplies'/);
+    assert.match(sessBlock, /allow list: if isAdmin\(\);/);
 
     // 4. chatbot_support_requests: visitor create enforces status=='open', optional Phase 3 triage locked to admin
     const supBlock = extractMatchBlock('/chatbot_support_requests/{reqId}');
@@ -338,10 +342,10 @@ describe('T0.15 Firestore Security Rules — Dirty Dozen Adversarial Verificatio
     const revBlock = extractMatchBlock('/reviews/{reviewId}');
     assert.match(revBlock, /existsAfter\(\/databases\/\$\(database\)\/documents\/order_review_claims\//);
 
-    // 6. refill_reminders (S0-03): server/admin-only, zero anonymous client read/write
+    // 6. refill_reminders: master keeps LIVE-compatible exists(order_tracking) check until Admin SDK lands
     const refillBlock = extractMatchBlock('/refill_reminders/{reminderId}');
-    assert.match(refillBlock, /allow get, list: if isAdmin\(\);/);
-    assert.match(refillBlock, /allow create: if isValidId\(reminderId\)\s+&& isAdmin\(\)/);
+    assert.match(refillBlock, /allow list: if isAdmin\(\);/);
+    assert.match(refillBlock, /exists\(\/databases\/\$\(database\)\/documents\/order_tracking\/\$\(reminderId\)\)/);
 
     // 7. Blueprint & Spec sync
     for (const entity of ['SupportEvidence', 'SupportAgentReply', 'OrderReviewClaim', 'RefillReminder']) {
@@ -413,22 +417,22 @@ describe('T0.15 Firestore Security Rules — Dirty Dozen Adversarial Verificatio
     assert.match(webhookFn, /'messenger', 'instagram', 'whatsapp'/);
     assert.match(webhookFn, /'processed', 'duplicate', 'rejected'/);
 
-    // 2. marketing_consents (S0-03): server/admin-only, zero anonymous client read/write
+    // 2. marketing_consents: master keeps LIVE-compatible phone-key binding & campaign counter lock until Admin SDK lands
     const consentBlock = extractMatchBlock('/marketing_consents/{phoneKey}');
     const consentFn = extractFunctionBody('isValidMarketingConsent');
-    assert.match(consentBlock, /allow get, list: if isAdmin\(\);/);
-    assert.match(consentBlock, /allow create: if isValidId\(phoneKey\)\s+&& isAdmin\(\)/);
+    assert.match(consentBlock, /allow list: if isAdmin\(\);/);
     assert.match(consentBlock, /phoneKey == incoming\(\)\.phone/);
+    assert.match(consentBlock, /'optIn', 'unsubscribed', 'quietHoursRespect', 'channel'/);
     assert.match(consentFn, /data\.phone\.matches\('\^01\[3-9\]\[0-9\]\{8\}\$'\)/);
 
-    // 3. chat_sessions (S0-02): external identity fields validated in schema; direct client read/write disabled
+    // 3. chat_sessions: external identity fields validated & linkedPhone immutable once set
     const sessFn = extractFunctionBody('isValidChatSession');
     const sessBlock = extractMatchBlock('/chat_sessions/{sessionId}');
     for (const field of ['channel', 'externalUserId', 'linkedPhone']) {
       assert.equal(sessFn.split('hasOnly(')[0].includes(`'${field}'`), false);
       assert.equal(sessFn.split('hasOnly(')[1].includes(`'${field}'`), true);
     }
-    assert.match(sessBlock, /allow get, list: if isAdmin\(\);/);
+    assert.match(sessBlock, /incoming\(\)\.linkedPhone == existing\(\)\.linkedPhone/);
 
     // 4. Optional attribution & channel fields across Order, ChatbotLog, ChatbotSupportRequest
     const validOrderFn = extractFunctionBody('isValidOrder');

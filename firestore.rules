@@ -1,3 +1,13 @@
+// ============================================================================
+// DEPLOY-BLOCKED NOTICE (see /DEPLOY_BLOCKED.md)
+// Commits a9b83d4 (S0-02) and 03b61fb (S0-03) restricted chat_sessions,
+// order_drafts, refill_reminders, and marketing_consents to isAdmin()-only.
+// Those hardened rules are STAGED on branch `rules-admin-only-pending-sdk`
+// and are DEPLOY-BLOCKED until server-side Firebase Admin SDK (ADC) replaces
+// unauthenticated REST calls in src/lib/chatbot/firestoreRest.ts and passes
+// Firestore Emulator tests + explicit owner deployment approval.
+// `master` intentionally keeps rules matching LIVE (1550bd7) and running code.
+// ============================================================================
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -1130,21 +1140,38 @@ service cloud.firestore {
       allow delete: if isValidId(chunkId) && isAdmin();
     }
 
-    // S0-02: Server-only session & draft storage (zero anonymous/client direct read or write).
-    // Customer access goes strictly through /api/chat/session with signed HttpOnly cookie ownership.
     match /chat_sessions/{sessionId} {
-      allow get, list: if isAdmin();
-      allow create, update: if isValidId(sessionId)
-        && isAdmin()
+      allow get: if isValidId(sessionId);
+      allow list: if isAdmin();
+      allow create: if isValidId(sessionId)
         && isValidChatSession(incoming())
-        && incoming().sessionId == sessionId;
+        && incoming().sessionId == sessionId
+        && (
+          isAdmin()
+          || (
+            (!('aiPaused' in incoming()) || incoming().aiPaused == false)
+            && (!('activeTicketId' in incoming()) || incoming().activeTicketId == '')
+            && (!('assignedAgentName' in incoming()) || incoming().assignedAgentName == '')
+            && (!('agentReplies' in incoming()) || incoming().agentReplies.size() == 0)
+          )
+        );
+      allow update: if isValidId(sessionId)
+        && isValidChatSession(incoming())
+        && incoming().sessionId == sessionId
+        && (
+          isAdmin()
+          || (
+            !incoming().diff(existing()).affectedKeys().hasAny(['aiPaused', 'activeTicketId', 'assignedAgentName', 'agentReplies'])
+            && (!('linkedPhone' in existing()) || existing().linkedPhone == '' || incoming().linkedPhone == existing().linkedPhone)
+          )
+        );
       allow delete: if isValidId(sessionId) && isAdmin();
     }
 
     match /order_drafts/{draftId} {
-      allow get, list: if isAdmin();
+      allow get: if isValidId(draftId);
+      allow list: if isAdmin();
       allow create, update: if isValidId(draftId)
-        && isAdmin()
         && isValidOrderDraft(incoming())
         && incoming().draftId == draftId;
       allow delete: if isValidId(draftId) && isAdmin();
@@ -1207,18 +1234,26 @@ service cloud.firestore {
       allow update, delete: if isValidId(orderNumber) && isAdmin();
     }
 
-    // S0-03: Server-only refill reminder & marketing consent records (zero anonymous/client read or write).
     match /refill_reminders/{reminderId} {
-      allow get, list: if isAdmin();
+      allow get: if isValidId(reminderId);
+      allow list: if isAdmin();
       allow create: if isValidId(reminderId)
-        && isAdmin()
         && isValidRefillReminder(incoming())
         && incoming().createdAt == request.time
-        && reminderId == incoming().orderNumber + '_' + incoming().phone;
+        && reminderId == incoming().orderNumber + '_' + incoming().phone
+        && exists(/databases/$(database)/documents/order_tracking/$(reminderId));
       allow update: if isValidId(reminderId)
-        && isAdmin()
         && isValidRefillReminder(incoming())
-        && incoming().createdAt == existing().createdAt;
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin()
+          || (
+            reminderId == existing().orderNumber + '_' + existing().phone
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'intervalDays', 'status', 'nextReminderAtIso', 'updatedAt'
+            ])
+          )
+        );
       allow delete: if isValidId(reminderId) && isAdmin();
     }
 
@@ -1229,16 +1264,27 @@ service cloud.firestore {
     }
 
     match /marketing_consents/{phoneKey} {
-      allow get, list: if isAdmin();
+      allow get: if isValidId(phoneKey);
+      allow list: if isAdmin();
       allow create: if isValidId(phoneKey)
-        && isAdmin()
         && isValidMarketingConsent(incoming())
         && incoming().createdAt == request.time
-        && phoneKey == incoming().phone;
+        && phoneKey == incoming().phone
+        && (!('campaignCount' in incoming()) || incoming().campaignCount == 0)
+        && !('lastCampaignAtIso' in incoming());
       allow update: if isValidId(phoneKey)
-        && isAdmin()
         && isValidMarketingConsent(incoming())
-        && incoming().createdAt == existing().createdAt;
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin()
+          || (
+            phoneKey == existing().phone
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'optIn', 'unsubscribed', 'quietHoursRespect', 'channel',
+              'source', 'consentTimestampIso', 'updatedAt'
+            ])
+          )
+        );
       allow delete: if isValidId(phoneKey) && isAdmin();
     }
 

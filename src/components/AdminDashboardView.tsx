@@ -151,8 +151,13 @@ export function AdminDashboardView({
       setCoupons(couponList);
       setSubscribers(subList);
 
-      const whRes = await fetch('/api/notifications/status');
-      if (whRes.ok) {
+      const idToken = user ? await user.getIdToken().catch(() => '') : '';
+      const whRes = idToken
+        ? await fetch('/api/notifications/status', {
+            headers: { Authorization: `Bearer ${idToken}` },
+          })
+        : null;
+      if (whRes?.ok) {
         setWebhookInfo(await whRes.json());
       }
       await loadRefillReminders();

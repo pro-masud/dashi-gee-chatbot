@@ -21,6 +21,7 @@ import {
   getOrderStorageMemoryStateForTests,
   setAdminAuthOverrideForTests,
   setChannelMemoryModeForTests,
+  setChatLogObserverForTests,
   setOrderStorageMemoryModeForTests,
   setRateLimitMemoryModeForTests,
   setSessionDraftMemoryModeForTests,
@@ -55,6 +56,7 @@ describe('Phase 5 — Omnichannel Webhooks, Consent Retention, SEO, Dictation, A
     setChannelMemoryModeForTests(true);
     setSessionDraftMemoryModeForTests(true);
     setRateLimitMemoryModeForTests(true);
+    setChatLogObserverForTests(() => {});
     setAdminAuthOverrideForTests(async (authHeader) => {
       if (authHeader === 'Bearer admin-valid-token') {
         return { ok: true, email: 'admin@deshigee.com', uid: 'admin-1' };
@@ -76,6 +78,7 @@ describe('Phase 5 — Omnichannel Webhooks, Consent Retention, SEO, Dictation, A
     setChannelMemoryModeForTests(false);
     setSessionDraftMemoryModeForTests(false);
     setRateLimitMemoryModeForTests(false);
+    setChatLogObserverForTests(null);
     setAdminAuthOverrideForTests(null);
 
     if (PREV_META_VERIFY === undefined) delete process.env.META_VERIFY_TOKEN;

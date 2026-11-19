@@ -357,7 +357,11 @@ export function AdminChatbotPanel({
         ? '/api/chatbot/admin?refresh=1'
         : '/api/chatbot/admin';
       const [notifRes, adminRes, ticketRes, attrRes, retRes, intRes] = await Promise.all([
-        fetch('/api/notifications/status').catch(() => null),
+        token
+          ? fetch('/api/notifications/status', {
+              headers: { Authorization: `Bearer ${token}` },
+            }).catch(() => null)
+          : Promise.resolve(null),
         token
           ? fetch(adminHealthUrl, {
               headers: { Authorization: `Bearer ${token}` },
@@ -383,7 +387,11 @@ export function AdminChatbotPanel({
               headers: { Authorization: `Bearer ${token}` },
             }).catch(() => null)
           : Promise.resolve(null),
-        fetch('/api/integrations/status').catch(() => null),
+        token
+          ? fetch('/api/integrations/status', {
+              headers: { Authorization: `Bearer ${token}` },
+            }).catch(() => null)
+          : Promise.resolve(null),
       ]);
       if (notifRes?.ok) {
         setNotificationStatus(await notifRes.json());

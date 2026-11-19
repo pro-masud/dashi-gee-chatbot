@@ -62,6 +62,64 @@ const PROJECT_ID = firebaseConfig.projectId;
 const DATABASE_ID = firebaseConfig.firestoreDatabaseId;
 const API_KEY = firebaseConfig.apiKey;
 const BASE_DOC_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents`;
+const NATIVE_FETCH_AT_LOAD = globalThis.fetch;
+
+/**
+ * S0-14 (Fail-Closed Test Guard):
+ * Thrown whenever any test runtime attempts a real network write to live Firestore
+ * without an active FIRESTORE_EMULATOR_HOST, an active in-memory test mock, or a mocked globalThis.fetch.
+ */
+export class LiveFirestoreWriteBlockedInTestError extends Error {
+  readonly code = 'FAIL_CLOSED_LIVE_FIRESTORE_WRITE';
+
+  constructor(operation: string) {
+    super(
+      `FAIL_CLOSED_LIVE_FIRESTORE_WRITE: Refusing live Firestore write (${operation}) during test run without FIRESTORE_EMULATOR_HOST, an active in-memory mock, or mocked globalThis.fetch.`
+    );
+    this.name = 'LiveFirestoreWriteBlockedInTestError';
+  }
+}
+
+export function isTestProcessRuntime(): boolean {
+  return (
+    process.env.NODE_ENV === 'test' ||
+    process.env.DESHI_GEE_TEST_MODE === '1' ||
+    Boolean(process.env.NODE_TEST_CONTEXT) ||
+    process.execArgv.some((arg) => arg === '--test' || arg.startsWith('--test-')) ||
+    process.argv.some(
+      (arg) =>
+        arg === '--test' ||
+        arg.startsWith('--test-') ||
+        /(?:^|[/\\])tests[/\\].*\.test\.[cm]?[jt]sx?$/.test(arg)
+    )
+  );
+}
+
+function getFirestoreBaseDocUrl(): string {
+  const emulatorHost = (process.env.FIRESTORE_EMULATOR_HOST || '').trim();
+  if (emulatorHost) {
+    const cleanHost = emulatorHost.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    return `http://${cleanHost}/v1/projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents`;
+  }
+  return BASE_DOC_URL;
+}
+
+export function assertLiveFirestoreWriteAllowed(operation: string): void {
+  if (!isTestProcessRuntime()) return;
+  const hasEmulator = Boolean((process.env.FIRESTORE_EMULATOR_HOST || '').trim());
+  const hasMockFetch = globalThis.fetch !== NATIVE_FETCH_AT_LOAD;
+  if (!hasEmulator && !hasMockFetch) {
+    throw new LiveFirestoreWriteBlockedInTestError(operation);
+  }
+}
+
+async function firestoreCommitFetch(
+  init: RequestInit,
+  operation = 'firestore_commit'
+): Promise<Response> {
+  assertLiveFirestoreWriteAllowed(operation);
+  return fetch(`${getFirestoreBaseDocUrl()}:commit?key=${encodeURIComponent(API_KEY)}`, init);
+}
 
 type FsValue =
   | { stringValue: string }
@@ -155,7 +213,7 @@ async function fetchFsGetWithMeta(
   path: string,
   idToken?: string
 ): Promise<{ data: Record<string, unknown>; updateTime?: string } | null> {
-  const url = `${BASE_DOC_URL}/${path}?key=${encodeURIComponent(API_KEY)}`;
+  const url = `${getFirestoreBaseDocUrl()}/${path}?key=${encodeURIComponent(API_KEY)}`;
   const headers: Record<string, string> = {};
   if (idToken) {
     headers.Authorization = `Bearer ${idToken}`;
@@ -192,7 +250,7 @@ async function fetchFsCollectionList(
   pageSize = 200,
   idToken?: string
 ): Promise<Record<string, unknown>[]> {
-  const url = `${BASE_DOC_URL}/${collectionId}?pageSize=${pageSize}&key=${encodeURIComponent(API_KEY)}`;
+  const url = `${getFirestoreBaseDocUrl()}/${collectionId}?pageSize=${pageSize}&key=${encodeURIComponent(API_KEY)}`;
   const headers: Record<string, string> = {};
   if (idToken) {
     headers.Authorization = `Bearer ${idToken}`;
@@ -214,7 +272,7 @@ async function runFsStructuredQuery(
   structuredQuery: Record<string, unknown>,
   idToken?: string
 ): Promise<Record<string, unknown>[]> {
-  const url = `${BASE_DOC_URL}:runQuery?key=${encodeURIComponent(API_KEY)}`;
+  const url = `${getFirestoreBaseDocUrl()}:runQuery?key=${encodeURIComponent(API_KEY)}`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -285,7 +343,8 @@ export async function verifyServerAdminToken(
       return { ok: true, email: user.email || '', uid: user.localId };
     }
     return { ok: false, email: user.email || '', uid: user.localId };
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return { ok: false, email: '', uid: '' };
   }
 }
@@ -303,7 +362,8 @@ export async function fetchServerStoreSettings(): Promise<StoreSettingsDoc> {
       return { ...DEFAULT_STORE_SETTINGS, ...(data as Partial<StoreSettingsDoc>) };
     }
     return DEFAULT_STORE_SETTINGS;
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return DEFAULT_STORE_SETTINGS;
   }
 }
@@ -317,7 +377,8 @@ export async function fetchServerBatchRecord(batchCode: string): Promise<BatchRe
       return { ...DEFAULT_ACTIVE_BATCH, ...(data as Partial<BatchRecord>) };
     }
     return DEFAULT_ACTIVE_BATCH;
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return DEFAULT_ACTIVE_BATCH;
   }
 }
@@ -339,7 +400,8 @@ export async function fetchServerChatbotConfig(
       }
     }
     return DEFAULT_CHATBOT_CONFIG;
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return DEFAULT_CHATBOT_CONFIG;
   }
 }
@@ -379,7 +441,8 @@ export async function fetchServerChatbotFaqs(
       limit: 120,
     });
     return rows as unknown as ChatbotFaqDoc[];
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return [];
   }
 }
@@ -405,7 +468,8 @@ export async function fetchServerChatbotKbDocs(
       limit: 60,
     });
     return rows as unknown as ChatbotKbDocRecord[];
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return [];
   }
 }
@@ -491,7 +555,7 @@ export async function checkAndIncrementFirestoreRateLimit(
     const nextCount = expired ? 1 : prevCount + 1;
     const nextWindowStart = expired ? now : prevWindowStart;
 
-    const writeRes = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const writeRes = await firestoreCommitFetch({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -519,7 +583,8 @@ export async function checkAndIncrementFirestoreRateLimit(
       return { allowed: true, count: nextCount, retryAfterSec: 0 };
     }
     return { allowed: true, count: nextCount, retryAfterSec: 0 };
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return { allowed: true, count: 1, retryAfterSec: 0 };
   }
 }
@@ -543,7 +608,8 @@ export async function checkOrderIdempotency(
       return { found: true, orderNumber: data.orderNumber };
     }
     return { found: false };
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return { found: false };
   }
 }
@@ -577,7 +643,8 @@ export async function checkRecentOrderFingerprint(
       return { duplicateFound: true, recentOrderNumber: doc.orderNumber };
     }
     return { duplicateFound: false };
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return { duplicateFound: false };
   }
 }
@@ -787,7 +854,7 @@ export async function createServerOrderAtomically(
     }
 
     try {
-      const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      const res = await firestoreCommitFetch({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ writes }),
@@ -810,6 +877,7 @@ export async function createServerOrderAtomically(
         errText.includes('FAILED_PRECONDITION');
       return { ok: false, conflict, error: errText.slice(0, 220) || `HTTP ${res.status}` };
     } catch (err) {
+    if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
       return {
         ok: false,
         error: err instanceof Error ? err.message : 'Order write failed',
@@ -850,7 +918,8 @@ export async function fetchServerOrderAuditLogs(
       idToken
     );
     return rows as unknown as OrderAuditLogRecord[];
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return [];
   }
 }
@@ -1092,7 +1161,7 @@ export async function manageServerOrder(params: ManageOrderParams): Promise<Mana
         createdAt: new Date().toISOString(),
       });
     } else {
-      const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      const res = await firestoreCommitFetch({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1339,7 +1408,7 @@ export async function manageServerOrder(params: ManageOrderParams): Promise<Mana
       if (params.adminIdToken) {
         authHeaders.Authorization = `Bearer ${params.adminIdToken}`;
       }
-      const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      const res = await firestoreCommitFetch({
         method: 'POST',
         headers: authHeaders,
         body: JSON.stringify({ writes }),
@@ -1456,7 +1525,7 @@ export async function manageServerOrder(params: ManageOrderParams): Promise<Mana
         updateFields.dispatchedAtIso = dispatchedAtIso;
       }
       const fieldPaths = Object.keys(updateFields);
-      const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      const res = await firestoreCommitFetch({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1554,7 +1623,7 @@ export async function manageServerOrder(params: ManageOrderParams): Promise<Mana
       createdAt: new Date().toISOString(),
     });
   } else if (params.adminIdToken) {
-    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const res = await firestoreCommitFetch({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1743,7 +1812,7 @@ export async function createServerSupportRequest(
   }
 
   try {
-    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const res = await firestoreCommitFetch({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1768,6 +1837,7 @@ export async function createServerSupportRequest(
     }
     return { ok: true, requestId: reqId, ticketNumber };
   } catch (err) {
+    if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
     return { ok: false, error: err instanceof Error ? err.message : 'Failed to log request' };
   }
 }
@@ -2094,7 +2164,8 @@ export async function getPersistentDailyCostStatus(
       state,
     });
     return state;
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     if (!globalFirestoreTestHooks.__deshiGeeCostLedgerMemory) {
       globalFirestoreTestHooks.__deshiGeeCostLedgerMemory = new Map();
     }
@@ -2149,7 +2220,7 @@ export async function recordPersistentDailyCost(
         capHit,
       };
 
-      const writeRes = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      const writeRes = await firestoreCommitFetch({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2193,7 +2264,8 @@ export async function recordPersistentDailyCost(
         }
         return nextState;
       }
-    } catch {
+    } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
       // Retry or fall through
     }
   }
@@ -2267,6 +2339,7 @@ export async function checkServerFirestoreHealth(
       detail: `Firestore REST HTTP ${res.status}`,
     };
   } catch (err) {
+    if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
     return {
       reachable: false,
       latencyMs: Date.now() - startedAt,
@@ -2370,7 +2443,7 @@ export async function createServerChatLog(entry: ServerChatLogInput): Promise<st
   }
 
   try {
-    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const res = await firestoreCommitFetch({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2409,7 +2482,7 @@ export async function createServerChatLog(entry: ServerChatLogInput): Promise<st
         channel: _omitChannel,
         ...legacyPayload
       } = payload;
-      await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      await firestoreCommitFetch({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2427,9 +2500,12 @@ export async function createServerChatLog(entry: ServerChatLogInput): Promise<st
           ],
         }),
         cache: 'no-store',
-      }).catch(() => {});
+      }).catch((err) => {
+        if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
+      });
     }
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     // Logging must never block chat response
   }
   return logId;
@@ -2485,7 +2561,8 @@ export async function fetchServerChatSession(sessionId: string): Promise<ChatSes
       externalUserId: typeof doc.externalUserId === 'string' ? doc.externalUserId : '',
       linkedPhone: typeof doc.linkedPhone === 'string' ? doc.linkedPhone : '',
     };
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return null;
   }
 }
@@ -2543,7 +2620,7 @@ export async function upsertServerChatSession(session: ChatSessionDoc): Promise<
       fieldPaths.push('externalUserId');
     }
 
-    await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    await firestoreCommitFetch({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2561,8 +2638,11 @@ export async function upsertServerChatSession(session: ChatSessionDoc): Promise<
         ],
       }),
       cache: 'no-store',
-    }).catch(() => {});
-  } catch {
+    }).catch((err) => {
+      if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
+    });
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     // Non-blocking
   }
 }
@@ -2615,7 +2695,8 @@ export async function fetchServerOrderDraft(draftId: string): Promise<OrderDraft
         : [],
       expiresAt: Number(doc.expiresAt || 0),
     };
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return null;
   }
 }
@@ -2657,7 +2738,7 @@ export async function upsertServerOrderDraft(draft: OrderDraftDoc): Promise<void
       expiresAt: Math.round(Number(draft.expiresAt) || Date.now() + 30 * 60 * 1000),
     };
 
-    await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    await firestoreCommitFetch({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2672,8 +2753,11 @@ export async function upsertServerOrderDraft(draft: OrderDraftDoc): Promise<void
         ],
       }),
       cache: 'no-store',
-    }).catch(() => {});
-  } catch {
+    }).catch((err) => {
+      if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
+    });
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     // Non-blocking
   }
 }
@@ -2722,7 +2806,8 @@ export async function fetchPublishedKnowledgeChunks(
       limit: 160,
     });
     return rows as unknown as KnowledgeChunkRecord[];
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return [];
   }
 }
@@ -2761,7 +2846,7 @@ export async function createServerChatFeedback(input: {
 
   try {
     const { id: _omitId, ...firestoreBody } = payload;
-    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const res = await firestoreCommitFetch({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2779,7 +2864,8 @@ export async function createServerChatFeedback(input: {
       cache: 'no-store',
     });
     return { ok: res.ok, feedbackId };
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return { ok: false, feedbackId };
   }
 }
@@ -2828,7 +2914,7 @@ export async function createServerSupportEvidence(input: {
   }
 
   try {
-    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const res = await firestoreCommitFetch({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2850,6 +2936,7 @@ export async function createServerSupportEvidence(input: {
     }
     return { ok: true, evidenceId };
   } catch (err) {
+    if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
     return { ok: false, error: err instanceof Error ? err.message : 'Failed to store evidence' };
   }
 }
@@ -2872,7 +2959,8 @@ export async function fetchAdminSupportEvidence(
   try {
     const doc = await fetchFsGet(`support_evidence/${encodeURIComponent(cleanId)}`, adminIdToken);
     return doc ? (doc as unknown as SupportEvidenceDoc) : null;
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return null;
   }
 }
@@ -2894,7 +2982,8 @@ export async function fetchAdminSupportTickets(
     return (rows as unknown as ChatbotSupportRequestRecord[]).sort((a, b) =>
       String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''))
     );
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return [];
   }
 }
@@ -2953,7 +3042,7 @@ export async function setAdminSessionAiPause(input: {
       updateFields.orderDraftId = '';
       updateFields.turnCount = 0;
     }
-    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const res = await firestoreCommitFetch({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2975,6 +3064,7 @@ export async function setAdminSessionAiPause(input: {
     });
     return res.ok ? { ok: true } : { ok: false, error: `HTTP ${res.status}` };
   } catch (err) {
+    if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
     return { ok: false, error: err instanceof Error ? err.message : 'Failed to toggle AI pause' };
   }
 }
@@ -3069,7 +3159,7 @@ export async function updateAdminSupportTicket(input: {
       return { ok: true, ticket: existing as unknown as ChatbotSupportRequestRecord };
     }
 
-    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const res = await firestoreCommitFetch({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -3111,6 +3201,7 @@ export async function updateAdminSupportTicket(input: {
       },
     };
   } catch (err) {
+    if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
     return { ok: false, error: err instanceof Error ? err.message : 'Ticket update failed' };
   }
 }
@@ -3264,7 +3355,7 @@ export async function postAdminAgentReply(input: {
       });
     }
 
-    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const res = await firestoreCommitFetch({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -3277,6 +3368,7 @@ export async function postAdminAgentReply(input: {
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
     return { ok: true, reply: replyItem };
   } catch (err) {
+    if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
     return { ok: false, error: err instanceof Error ? err.message : 'Failed to post reply' };
   }
 }
@@ -3386,7 +3478,7 @@ export async function createVerifiedDeliveryReview(input: {
       };
     }
 
-    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const res = await firestoreCommitFetch({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -3443,7 +3535,8 @@ export async function createVerifiedDeliveryReview(input: {
       messageEn: 'Thank you! Your verified review has been submitted for moderation.',
       messageBn: 'ধন্যবাদ! আপনার ভেরিফায়েড রিভিউটি অনুমোদনের জন্য জমা হয়েছে।',
     };
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return {
       ok: false,
       code: 'submit_failed',
@@ -3474,7 +3567,8 @@ export async function fetchRefillReminder(
   try {
     const doc = await fetchFsGet(`refill_reminders/${encodeURIComponent(key)}`);
     return doc ? (doc as unknown as RefillReminderDoc) : null;
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return null;
   }
 }
@@ -3599,7 +3693,7 @@ export async function upsertRefillReminder(input: {
           },
         ];
 
-    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const res = await firestoreCommitFetch({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ writes }),
@@ -3627,7 +3721,8 @@ export async function upsertRefillReminder(input: {
           ? `প্রতি ${intervalDays} দিন পর রিফিল রিমাইন্ডার সেট করা হয়েছে।`
           : `রিফিল রিমাইন্ডার ${nextStatus === 'paused' ? 'বিরতি দেওয়া' : 'বন্ধ করা'} হয়েছে।`,
     };
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return {
       ok: false,
       code: 'save_failed',
@@ -3758,7 +3853,8 @@ export async function fetchAdminRefillReminders(
     return (rows as unknown as RefillReminderDoc[]).sort(
       (a, b) => Date.parse(a.nextReminderAtIso) - Date.parse(b.nextReminderAtIso)
     );
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return [];
   }
 }
@@ -3926,7 +4022,7 @@ export async function dispatchDueRefillReminders(options?: {
         existing.updatedAt = nowIso;
       }
     } else if (options?.adminIdToken) {
-      const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      const res = await firestoreCommitFetch({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -4058,7 +4154,7 @@ export async function recordOrCheckWebhookEventIdempotency(input: {
       payload.verifiedPhone = input.verifiedPhone;
     }
 
-    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const res = await firestoreCommitFetch({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -4079,7 +4175,8 @@ export async function recordOrCheckWebhookEventIdempotency(input: {
       return { ok: true, isDuplicate: true, docId };
     }
     return { ok: res.ok, isDuplicate: false, docId };
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return { ok: false, isDuplicate: false, docId };
   }
 }
@@ -4148,7 +4245,7 @@ export async function linkSessionVerifiedPhone(input: {
           linkedPhone: cleanPhone,
         };
 
-    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const res = await firestoreCommitFetch({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -4166,7 +4263,8 @@ export async function linkSessionVerifiedPhone(input: {
       cache: 'no-store',
     });
     return { ok: res.ok, linkedPhone: cleanPhone };
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return { ok: false };
   }
 }
@@ -4189,7 +4287,8 @@ export async function fetchMarketingConsentByPhone(
   try {
     const doc = await fetchFsGet(`marketing_consents/${encodeURIComponent(cleanPhone)}`);
     return doc ? (doc as unknown as MarketingConsentDoc) : null;
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return null;
   }
 }
@@ -4293,7 +4392,7 @@ export async function upsertMarketingConsent(input: {
           },
         ];
 
-    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const res = await firestoreCommitFetch({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ writes }),
@@ -4322,6 +4421,7 @@ export async function upsertMarketingConsent(input: {
       },
     };
   } catch (err) {
+    if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
     return { ok: false, error: err instanceof Error ? err.message : 'Consent update failed' };
   }
 }
@@ -4343,7 +4443,8 @@ export async function fetchAdminMarketingConsents(
     return (rows as unknown as MarketingConsentDoc[]).sort((a, b) =>
       String(b.consentTimestampIso || '').localeCompare(String(a.consentTimestampIso || ''))
     );
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return [];
   }
 }
@@ -4699,7 +4800,7 @@ export async function dispatchConsentRetentionCampaign(options: {
         });
       }
     } else if (options.adminIdToken && target.subscriber) {
-      await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+      await firestoreCommitFetch({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -4722,7 +4823,9 @@ export async function dispatchConsentRetentionCampaign(options: {
           ],
         }),
         cache: 'no-store',
-      }).catch(() => {});
+      }).catch((err) => {
+        if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
+      });
     }
 
     sentCount += 1;
@@ -4784,7 +4887,8 @@ export async function fetchServerOrderForAdmin(
     const raw = (await res.json()) as { fields?: Record<string, FsValue> };
     if (!raw.fields) return null;
     return decodeFsFields(raw.fields) as unknown as OrderRecord;
-  } catch {
+  } catch (__fsGuardErr) {
+    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return null;
   }
 }
@@ -4880,7 +4984,7 @@ export async function recordPaymentGatewayEvent(
       });
     }
 
-    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const res = await firestoreCommitFetch({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ writes }),
@@ -4895,6 +4999,7 @@ export async function recordPaymentGatewayEvent(
     }
     return { ok: true, duplicate: false };
   } catch (err) {
+    if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
     return {
       ok: false,
       error: err instanceof Error ? err.message : 'Failed to record gateway event.',
@@ -5059,7 +5164,7 @@ export async function markServerOrderPaymentVerified(input: {
       });
     }
 
-    const res = await fetch(`${BASE_DOC_URL}:commit?key=${encodeURIComponent(API_KEY)}`, {
+    const res = await firestoreCommitFetch({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ writes }),
@@ -5070,6 +5175,7 @@ export async function markServerOrderPaymentVerified(input: {
     }
     return { ok: true };
   } catch (err) {
+    if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
     return {
       ok: false,
       error: err instanceof Error ? err.message : 'Failed to update order payment status.',
