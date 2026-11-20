@@ -22,6 +22,7 @@ import {
   setAdminAuthOverrideForTests,
   setChannelMemoryModeForTests,
   setChatLogObserverForTests,
+  setInventoryMemoryModeForTests,
   setOrderStorageMemoryModeForTests,
   setRateLimitMemoryModeForTests,
   setSessionDraftMemoryModeForTests,
@@ -30,12 +31,15 @@ import { saveSessionAndDraft } from '../src/lib/chatbot/sessionStore';
 import { createSignedUnsubscribeToken } from '../src/lib/chatbot/sessionAuth';
 import { tryCreateSignedOrderToken } from '../src/lib/chatbot/orderToken';
 import {
-  DEFAULT_CHATBOT_CONFIG,
   type ChatbotLogRecord,
   type ChatbotSupportRequestRecord,
   type OrderDraftDoc,
 } from '../src/lib/chatbot/types';
-import { DEFAULT_STORE_SETTINGS, type OrderRecord } from '../src/lib/storeTypes';
+import type { OrderRecord } from '../src/lib/storeTypes';
+import {
+  TEST_CONFIRMED_CHATBOT_CONFIG as DEFAULT_CHATBOT_CONFIG,
+  TEST_CONFIRMED_STORE_SETTINGS as DEFAULT_STORE_SETTINGS,
+} from './helpers/testStoreFixture';
 
 const REAL_FETCH = globalThis.fetch;
 const PREV_META_VERIFY = process.env.META_VERIFY_TOKEN;
@@ -56,6 +60,7 @@ describe('Phase 5 — Omnichannel Webhooks, Consent Retention, SEO, Dictation, A
     setChannelMemoryModeForTests(true);
     setSessionDraftMemoryModeForTests(true);
     setRateLimitMemoryModeForTests(true);
+    setInventoryMemoryModeForTests({ ...DEFAULT_STORE_SETTINGS });
     setChatLogObserverForTests(() => {});
     setAdminAuthOverrideForTests(async (authHeader) => {
       if (authHeader === 'Bearer admin-valid-token') {
@@ -78,6 +83,7 @@ describe('Phase 5 — Omnichannel Webhooks, Consent Retention, SEO, Dictation, A
     setChannelMemoryModeForTests(false);
     setSessionDraftMemoryModeForTests(false);
     setRateLimitMemoryModeForTests(false);
+    setInventoryMemoryModeForTests(null);
     setChatLogObserverForTests(null);
     setAdminAuthOverrideForTests(null);
 

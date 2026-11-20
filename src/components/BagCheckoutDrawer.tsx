@@ -104,6 +104,7 @@ export function BagCheckoutDrawer({
   const [gatewayError, setGatewayError] = useState('');
   const [copiedMfs, setCopiedMfs] = useState(false);
   const [draftHydrated, setDraftHydrated] = useState(false);
+  const [orderingUnavailable, setOrderingUnavailable] = useState('');
 
   const bn = lang === 'bn';
 
@@ -446,11 +447,12 @@ export function BagCheckoutDrawer({
   const handleSubmitOrder = async (e: FormEvent) => {
     e.preventDefault();
     if (!primaryItem || submitting) return;
+    setOrderingUnavailable('');
     if (!orderingReady || subtotal <= 0) {
-      setFormError(
+      setOrderingUnavailable(
         bn
-          ? 'অর্ডার এখনও চালু হয়নি। মূল্য ও ডেলিভারি চার্জ নিশ্চিত হলে অর্ডার করা যাবে।'
-          : 'Ordering is not available yet until store pricing and delivery fees are confirmed.'
+          ? 'অনলাইন অর্ডার এখন সাময়িকভাবে অনুপলব্ধ। কোনো অর্ডার তৈরি হয়নি — অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।'
+          : 'Ordering is temporarily unavailable right now. No order was placed — please try again shortly.'
       );
       return;
     }
@@ -546,6 +548,20 @@ export function BagCheckoutDrawer({
       });
 
       const checkoutData = await checkoutRes.json().catch(() => ({}));
+      if (
+        checkoutRes.status === 503 ||
+        checkoutData.code === 'admin_sdk_unavailable' ||
+        checkoutData.code === 'ordering_not_available'
+      ) {
+        setFormError('');
+        setOrderingUnavailable(
+          bn
+            ? 'আমাদের অর্ডার সিস্টেম সাময়িকভাবে অনুপলব্ধ থাকায় আপনার অর্ডারটি জমা দেওয়া যায়নি। কোনো অর্ডার তৈরি হয়নি এবং কোনো টাকা কাটা হয়নি।'
+            : 'Ordering is temporarily unavailable right now. No order was placed and no payment was charged. Please try again shortly.'
+        );
+        setSubmitting(false);
+        return;
+      }
       if (!checkoutRes.ok || !checkoutData.ok || !checkoutData.order) {
         setFormError(
           (bn ? checkoutData.messageBn : checkoutData.messageEn) ||
@@ -620,6 +636,7 @@ export function BagCheckoutDrawer({
                 type="button"
                 onClick={() => {
                   setFormError('');
+                  setOrderingUnavailable('');
                   setStep('bag');
                 }}
                 aria-label={bn ? 'ব্যাগে ফিরে যান' : 'Back to bag'}
@@ -1019,6 +1036,44 @@ export function BagCheckoutDrawer({
           ) : (
             /* Step 2: Full Checkout Form + Payment Selection */
             <form id="deshi-checkout-form" onSubmit={handleSubmitOrder} className="space-y-4">
+              {orderingUnavailable && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  data-testid="ordering-temporarily-unavailable"
+                  className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-[#1E1710]"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-800" />
+                    <div className="space-y-2">
+                      <p className="text-sm font-semibold text-amber-950">
+                        {bn ? 'অনলাইন অর্ডার সাময়িকভাবে অনুপলব্ধ' : 'Ordering is temporarily unavailable'}
+                      </p>
+                      <p className="text-xs leading-relaxed text-amber-900">
+                        {orderingUnavailable}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setOrderingUnavailable('')}
+                          className="inline-flex min-h-[36px] items-center justify-center rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-xs font-semibold text-amber-950 hover:bg-amber-100"
+                        >
+                          {bn ? 'আবার চেষ্টা করুন' : 'Try Again'}
+                        </button>
+                        {hasValidRealPhone(settings.supportPhone) && (
+                          <a
+                            href={`tel:${settings.supportPhone.replace(/[^+\d]/g, '')}`}
+                            className="inline-flex min-h-[36px] items-center justify-center rounded-lg bg-[#1A120B] px-3 py-1.5 text-xs font-semibold text-[#FAF7F2] hover:bg-[#332415]"
+                          >
+                            {bn ? 'সাপোর্টে কল করুন' : 'Call Support'}
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {formError && (
                 <div
                   role="alert"

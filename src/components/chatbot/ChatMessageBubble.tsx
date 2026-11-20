@@ -140,7 +140,7 @@ export function ChatMessageBubble({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showSources, setShowSources] = useState(false);
   const [showReasonPicker, setShowReasonPicker] = useState(false);
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [nowMs, setNowMs] = useState<number>(0);
 
   const bn = lang === 'bn';
   const isUser = msg.role === 'user';
@@ -161,7 +161,9 @@ export function ChatMessageBubble({
   }, [hasActiveExpiry, summary?.expiresAt]);
 
   const remainingMs =
-    hasActiveExpiry && summary?.expiresAt ? Math.max(0, summary.expiresAt - nowMs) : null;
+    hasActiveExpiry && summary?.expiresAt && nowMs > 0
+      ? Math.max(0, summary.expiresAt - nowMs)
+      : null;
   const isQuoteExpired = remainingMs !== null && remainingMs <= 0;
 
   const handleCopyText = async (key: string, value: string) => {

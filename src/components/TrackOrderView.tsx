@@ -141,6 +141,27 @@ export function TrackOrderView({
           ref: sp.get('ref') || '',
         });
       }
+      const tokenParam = (sp.get('token') || '').trim();
+      if (tokenParam.length >= 24) {
+        setLoading(true);
+        setSearched(true);
+        trackOrderLookup('', '', tokenParam)
+          .then((found) => {
+            if (found) {
+              setResult(found);
+              setOrderInput(found.orderNumber);
+              setErrorMsg('');
+            } else {
+              setErrorMsg(
+                bn
+                  ? 'এই ট্র্যাকিং লিংকটি সঠিক নয় অথবা মেয়াদ শেষ হয়েছে। অনুগ্রহ করে অর্ডার নম্বর ও ফোন দিয়ে খুঁজুন।'
+                  : 'This tracking link is invalid or expired. Please try searching with your Order ID and mobile number.'
+              );
+            }
+          })
+          .catch(() => {})
+          .finally(() => setLoading(false));
+      }
     }
     let active = true;
     fetch('/api/payments/methods')
@@ -156,7 +177,7 @@ export function TrackOrderView({
     return () => {
       active = false;
     };
-  }, []);
+  }, [bn]);
 
   const handlePayOrderOnline = async (gateway: 'sslcommerz' | 'bkash') => {
     if (!result || !verifiedPhone || gatewayBusy) return;

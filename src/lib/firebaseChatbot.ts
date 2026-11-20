@@ -162,13 +162,32 @@ function sanitizeConfigPayload(cfg: ChatbotConfigDoc): Record<string, unknown> {
 
 export async function fetchPublishedChatbotConfig(): Promise<ChatbotConfigDoc> {
   try {
-    const snap = await getDoc(doc(db, 'chatbot_config', 'published'));
-    if (snap.exists()) {
-      return { ...DEFAULT_CHATBOT_CONFIG, ...(snap.data() as Partial<ChatbotConfigDoc>) };
+    const res = await fetch('/api/chatbot/public-config', {
+      method: 'GET',
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      return DEFAULT_CHATBOT_CONFIG;
     }
+    const pub = (await res.json()) as {
+      enabled?: boolean;
+      botName?: string;
+      welcomeMessage?: string;
+      quickQuestions?: string[];
+      enableVoiceFeatures?: boolean;
+    };
+    return {
+      ...DEFAULT_CHATBOT_CONFIG,
+      enabled: pub.enabled !== false,
+      botName: pub.botName || DEFAULT_CHATBOT_CONFIG.botName,
+      welcomeMessageBn: pub.welcomeMessage || DEFAULT_CHATBOT_CONFIG.welcomeMessageBn,
+      quickQuestionsBn: Array.isArray(pub.quickQuestions) && pub.quickQuestions.length > 0
+        ? pub.quickQuestions
+        : DEFAULT_CHATBOT_CONFIG.quickQuestionsBn,
+      enableVoiceFeatures: pub.enableVoiceFeatures === true,
+    };
+  } catch {
     return DEFAULT_CHATBOT_CONFIG;
-  } catch (error) {
-    handleFirestoreError(error, OperationType.GET, 'chatbot_config/published');
   }
 }
 

@@ -35,6 +35,7 @@ import {
   setChannelMemoryModeForTests,
   setChatLogObserverForTests,
   setCostLedgerOverrideForTests,
+  setInventoryMemoryModeForTests,
   setOrderStorageMemoryModeForTests,
   setRateLimitMemoryModeForTests,
   setRetentionMemoryModeForTests,
@@ -54,7 +55,10 @@ import {
   getActiveApprovedClaimsText,
   sanitizeApprovedClaimsMetaForPublish,
 } from '../src/lib/chatbot/storeFacts';
-import { DEFAULT_CHATBOT_CONFIG } from '../src/lib/chatbot/types';
+import {
+  TEST_CONFIRMED_CHATBOT_CONFIG as DEFAULT_CHATBOT_CONFIG,
+  TEST_CONFIRMED_STORE_SETTINGS as DEFAULT_STORE_SETTINGS,
+} from './helpers/testStoreFixture';
 import { setGeminiClientFactoryForTests } from '../src/lib/gemini/client';
 import { bookCourierParcel } from '../src/lib/integrations/courierApi';
 import { sanitizeGatewayDetail, sendDirectSms } from '../src/lib/integrations/messagingGateway';
@@ -63,7 +67,6 @@ import {
   executeBkashCheckout,
 } from '../src/lib/integrations/paymentGateway';
 import { buildStorefrontStructuredData } from '../src/lib/seo';
-import { DEFAULT_STORE_SETTINGS } from '../src/lib/storeTypes';
 
 const ROOT = process.cwd();
 
@@ -102,6 +105,7 @@ describe('Stage 1 P0 Security — S0-01..S0-06', () => {
     setOrderStorageMemoryModeForTests(true);
     setRetentionMemoryModeForTests(true);
     setChannelMemoryModeForTests(true);
+    setInventoryMemoryModeForTests({ ...DEFAULT_STORE_SETTINGS });
   });
 
   afterEach(() => {
@@ -110,6 +114,7 @@ describe('Stage 1 P0 Security — S0-01..S0-06', () => {
     setOrderStorageMemoryModeForTests(false);
     setRetentionMemoryModeForTests(false);
     setChannelMemoryModeForTests(false);
+    setInventoryMemoryModeForTests(null);
   });
 
   it('S0-01: public/assets/aistudio does not exist and no internal markdown/spec/backlog docs are inside public/', () => {

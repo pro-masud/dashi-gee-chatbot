@@ -35,9 +35,12 @@ import {
   formatPaymentClarification,
   validateEvidenceUpload,
 } from '../src/lib/chatbot/supportEngine';
-import { DEFAULT_CHATBOT_CONFIG } from '../src/lib/chatbot/types';
 import { clearGeminiHealthCacheForTests, setGeminiClientFactoryForTests } from '../src/lib/gemini/client';
-import { DEFAULT_ACTIVE_BATCH, DEFAULT_STORE_SETTINGS } from '../src/lib/storeTypes';
+import {
+  TEST_CONFIRMED_BATCH as DEFAULT_ACTIVE_BATCH,
+  TEST_CONFIRMED_CHATBOT_CONFIG as DEFAULT_CHATBOT_CONFIG,
+  TEST_CONFIRMED_STORE_SETTINGS as DEFAULT_STORE_SETTINGS,
+} from './helpers/testStoreFixture';
 
 const REAL_FETCH = globalThis.fetch;
 
@@ -53,6 +56,25 @@ const VALID_PNG_DATA_URL = `data:image/png;base64,${Buffer.from(VALID_PNG_BYTES)
 function installPhase3FetchStub() {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
+    if (url.includes('firestore.googleapis.com') && url.includes('chatbot_config/published')) {
+      return new Response(
+        JSON.stringify({
+          fields: {
+            enabled: { booleanValue: true },
+            businessHours: { stringValue: DEFAULT_CHATBOT_CONFIG.businessHours },
+            closedDays: { stringValue: DEFAULT_CHATBOT_CONFIG.closedDays },
+            openHourBst: { integerValue: String(DEFAULT_CHATBOT_CONFIG.openHourBst) },
+            closeHourBst: { integerValue: String(DEFAULT_CHATBOT_CONFIG.closeHourBst) },
+            slaUrgentMinutes: { integerValue: String(DEFAULT_CHATBOT_CONFIG.slaUrgentMinutes) },
+            slaStandardMinutes: { integerValue: String(DEFAULT_CHATBOT_CONFIG.slaStandardMinutes) },
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
     if (url.includes('firestore.googleapis.com')) {
       return new Response(JSON.stringify({ error: { code: 404 } }), {
         status: 404,
@@ -174,7 +196,7 @@ describe('Phase 3 (T3.1-T3.3) — Post-Purchase Support, Evidence Privacy, BST S
     setKnowledgeChunkTestStore([]);
     setRateLimitMemoryModeForTests(true);
     setSessionDraftMemoryModeForTests(true);
-    setInventoryMemoryModeForTests({});
+    setInventoryMemoryModeForTests({ ...DEFAULT_STORE_SETTINGS });
     setOrderStorageMemoryModeForTests(true);
     setSupportInboxMemoryModeForTests(true);
     setRetentionMemoryModeForTests(true);
@@ -701,7 +723,7 @@ describe('Phase 3 (T3.1-T3.3) — Post-Purchase Support, Evidence Privacy, BST S
     assert.equal(reminderJson.reminder.status, 'paused');
 
     // 4. Reorder clamps quantities to live stock (e.g., 1kg limited to 1 jar while previous order had 2)
-    setInventoryMemoryModeForTests({ stock250g: 5, stock500g: 5, stock1kg: 1 });
+    setInventoryMemoryModeForTests({ ...DEFAULT_STORE_SETTINGS, stock250g: 5, stock500g: 5, stock1kg: 1 });
     const reorderRes = await reorderPost(
       new Request('http://localhost/api/orders/reorder', {
         method: 'POST',

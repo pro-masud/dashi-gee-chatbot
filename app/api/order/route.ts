@@ -450,6 +450,7 @@ export async function POST(request: Request) {
     paymentMethod: payload.paymentMethod,
     totalBdt: livePricing.totalBdt,
     codHighValueThresholdBdt: settings.codHighValueThresholdBdt,
+    codRiskThresholdScore: settings.codRiskThresholdScore,
   });
 
   const orderNumber = `DG-${Math.floor(10000 + Math.random() * 89999)}`;
@@ -523,6 +524,32 @@ export async function POST(request: Request) {
   );
 
   if (!writeRes.ok) {
+    if (writeRes.serviceUnavailable) {
+      return jsonResp(
+        {
+          ok: false,
+          code: 'admin_sdk_unavailable',
+          error: bn
+            ? 'অর্ডার সিস্টেম সাময়িকভাবে অনুপলব্ধ। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।'
+            : 'Ordering is temporarily unavailable. Please try again shortly.',
+        },
+        503
+      );
+    }
+
+    if (writeRes.couponExhausted) {
+      return jsonResp(
+        {
+          ok: false,
+          code: 'coupon_usage_limit_reached',
+          error: bn
+            ? 'এই কুপন কোডের ব্যবহারের সীমা শেষ হয়ে গেছে। কুপন ছাড়াই পুনরায় সারাংশ তৈরি করুন।'
+            : 'This coupon code has reached its usage limit. Please refresh your order summary.',
+        },
+        409
+      );
+    }
+
     if (writeRes.outOfStock) {
       return jsonResp(
         {
@@ -639,7 +666,10 @@ export async function POST(request: Request) {
     riskSignals: risk.riskSignals,
     ...(duplicateWarning ? { duplicateWarning } : {}),
     notificationStatus,
-    trackingHref: `/track?order=${encodeURIComponent(orderNumber)}`,
+    trackingToken: writeRes.trackingToken || undefined,
+    trackingHref: writeRes.trackingToken
+      ? `/track?token=${encodeURIComponent(writeRes.trackingToken)}`
+      : `/track?order=${encodeURIComponent(orderNumber)}`,
     message:
       risk.reviewStatus === 'manual_review'
         ? bn

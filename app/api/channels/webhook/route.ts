@@ -39,6 +39,8 @@ import {
   buildStoreFactsSnapshot,
   getSeededVerifiedMonetaryAmounts,
 } from '../../../../src/lib/chatbot/storeFacts';
+import { parseWhatsAppDeliveryStatuses } from '../../../../src/lib/integrations/whatsappCloud';
+import { publishBusinessEventSafe } from '../../../../src/lib/notifications/engine';
 
 function timingSafeTokenMatch(a: string, b: string): boolean {
   if (!a || !b) return false;
@@ -57,13 +59,13 @@ export async function GET(request: Request) {
   const verifyToken = url.searchParams.get('hub.verify_token') || '';
   const challenge = url.searchParams.get('hub.challenge') || '';
 
-  const configuredToken = String(process.env.META_VERIFY_TOKEN || '').trim();
-  if (
-    mode === 'subscribe' &&
-    configuredToken &&
-    challenge &&
-    timingSafeTokenMatch(verifyToken, configuredToken)
-  ) {
+  const configuredTokens = [
+    String(process.env.WHATSAPP_VERIFY_TOKEN || '').trim(),
+    String(process.env.META_VERIFY_TOKEN || '').trim(),
+  ].filter(Boolean);
+  const matched = configuredTokens.some((tok) => timingSafeTokenMatch(verifyToken, tok));
+
+  if (mode === 'subscribe' && matched && challenge) {
     return new Response(challenge, {
       status: 200,
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
@@ -187,12 +189,19 @@ export async function POST(request: Request) {
     );
   }
 
+  const deliveryStatuses = isWhatsApp ? parseWhatsAppDeliveryStatuses(parsedBody) : [];
   const inboundEvents = isWhatsApp
     ? parseWhatsAppCloudEvents(parsedBody)
     : parseMetaInboundWebhookEvents(parsedBody);
 
   if (inboundEvents.length === 0) {
-    return Response.json({ ok: true, processed: 0, results: [] });
+    return Response.json({
+      ok: true,
+      processed: 0,
+      deliveryStatusesCount: deliveryStatuses.length,
+      deliveryStatuses,
+      results: [],
+    });
   }
 
   const [config, settings, faqs] = await Promise.all([
@@ -452,6 +461,18 @@ export async function POST(request: Request) {
       });
     }
 
+    void publishBusinessEventSafe({
+      type: 'CUSTOMER_MESSAGE_RECEIVED',
+      idempotencyKey: `inbound_${ev.channel}_${ev.eventId}`,
+      title: `Inbound ${ev.channel.toUpperCase()} Message`,
+      summary: ev.text.slice(0, 220),
+      customerName: ev.displayName || 'Customer',
+      customerPhone: verifiedPhone || sessionDoc.linkedPhone || undefined,
+      channel: ev.channel,
+      withinWhatsapp24hWindow: ev.channel === 'whatsapp' && waWindow.within24hWindow,
+      adminPath: '/admin',
+    });
+
     results.push({
       eventId: ev.eventId,
       sessionId,
@@ -469,6 +490,8 @@ export async function POST(request: Request) {
   return Response.json({
     ok: true,
     processed: results.filter((r) => r.status === 'processed').length,
+    deliveryStatusesCount: deliveryStatuses.length,
+    deliveryStatuses,
     results,
   });
 }

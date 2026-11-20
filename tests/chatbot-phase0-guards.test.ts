@@ -9,6 +9,7 @@ import {
   setChatLogObserverForTests,
   setCostLedgerOverrideForTests,
   setFirestoreHealthOverrideForTests,
+  setInventoryMemoryModeForTests,
   setRateLimitMemoryModeForTests,
 } from '../src/lib/chatbot/firestoreRest';
 import { generateLiveFallbackReply } from '../src/lib/chatbot/liveFallbackEngine';
@@ -24,14 +25,17 @@ import {
   detectStoreFactConflicts,
   getSeededVerifiedMonetaryAmounts,
 } from '../src/lib/chatbot/storeFacts';
-import { DEFAULT_CHATBOT_CONFIG } from '../src/lib/chatbot/types';
+import {
+  TEST_CONFIRMED_BATCH as DEFAULT_ACTIVE_BATCH,
+  TEST_CONFIRMED_CHATBOT_CONFIG as DEFAULT_CHATBOT_CONFIG,
+  TEST_CONFIRMED_STORE_SETTINGS as DEFAULT_STORE_SETTINGS,
+} from './helpers/testStoreFixture';
 import {
   buildGeminiGenerateConfig,
   classifyGeminiError,
   clearGeminiHealthCacheForTests,
   setGeminiClientFactoryForTests,
 } from '../src/lib/gemini/client';
-import { DEFAULT_ACTIVE_BATCH, DEFAULT_STORE_SETTINGS } from '../src/lib/storeTypes';
 
 const ORIGINAL_ENV = {
   NODE_ENV: process.env.NODE_ENV,
@@ -110,6 +114,7 @@ describe('Phase 0 Runtime, Security, Cost & Quality Guards (T0.2-T0.14)', () => 
     setChatLogObserverForTests(null);
     setCostLedgerOverrideForTests(null);
     setRateLimitMemoryModeForTests(true);
+    setInventoryMemoryModeForTests({ ...DEFAULT_STORE_SETTINGS });
     setFirestoreHealthOverrideForTests(async () => ({
       reachable: true,
       latencyMs: 5,
@@ -126,6 +131,7 @@ describe('Phase 0 Runtime, Security, Cost & Quality Guards (T0.2-T0.14)', () => 
     setChatLogObserverForTests(null);
     setCostLedgerOverrideForTests(null);
     setRateLimitMemoryModeForTests(false);
+    setInventoryMemoryModeForTests(null);
     setFirestoreHealthOverrideForTests(null);
     resetDevOrderTokenSecretForTests();
   });

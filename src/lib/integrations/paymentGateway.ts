@@ -102,6 +102,145 @@ export interface PaymentVerificationResult {
   error?: string;
 }
 
+export const PAYMENT_LIFECYCLE_STATES = [
+  'unpaid',
+  'pending',
+  'verification_required',
+  'paid',
+  'failed',
+  'expired',
+  'refunded',
+  'partially_refunded',
+] as const;
+
+export type PaymentLifecycleState = (typeof PAYMENT_LIFECYCLE_STATES)[number];
+
+export function derivePaymentLifecycleState(params: {
+  paymentStatus?: string;
+  paymentMethod?: string;
+  rawGatewayStatus?: string;
+  refundedBdt?: number;
+  totalBdt?: number;
+}): PaymentLifecycleState {
+  const total = Number(params.totalBdt || 0);
+  const refunded = Number(params.refundedBdt || 0);
+  if (refunded > 0) {
+    return total > 0 && refunded < total ? 'partially_refunded' : 'refunded';
+  }
+  const raw = String(params.rawGatewayStatus || '').trim().toLowerCase();
+  if (raw === 'expired' || raw === 'timeout') return 'expired';
+  if (raw === 'failed' || raw === 'cancelled' || raw === 'canceled' || raw === 'invalid') {
+    return 'failed';
+  }
+  const status = String(params.paymentStatus || '').trim().toLowerCase();
+  if (status === 'verified' || status === 'paid') return 'paid';
+  if (status === 'failed') return 'failed';
+  if (status === 'refunded') return 'refunded';
+  if (status === 'pending_verification' || status === 'verification_required') {
+    return 'verification_required';
+  }
+  if (status === 'pending') return 'pending';
+  return params.paymentMethod && params.paymentMethod !== 'cod' ? 'pending' : 'unpaid';
+}
+
+export interface PaymentProvider {
+  readonly id: OnlinePaymentGateway | 'mock';
+  readonly isMock: boolean;
+  initiate(input: PaymentInitiationInput): Promise<PaymentInitiationResult>;
+  verify(params: {
+    referenceId: string;
+    expectedOrderNumber: string;
+    expectedAmountBdt: number;
+  }): Promise<PaymentVerificationResult>;
+}
+
+export function createMockPaymentProvider(options?: {
+  gateway?: OnlinePaymentGateway;
+  simulateStatus?: 'VALID' | 'FAILED' | 'AMOUNT_MISMATCH';
+}): PaymentProvider {
+  const gateway: OnlinePaymentGateway = options?.gateway || 'sslcommerz';
+  const sim = options?.simulateStatus || 'VALID';
+  return {
+    id: 'mock',
+    isMock: true,
+    async initiate(input: PaymentInitiationInput): Promise<PaymentInitiationResult> {
+      if (!Number.isFinite(input.amountBdt) || input.amountBdt <= 0) {
+        return {
+          ok: false,
+          gateway,
+          code: 'invalid_amount',
+          error: 'Amount must be positive.',
+        };
+      }
+      const ref = `MOCK_${gateway.toUpperCase()}_${input.orderNumber}`;
+      return {
+        ok: true,
+        gateway,
+        gatewayUrl: `https://mock.payment.local/checkout/${encodeURIComponent(ref)}`,
+        sessionKey: ref,
+        paymentId: ref,
+      };
+    },
+    async verify(params): Promise<PaymentVerificationResult> {
+      if (!Number.isFinite(params.expectedAmountBdt) || params.expectedAmountBdt <= 0) {
+        return {
+          ok: false,
+          verified: false,
+          gateway,
+          orderNumber: params.expectedOrderNumber,
+          transactionId: '',
+          amountBdt: 0,
+          currency: 'BDT',
+          rawStatus: 'invalid_expected_amount',
+          error: 'Authoritative server order amount is required for payment validation.',
+        };
+      }
+      const paidAmount =
+        sim === 'AMOUNT_MISMATCH'
+          ? Math.max(0, params.expectedAmountBdt - 50)
+          : params.expectedAmountBdt;
+      const verified = sim === 'VALID' && paidAmount >= params.expectedAmountBdt;
+      return {
+        ok: true,
+        verified,
+        gateway,
+        orderNumber: params.expectedOrderNumber,
+        transactionId: params.referenceId || `MOCK_TRX_${params.expectedOrderNumber}`,
+        valId: params.referenceId,
+        amountBdt: paidAmount,
+        currency: 'BDT',
+        rawStatus: sim,
+        error: verified ? undefined : `Mock verification status: ${sim}`,
+      };
+    },
+  };
+}
+
+export function createLivePaymentProvider(gateway: OnlinePaymentGateway): PaymentProvider {
+  return {
+    id: gateway,
+    isMock: false,
+    initiate(input: PaymentInitiationInput) {
+      return gateway === 'sslcommerz'
+        ? initiateSslCommerzPayment({ ...input, gateway: 'sslcommerz' })
+        : initiateBkashCheckout({ ...input, gateway: 'bkash' });
+    },
+    verify(params) {
+      return gateway === 'sslcommerz'
+        ? validateSslCommerzPayment({
+            valId: params.referenceId,
+            expectedOrderNumber: params.expectedOrderNumber,
+            expectedAmountBdt: params.expectedAmountBdt,
+          })
+        : executeBkashCheckout({
+            paymentId: params.referenceId,
+            expectedOrderNumber: params.expectedOrderNumber,
+            expectedAmountBdt: params.expectedAmountBdt,
+          });
+    },
+  };
+}
+
 export function getPaymentGatewayReadiness(): PaymentGatewayReadiness {
   const sslStoreId = (process.env.SSLCOMMERZ_STORE_ID || '').trim();
   const sslPasswd = (process.env.SSLCOMMERZ_STORE_PASSWD || '').trim();

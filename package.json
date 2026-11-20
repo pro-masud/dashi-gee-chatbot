@@ -13,6 +13,7 @@
     "lint": "tsc --noEmit",
     "test": "NODE_ENV=test tsx --test tests/*.test.ts",
     "test:chatbot": "NODE_ENV=test tsx --test tests/chatbot-regression-50.test.ts",
+    "test:rules": "NODE_ENV=test tsx --test tests/emulator/firestore-rules-final.test.ts",
     "test:rules:s013": "NODE_ENV=test tsx --test tests/emulator/firestore-rules-hotfix-s013.test.ts"
   },
   "dependencies": {
@@ -25,6 +26,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "express": "^5.3.0",
     "firebase": "^13.4.0",
+    "firebase-admin": "^14.5.1",
     "gsap": "^3.12.7",
     "lenis": "^1.1.20",
     "lucide-react": "^1.73.0",

@@ -586,6 +586,17 @@ export function ChatPanel({
     return null;
   }, [messages]);
 
+  useEffect(() => {
+    if (!open || minimized) return;
+    const onGlobalKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onGlobalKey);
+    return () => window.removeEventListener('keydown', onGlobalKey);
+  }, [open, minimized, onClose]);
+
   if (!open || minimized) {
     return null;
   }
@@ -923,6 +934,26 @@ export function ChatPanel({
         return;
       }
 
+      if (
+        res.status === 503 ||
+        data.code === 'admin_sdk_unavailable' ||
+        data.code === 'ordering_not_available'
+      ) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `ord_unavail_${Date.now()}`,
+            role: 'assistant',
+            text: bn
+              ? 'অনলাইন অর্ডার এখন সাময়িকভাবে অনুপলব্ধ। কোনো অর্ডার তৈরি হয়নি এবং কোনো টাকা কাটা হয়নি — অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।'
+              : 'Ordering is temporarily unavailable right now. No order was placed and no payment was charged — please try again shortly.',
+            timestamp: createTimeLabel(),
+            isError: true,
+          },
+        ]);
+        return;
+      }
+
       if (!res.ok || !data.ok) {
         setMessages((prev) => [
           ...prev,
@@ -1245,17 +1276,6 @@ export function ChatPanel({
     }
   };
 
-  useEffect(() => {
-    if (!open || minimized) return;
-    const onGlobalKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onGlobalKey);
-    return () => window.removeEventListener('keydown', onGlobalKey);
-  }, [open, minimized, onClose]);
-
   return (
     <div
       role="dialog"
@@ -1413,7 +1433,9 @@ export function ChatPanel({
             }
             onSuggestedReply={(q) => sendMessage(q)}
             onSubmitFeedback={handleSubmitFeedback}
-            onSpeakMessage={handleSpeakMessage}
+            onSpeakMessage={
+              chatbotConfig.enableVoiceFeatures === true ? handleSpeakMessage : undefined
+            }
             speakingMsgId={speakingMsgId}
             loadingAudioMsgId={loadingAudioMsgId}
           />
@@ -1523,7 +1545,7 @@ export function ChatPanel({
               <ImagePlus className="h-4 w-4" />
             )}
           </button>
-          {speechSupported && (
+          {chatbotConfig.enableVoiceFeatures === true && speechSupported && (
             <button
               type="button"
               disabled={awaitingReply}

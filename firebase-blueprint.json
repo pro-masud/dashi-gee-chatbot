@@ -742,6 +742,87 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["provider", "eventType", "orderNumber", "externalRef", "rawStatus", "verified", "createdAtIso", "createdAt"]
+    },
+    "IntegrationSettings": {
+      "title": "IntegrationSettings",
+      "description": "Non-secret operational integration toggles and channel connection metadata for Telegram, Discord, WhatsApp, and AI Support.",
+      "type": "object",
+      "properties": {
+        "telegram": { "type": "object" },
+        "discord": { "type": "object" },
+        "whatsapp": { "type": "object" },
+        "aiSupport": { "type": "object" },
+        "updatedAtIso": { "type": "string", "maxLength": 48 },
+        "updatedBy": { "type": "string", "maxLength": 160 }
+      },
+      "required": ["telegram", "discord", "whatsapp", "aiSupport", "updatedAtIso"]
+    },
+    "NotificationRules": {
+      "title": "NotificationRules",
+      "description": "Per-event notification routing matrix and exponential backoff retry thresholds.",
+      "type": "object",
+      "properties": {
+        "events": { "type": "object" },
+        "maxRetries": { "type": "number" },
+        "baseBackoffSeconds": { "type": "number" },
+        "lowStockThreshold": { "type": "number" },
+        "updatedAtIso": { "type": "string", "maxLength": 48 },
+        "updatedBy": { "type": "string", "maxLength": 160 }
+      },
+      "required": ["events", "maxRetries", "baseBackoffSeconds", "lowStockThreshold", "updatedAtIso"]
+    },
+    "NotificationEvent": {
+      "title": "NotificationEvent",
+      "description": "Deduplicated business event ledger record keyed by deterministic idempotencyKey.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 80 },
+        "idempotencyKey": { "type": "string", "maxLength": 120 },
+        "type": { "type": "string", "maxLength": 40 },
+        "occurredAtIso": { "type": "string", "maxLength": 48 },
+        "title": { "type": "string", "maxLength": 240 },
+        "summary": { "type": "string", "maxLength": 1000 },
+        "createdAtMs": { "type": "number" }
+      },
+      "required": ["eventId", "idempotencyKey", "type", "occurredAtIso", "title", "summary", "createdAtMs"]
+    },
+    "NotificationJob": {
+      "title": "NotificationJob",
+      "description": "Durable per-channel notification dispatch job with exponential backoff and dead-letter queue status.",
+      "type": "object",
+      "properties": {
+        "jobId": { "type": "string", "maxLength": 80 },
+        "eventId": { "type": "string", "maxLength": 80 },
+        "eventType": { "type": "string", "maxLength": 40 },
+        "channel": { "type": "string", "enum": ["telegram", "discord", "whatsapp"] },
+        "status": { "type": "string", "enum": ["queued", "processing", "sent", "failed_retrying", "dead_letter", "skipped_disabled"] },
+        "attemptCount": { "type": "number" },
+        "maxAttempts": { "type": "number" },
+        "nextRetryAtMs": { "type": "number" },
+        "messageSummary": { "type": "string", "maxLength": 260 },
+        "lastError": { "type": "string", "maxLength": 320 },
+        "createdAtMs": { "type": "number" }
+      },
+      "required": ["jobId", "eventId", "eventType", "channel", "status", "attemptCount", "maxAttempts", "nextRetryAtMs", "messageSummary", "createdAtMs"]
+    },
+    "NotificationLog": {
+      "title": "NotificationLog",
+      "description": "Immutable delivery attempt audit log with sanitized errors and external message IDs.",
+      "type": "object",
+      "properties": {
+        "logId": { "type": "string", "maxLength": 80 },
+        "jobId": { "type": "string", "maxLength": 80 },
+        "eventId": { "type": "string", "maxLength": 80 },
+        "eventType": { "type": "string", "maxLength": 40 },
+        "channel": { "type": "string", "enum": ["telegram", "discord", "whatsapp"] },
+        "status": { "type": "string", "enum": ["sent", "failed", "retrying", "dead_letter", "skipped"] },
+        "attemptNumber": { "type": "number" },
+        "messageSummary": { "type": "string", "maxLength": 260 },
+        "externalMessageId": { "type": "string", "maxLength": 160 },
+        "errorDetail": { "type": "string", "maxLength": 320 },
+        "createdAtMs": { "type": "number" }
+      },
+      "required": ["logId", "jobId", "eventId", "eventType", "channel", "status", "attemptNumber", "messageSummary", "createdAtMs"]
     }
   },
   "firestore": {
@@ -868,6 +949,26 @@
     "/payment_gateway_events/{eventId}": {
       "schema": { "$ref": "#/entities/PaymentGatewayEvent" },
       "description": "Immutable idempotent event ledger for SSLCommerz/bKash payment verification and live courier webhook sync."
+    },
+    "/integration_settings/{docId}": {
+      "schema": { "$ref": "#/entities/IntegrationSettings" },
+      "description": "Non-secret integration toggles & connection status metadata ('main' doc), strictly Admin-only."
+    },
+    "/notification_rules/{docId}": {
+      "schema": { "$ref": "#/entities/NotificationRules" },
+      "description": "Per-event notification channel rules and retry thresholds ('main' doc), strictly Admin-only."
+    },
+    "/notification_events/{eventKey}": {
+      "schema": { "$ref": "#/entities/NotificationEvent" },
+      "description": "Deduplicated business event ledger keyed by idempotencyKey, strictly Admin-only."
+    },
+    "/notification_jobs/{jobId}": {
+      "schema": { "$ref": "#/entities/NotificationJob" },
+      "description": "Durable per-channel notification queue & dead-letter jobs, strictly Admin-only."
+    },
+    "/notification_logs/{logId}": {
+      "schema": { "$ref": "#/entities/NotificationLog" },
+      "description": "Sanitized append-only notification delivery attempt logs, strictly Admin-only."
     }
   }
 }

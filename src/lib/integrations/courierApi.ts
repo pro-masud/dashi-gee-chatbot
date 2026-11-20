@@ -1,6 +1,13 @@
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { CourierPartner, OrderStatus } from '../storeTypes';
 import { normalizeBangladeshPhone } from '../chatbot/orderToken';
+import { isSafeCourierTrackingUrl } from '../server/requestSecurity';
+
+export function sanitizeCourierTrackingUrl(url: string | undefined | null): string {
+  const clean = String(url || '').trim();
+  if (!clean) return '';
+  return isSafeCourierTrackingUrl(clean) ? clean : '';
+}
 
 export interface CourierApiReadiness {
   steadfast: boolean;
@@ -45,6 +52,54 @@ export interface NormalizedCourierWebhookEvent {
   rawStatus: string;
   mappedOrderStatus: OrderStatus | null;
   trackingMessage: string;
+}
+
+export interface CourierProvider {
+  readonly partner: Exclude<CourierPartner, 'manual'>;
+  readonly isMock: boolean;
+  book(req: CourierBookingRequest): Promise<CourierBookingResult>;
+}
+
+export function createMockCourierProvider(
+  partner: Exclude<CourierPartner, 'manual'> = 'steadfast'
+): CourierProvider {
+  return {
+    partner,
+    isMock: true,
+    async book(req: CourierBookingRequest): Promise<CourierBookingResult> {
+      const code = `MOCK-${partner.toUpperCase()}-${req.orderNumber}`;
+      const rawUrl =
+        partner === 'pathao'
+          ? `https://merchant.pathao.com/tracking?consignment_id=${encodeURIComponent(code)}`
+          : partner === 'redx'
+            ? `https://redx.com.bd/track-global-parcel/?trackingId=${encodeURIComponent(code)}`
+            : `https://steadfast.com.bd/t/${encodeURIComponent(code)}`;
+      return {
+        ok: true,
+        partner,
+        consignmentId: code,
+        trackingCode: code,
+        courierTrackingUrl: sanitizeCourierTrackingUrl(rawUrl),
+        rawStatus: 'in_review',
+      };
+    },
+  };
+}
+
+export function createLiveCourierProvider(
+  partner: Exclude<CourierPartner, 'manual'>
+): CourierProvider {
+  return {
+    partner,
+    isMock: false,
+    async book(req: CourierBookingRequest): Promise<CourierBookingResult> {
+      const res = await bookCourierParcel({ ...req, partner });
+      return {
+        ...res,
+        courierTrackingUrl: sanitizeCourierTrackingUrl(res.courierTrackingUrl),
+      };
+    },
+  };
 }
 
 export function getCourierApiReadiness(): CourierApiReadiness {

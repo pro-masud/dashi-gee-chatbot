@@ -72,8 +72,13 @@ export function buildChannelSessionId(
 ): string {
   const prefix =
     channel === 'whatsapp' ? 'ch_wa_' : channel === 'instagram' ? 'ch_ig_' : 'ch_msg_';
-  const digest = createHash('sha256')
-    .update(`${channel}:${String(senderId || '').trim()}`)
+  const secret =
+    (typeof process !== 'undefined' &&
+      ((process.env.CHANNEL_SESSION_SECRET || '').trim() ||
+        (process.env.ORDER_TOKEN_SECRET || '').trim())) ||
+    'deshi_gee_channel_session_dev_hmac_key_v2';
+  const digest = createHmac('sha256', secret)
+    .update(`channel_session_v2|${channel}|${String(senderId || '').trim()}`, 'utf8')
     .digest('hex')
     .slice(0, 24);
   return `${prefix}${digest}`;

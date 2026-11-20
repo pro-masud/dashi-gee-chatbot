@@ -476,13 +476,50 @@ export async function probeGeminiModelReachability(
   }
 }
 
-export function estimateGeminiCostUsd(promptTokens: number, outputTokens: number): number {
-  const inputRateRaw = Number((process.env.GEMINI_INPUT_COST_PER_M_TOKENS || '').trim());
-  const outputRateRaw = Number((process.env.GEMINI_OUTPUT_COST_PER_M_TOKENS || '').trim());
-  const inputRate = Number.isFinite(inputRateRaw) && inputRateRaw >= 0 ? inputRateRaw : 0.15;
-  const outputRate = Number.isFinite(outputRateRaw) && outputRateRaw >= 0 ? outputRateRaw : 0.6;
-  const inputCost = (promptTokens / 1_000_000) * inputRate;
-  const outputCost = (outputTokens / 1_000_000) * outputRate;
+export interface GeminiModelCostRate {
+  inputPerM: number;
+  outputPerM: number;
+}
+
+export function resolveGeminiModelCostRate(modelName?: string): GeminiModelCostRate {
+  const defaultInputRaw = Number((process.env.GEMINI_INPUT_COST_PER_M_TOKENS || '').trim());
+  const defaultOutputRaw = Number((process.env.GEMINI_OUTPUT_COST_PER_M_TOKENS || '').trim());
+  const fallbackInput = Number.isFinite(defaultInputRaw) && defaultInputRaw >= 0 ? defaultInputRaw : 0.15;
+  const fallbackOutput = Number.isFinite(defaultOutputRaw) && defaultOutputRaw >= 0 ? defaultOutputRaw : 0.6;
+
+  const rawJson = (process.env.GEMINI_MODEL_COST_RATES_JSON || '').trim();
+  if (rawJson) {
+    try {
+      const parsed = JSON.parse(rawJson) as Record<
+        string,
+        { inputPerM?: number; outputPerM?: number; input?: number; output?: number }
+      >;
+      const cleanModel = String(modelName || getGeminiModelName()).trim();
+      const hit = parsed[cleanModel] || parsed[cleanModel.toLowerCase()] || parsed.default;
+      if (hit && typeof hit === 'object') {
+        const inRate = Number(hit.inputPerM ?? hit.input);
+        const outRate = Number(hit.outputPerM ?? hit.output);
+        return {
+          inputPerM: Number.isFinite(inRate) && inRate >= 0 ? inRate : fallbackInput,
+          outputPerM: Number.isFinite(outRate) && outRate >= 0 ? outRate : fallbackOutput,
+        };
+      }
+    } catch {
+      // Fall through to scalar env vars on malformed JSON
+    }
+  }
+
+  return { inputPerM: fallbackInput, outputPerM: fallbackOutput };
+}
+
+export function estimateGeminiCostUsd(
+  promptTokens: number,
+  outputTokens: number,
+  modelName?: string
+): number {
+  const { inputPerM, outputPerM } = resolveGeminiModelCostRate(modelName);
+  const inputCost = (promptTokens / 1_000_000) * inputPerM;
+  const outputCost = (outputTokens / 1_000_000) * outputPerM;
   return Number((inputCost + outputCost).toFixed(6));
 }
 
@@ -548,6 +585,7 @@ export function normalizeFailoverTag(code: string): string {
 export function classifyGeminiError(err: unknown): {
   code: string;
   shouldFailover: boolean;
+  adminAlertCode?: 'gemini_auth_failed' | 'gemini_model_retired';
   friendlyEn: string;
   friendlyBn: string;
 } {
@@ -559,7 +597,10 @@ export function classifyGeminiError(err: unknown): {
   } | null;
   const statusNum = Number(errObj?.status || errObj?.error?.code || errObj?.code || 0);
   const nestedStatus = String(errObj?.error?.status || '').toLowerCase();
-  const rawMsg = err instanceof Error ? err.message : String(errObj?.error?.message || err || '');
+  const rawMsg =
+    err instanceof Error
+      ? err.message
+      : String(errObj?.message || errObj?.error?.message || err || '');
   const msg = `${rawMsg} ${nestedStatus}`.toLowerCase();
 
   // Check timeouts & aborts FIRST so numeric strings like "4000ms" never misclassify as HTTP 400
@@ -586,11 +627,14 @@ export function classifyGeminiError(err: unknown): {
     msg.includes('api key not valid') ||
     msg.includes('invalid api key') ||
     msg.includes('api_key') ||
-    msg.includes('unauthenticated')
+    msg.includes('unauthenticated') ||
+    ((statusNum === 403 || /\b403\b/.test(msg)) &&
+      (msg.includes('billing') || msg.includes('consumer_invalid') || msg.includes('key_invalid')))
   ) {
     return {
       code: 'gemini_auth_error',
       shouldFailover: false,
+      adminAlertCode: 'gemini_auth_failed',
       friendlyEn:
         'The AI assistant is temporarily unavailable. Please contact our customer support directly.',
       friendlyBn:
@@ -606,6 +650,7 @@ export function classifyGeminiError(err: unknown): {
     return {
       code: 'gemini_permission_denied',
       shouldFailover: true,
+      adminAlertCode: 'gemini_auth_failed',
       friendlyEn:
         'The AI assistant is temporarily switching to an available model. Please contact our support if needed.',
       friendlyBn:
@@ -640,6 +685,7 @@ export function classifyGeminiError(err: unknown): {
     return {
       code: 'gemini_model_retired',
       shouldFailover: true,
+      adminAlertCode: 'gemini_model_retired',
       friendlyEn:
         'Our AI assistant model is switching to a supported engine. Please reach us on WhatsApp if anything stalls.',
       friendlyBn:

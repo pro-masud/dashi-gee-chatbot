@@ -15,6 +15,7 @@ import {
   type OnlinePaymentGateway,
 } from '../../../../src/lib/integrations/paymentGateway';
 import { dispatchWebhookWithRetry, notificationLogs } from '../../../../src/lib/serverState';
+import { publishBusinessEventSafe } from '../../../../src/lib/notifications/engine';
 
 export const dynamic = 'force-dynamic';
 
@@ -146,6 +147,19 @@ async function handlePaymentCallback(request: Request) {
         rawStatus: statusLabel,
         verified: false,
       }).catch(() => {});
+
+      void publishBusinessEventSafe({
+        type: 'PAYMENT_FAILED',
+        idempotencyKey: `payment_${statusLabel}_${gateway}_${orderNumber}_${safeRef}`,
+        title: `Payment ${isCancel ? 'Cancelled' : 'Failed'} — ${orderNumber}`,
+        summary: `${gateway.toUpperCase()} callback reported status "${statusLabel}" (ref: ${rawRef}).`,
+        orderNumber,
+        customerPhone: phone || undefined,
+        paymentMethod: gateway,
+        paymentStatus: statusLabel,
+        priority: 'high',
+        adminPath: '/admin',
+      });
     }
 
     if (wantsJson) {
@@ -264,6 +278,26 @@ async function handlePaymentCallback(request: Request) {
     );
     notificationLogs.unshift(log);
     if (notificationLogs.length > 50) notificationLogs.pop();
+  }
+
+  if (!recordRes.duplicate) {
+    void publishBusinessEventSafe({
+      type: verification.verified ? 'PAYMENT_SUCCESS' : 'PAYMENT_FAILED',
+      idempotencyKey: `payment_${verification.verified ? 'ok' : 'fail'}_${eventId}`,
+      title: verification.verified
+        ? `Payment Verified — ${orderNumber}`
+        : `Payment Verification Failed — ${orderNumber}`,
+      summary: verification.verified
+        ? `${gateway.toUpperCase()} payment of ৳${Math.round(verification.amountBdt || expectedAmountBdt)} verified (ref: ${externalRef}).`
+        : `${gateway.toUpperCase()} verification failed (${verification.error || verification.rawStatus || 'unverified'}).`,
+      orderNumber,
+      customerPhone: serverOrder.phone || phone || undefined,
+      totalBdt: verification.amountBdt || expectedAmountBdt,
+      paymentMethod: gateway,
+      paymentStatus: verification.verified ? 'verified' : 'failed',
+      priority: verification.verified ? 'normal' : 'high',
+      adminPath: '/admin',
+    });
   }
 
   if (wantsJson) {

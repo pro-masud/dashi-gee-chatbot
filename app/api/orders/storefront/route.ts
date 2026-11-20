@@ -296,6 +296,7 @@ export async function POST(request: Request) {
     paymentMethod,
     totalBdt: pricing.totalBdt,
     codHighValueThresholdBdt: settings.codHighValueThresholdBdt,
+    codRiskThresholdScore: settings.codRiskThresholdScore,
   });
 
   const dispatchWindow = getDispatchWindowInfo(settings);
@@ -366,6 +367,24 @@ export async function POST(request: Request) {
   );
 
   if (!writeRes.ok) {
+    if (writeRes.serviceUnavailable) {
+      return localizedError(
+        uiLang,
+        'Ordering is temporarily unavailable. Please try again shortly.',
+        'অর্ডার সিস্টেম সাময়িকভাবে অনুপলব্ধ। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।',
+        503,
+        { code: 'admin_sdk_unavailable' }
+      );
+    }
+    if (writeRes.couponExhausted) {
+      return localizedError(
+        uiLang,
+        'This coupon code has reached its usage limit.',
+        'এই কুপন কোডের ব্যবহারের সীমা শেষ হয়ে গেছে।',
+        409,
+        { code: 'coupon_usage_limit_reached' }
+      );
+    }
     if (writeRes.outOfStock) {
       return localizedError(
         uiLang,
@@ -413,6 +432,10 @@ export async function POST(request: Request) {
       },
       dispatchCutoffNote: dispatchWindow.noticeEn,
       dispatchCutoffNoteBn: dispatchWindow.noticeBn,
+      trackingToken: writeRes.trackingToken || undefined,
+      trackingHref: writeRes.trackingToken
+        ? `/track?token=${encodeURIComponent(writeRes.trackingToken)}`
+        : `/track?order=${encodeURIComponent(orderDoc.orderNumber)}`,
       notified: notifyResult.webhookStatus === 'delivered',
       notificationStatus: notifyResult.webhookStatus,
     },

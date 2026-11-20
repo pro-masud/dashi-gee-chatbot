@@ -24,8 +24,11 @@ import {
 } from '../src/lib/gemini/client';
 import { executeChatbotTool, normalizeWeight, type ToolRuntimeContext } from '../src/lib/gemini/tools';
 import { buildStoreFactsSnapshot, getSeededVerifiedMonetaryAmounts } from '../src/lib/chatbot/storeFacts';
-import { DEFAULT_CHATBOT_CONFIG } from '../src/lib/chatbot/types';
-import { DEFAULT_ACTIVE_BATCH, DEFAULT_STORE_SETTINGS } from '../src/lib/storeTypes';
+import {
+  TEST_CONFIRMED_BATCH as DEFAULT_ACTIVE_BATCH,
+  TEST_CONFIRMED_CHATBOT_CONFIG as DEFAULT_CHATBOT_CONFIG,
+  TEST_CONFIRMED_STORE_SETTINGS as DEFAULT_STORE_SETTINGS,
+} from './helpers/testStoreFixture';
 
 const ORIGINAL_ENV = {
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
@@ -194,6 +197,7 @@ describe('T0.10 Bilingual Chatbot Regression Suite (62 Curated & Order-Safety Sc
     setChatLogObserverForTests(null);
     setCostLedgerOverrideForTests(null);
     setRateLimitMemoryModeForTests(true);
+    setInventoryMemoryModeForTests({ ...DEFAULT_STORE_SETTINGS });
     setFirestoreHealthOverrideForTests(async () => ({
       reachable: true,
       latencyMs: 5,
@@ -211,6 +215,7 @@ describe('T0.10 Bilingual Chatbot Regression Suite (62 Curated & Order-Safety Sc
     setChatLogObserverForTests(null);
     setCostLedgerOverrideForTests(null);
     setRateLimitMemoryModeForTests(false);
+    setInventoryMemoryModeForTests(null);
     setFirestoreHealthOverrideForTests(null);
   });
 
@@ -1109,4 +1114,138 @@ describe('T0.10 Bilingual Chatbot Regression Suite (62 Curated & Order-Safety Sc
       else process.env.ORDER_TOKEN_SECRET = prevSecret;
     }
   });
+
+  it('Case #63 (Language Switch Mid-Chat): Switching from English to Bangla mid-conversation returns Bangla script reply', async () => {
+    const res = await callChat({
+      sessionId: 'reg_lang_switch_63',
+      uiLang: 'en',
+      messages: [
+        { role: 'user', text: 'What are the jar prices?' },
+        { role: 'assistant', text: 'Our confirmed jar prices are listed on the storefront.' },
+        { role: 'user', text: 'বাংলায় বলুন, ঢাকার বাইরে ডেলিভারি চার্জ কত?' },
+      ],
+      ip: '103.50.63.1',
+    });
+    assert.equal(res.status, 200);
+    assert.match(res.text, /[\u0980-\u09FF]/);
+  });
+
+  it('Case #64 (Multi-Slot Edit / Correction): Updating weight and district in follow-up turn produces updated draft without placing an order', async () => {
+    const res = await callChat({
+      sessionId: 'reg_slot_edit_64',
+      uiLang: 'en',
+      messages: [
+        { role: 'user', text: 'I want to order 500g ghee to Dhaka' },
+        { role: 'assistant', text: 'Sure, please share your name, phone, area, and full address.' },
+        { role: 'user', text: 'Actually change it to 1kg and deliver to Sylhet instead' },
+      ],
+      ip: '103.50.64.1',
+    });
+    assert.equal(res.status, 200);
+    assert.equal(getOrderStorageMemoryStateForTests()?.orders.size ?? 0, 0);
+    assert.ok(res.text.length > 10);
+  });
+
+  it('Case #65 (Session Resume): Reloading same sessionId with prior turns keeps context and responds cleanly', async () => {
+    const first = await callChat({
+      sessionId: 'reg_resume_65',
+      uiLang: 'bn',
+      messages: [{ role: 'user', text: '৫০০ গ্রাম ঘির দাম কত?' }],
+      ip: '103.50.65.1',
+    });
+    assert.equal(first.status, 200);
+    const second = await callChat({
+      sessionId: 'reg_resume_65',
+      uiLang: 'bn',
+      messages: [
+        { role: 'user', text: '৫০০ গ্রাম ঘির দাম কত?' },
+        { role: 'assistant', text: first.text },
+        { role: 'user', text: 'ডেলিভারি কত দিন লাগে?' },
+      ],
+      ip: '103.50.65.1',
+    });
+    assert.equal(second.status, 200);
+    assert.ok(second.text.length > 10);
+  });
+
+  it('Case #66 (Streaming Claim Blocker): Model output containing forbidden BSTI/organic/A2 claims is caught by responseValidator', async () => {
+    const { validateChatbotResponse } = await import('../src/lib/chatbot/responseValidator');
+    const facts = buildStoreFactsSnapshot({
+      settings: DEFAULT_STORE_SETTINGS,
+      batch: DEFAULT_ACTIVE_BATCH,
+      config: DEFAULT_CHATBOT_CONFIG,
+    });
+    const checked = validateChatbotResponse({
+      replyText: 'Our ghee is BSTI certified organic A2 bilona ghee and cures diabetes!',
+      replyLang: 'en',
+      settings: DEFAULT_STORE_SETTINGS,
+      config: DEFAULT_CHATBOT_CONFIG,
+      verifiedMonetaryAmounts: Array.from(getSeededVerifiedMonetaryAmounts(facts)),
+      hasPreparedOrderSummary: false,
+      isMixedQuestion: false,
+    });
+    assert.equal(checked.passed, false);
+    assert.equal(checked.errorCategory, 'unapproved_claim');
+  });
+
+  it('Case #67 (Mixed Pricing + Delivery Question): Answers jar pricing and delivery details cleanly in one turn', async () => {
+    setInventoryMemoryModeForTests({ ...DEFAULT_STORE_SETTINGS });
+    try {
+      const res = await callChat({
+        sessionId: 'reg_mixed_67',
+        uiLang: 'en',
+        messages: [{ role: 'user', text: 'How much is 500g ghee and what is the delivery fee inside Dhaka?' }],
+        ip: '103.50.67.1',
+      });
+      assert.equal(res.status, 200);
+      assert.match(res.text, /(1,?290|500\s*g|80|dhaka)/i);
+    } finally {
+      setInventoryMemoryModeForTests(null);
+    }
+  });
+
+  it('Case #68 (Banglish Pricing Variant): Banglish query defaults to Bangla script (D1) with confirmed price', async () => {
+    const res = await callChat({
+      sessionId: 'reg_banglish_68',
+      uiLang: 'bn',
+      messages: [{ role: 'user', text: '1kg ghee er dam koto vai? cod ache?' }],
+      ip: '103.50.68.1',
+    });
+    assert.equal(res.status, 200);
+    assert.match(res.text, /[\u0980-\u09FF]/);
+  });
+
+  it('Case #69 (Phase 3 Damaged Jar Support): Damaged jar complaint triggers support triage without promising unverified automatic refund', async () => {
+    const res = await callChat({
+      sessionId: 'reg_damaged_69',
+      uiLang: 'en',
+      messages: [{ role: 'user', text: 'My glass jar arrived cracked and leaking! Order DG-69001.' }],
+      ip: '103.50.69.1',
+    });
+    assert.equal(res.status, 200);
+    assert.equal(/automatic refund guaranteed/i.test(res.text), false);
+    assert.ok(res.text.length > 15);
+  });
+
+  it('Case #70 (T1.6 Structured Response Contract): /api/chat meta event emits structured contract fields with backend-only verified money/orderId projection', async () => {
+    const res = await callChat({
+      sessionId: 'reg_contract_70',
+      uiLang: 'en',
+      messages: [{ role: 'user', text: 'Show me jar prices please' }],
+      ip: '103.50.70.1',
+    });
+    assert.equal(res.status, 200);
+    const contract = res.meta?.contract as Record<string, unknown> | undefined;
+    assert.ok(contract && typeof contract === 'object');
+    assert.equal(typeof contract.replyText, 'string');
+    assert.equal(typeof contract.intent, 'string');
+    assert.equal(typeof contract.confidence, 'number');
+    assert.equal(typeof contract.needsHuman, 'boolean');
+    assert.ok(Array.isArray(contract.sources));
+    assert.ok(Array.isArray(contract.suggestedReplies));
+    assert.ok(Array.isArray(contract.productCardIds));
+    assert.ok(Array.isArray(contract.actions));
+    assert.equal(contract.verifiedOrderId, null);
+  });
 });
+

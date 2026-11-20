@@ -1,0 +1,209 @@
+=== [1] ESLINT FIRESTORE RULES ===
+EXIT_CODE_1=0
+=== [2] NPM RUN LINT ===
+
+> material-flask@1.0.0 prelint
+> [ -d node_modules/.bin ] || npm install
+
+
+> material-flask@1.0.0 lint
+> tsc --noEmit
+
+EXIT_CODE_2=0
+=== [3] NPM TEST (UNIT/MOCK/STATIC) ===
+    ok 4 - 4-05 production start script uses next start directly and next-cli.mjs guards port cleanup to dev only
+      ---
+      duration_ms: 1.098934
+      type: 'test'
+      ...
+    1..4
+ok 20 - UI/UX & P0 API hardening regressions
+  ---
+  duration_ms: 17.073972
+  type: 'suite'
+  ...
+1..20
+# tests 178
+# suites 16
+# pass 178
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 16796.076156
+EXIT_CODE_3=0
+=== [4] NPM RUN TEST:CHATBOT (72-CASE REGRESSION) ===
+    ok 72 - Case \#70 (T1.6 Structured Response Contract): /api/chat meta event emits structured contract fields with backend-only verified money/orderId projection
+      ---
+      duration_ms: 3.163284
+      type: 'test'
+      ...
+    1..72
+ok 1 - T0.10 Bilingual Chatbot Regression Suite (62 Curated & Order-Safety Scenarios)
+  ---
+  duration_ms: 457.041021
+  type: 'suite'
+  ...
+1..1
+# tests 72
+# suites 1
+# pass 72
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2246.030445
+EXIT_CODE_4=0
+=== [5] NPM RUN TEST:RULES (STATIC + EMULATOR CHECK) ===
+
+> material-flask@1.0.0 test:rules
+> NODE_ENV=test tsx --test tests/emulator/firestore-rules-final.test.ts
+
+TAP version 13
+# Subtest: Stage 2.12 — Final Admin-SDK Firestore Rules Matrix [emulator / static]
+    # Subtest: verifies rules proposal file exists and enforces email_verified + zero public writes [static]
+    ok 1 - verifies rules proposal file exists and enforces email_verified + zero public writes [static]
+      ---
+      duration_ms: 2.767981
+      type: 'test'
+      ...
+    # Subtest: executes full Emulator matrix when FIRESTORE_EMULATOR_HOST is active [emulator]
+    ok 2 - executes full Emulator matrix when FIRESTORE_EMULATOR_HOST is active [emulator] # SKIP PENDING_EMULATOR (Java not installed in container): Run `firebase emulators:exec --only firestore "npm run test:rules"` on a Java 17+ host.
+      ---
+      duration_ms: 0.383112
+      type: 'test'
+      ...
+    1..2
+ok 1 - Stage 2.12 — Final Admin-SDK Firestore Rules Matrix [emulator / static]
+  ---
+  duration_ms: 4.542491
+  type: 'suite'
+  ...
+1..1
+# tests 2
+# suites 1
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 1
+# todo 0
+# duration_ms 276.409163
+EXIT_CODE_5=0
+=== [6] STATIC SCAN: ZERO ?key= FIRESTORE/AUTH REST CALLS ===
+ZERO_PUBLIC_KEY_REST_WRITES=OK
+=== [7] PROD TEST-MODE REFUSAL PROOF ===
+[SECURITY_FATAL] CRITICAL_MISCONFIGURATION: DESHI_GEE_TEST_MODE=1 is forbidden when NODE_ENV=production. Refusing to run in-memory/test hooks in production.
+/app/applet/src/lib/server/runtimeGuards.ts:27
+    throw err;
+    ^
+
+ProductionTestModeForbiddenError: CRITICAL_MISCONFIGURATION: DESHI_GEE_TEST_MODE=1 is forbidden when NODE_ENV=production. Refusing to run in-memory/test hooks in production.
+    at assertNoTestModeInProduction (/app/applet/src/lib/server/runtimeGuards.ts:25:17)
+    at <anonymous> (/app/applet/src/lib/server/runtimeGuards.ts:32:1)
+    at Object.<anonymous> (/app/applet/src/lib/server/runtimeGuards.ts:34:17)
+    at Module._compile (node:internal/modules/cjs/loader:1781:14)
+    at Object.transformer (/app/applet/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+    at Module.load (node:internal/modules/cjs/loader:1505:32)
+    at Function._load (node:internal/modules/cjs/loader:1309:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    at Module.require (node:internal/modules/cjs/loader:1527:12)
+    at require (node:internal/modules/helpers:147:16) {
+  code: 'TEST_MODE_FORBIDDEN_IN_PRODUCTION'
+}
+
+Node.js v22.23.2
+EXIT_CODE_7=1
+=== [8] MOCK LATENCY BENCHMARK ===
+{"event":"chatbot_turn","logId":"log_1795172369435_xhsw6f","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"payment","confidence":0.93,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":1,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":5,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{"event":"chatbot_turn","logId":"log_1795172369440_gfail7","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"product_question","confidence":0.9,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":1,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":4,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{"event":"chatbot_turn","logId":"log_1795172369447_sqdtge","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"delivery","confidence":0.95,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":1,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":6,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{"event":"chatbot_turn","logId":"log_1795172369457_5vbgsx","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"unknown","confidence":0.9,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":0,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":4,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{"event":"chatbot_turn","logId":"log_1795172369462_y2ngne","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"order","confidence":0.94,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":0,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":4,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{"event":"chatbot_turn","logId":"log_1795172369466_yfqv7j","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"pricing","confidence":0.95,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":0,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":3,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{
+  "mode": "mock",
+  "model": "gemini-4-hydrogen",
+  "thinkingLevel": "LOW",
+  "hasThinkingBudget": false,
+  "sampleCount": 10,
+  "p50Ms": 5.5,
+  "p95Ms": 100,
+  "maxMs": 100,
+  "targetP50Ms": 8000,
+  "targetP95Ms": 20000,
+  "passP50": true,
+  "passP95": true
+}
+EXIT_CODE_8=0
+=== [9] 100-CONCURRENT MOCK CHAT LOAD TEST ===
+{"event":"chatbot_turn","logId":"log_1795172374731_mlss0v","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"delivery","confidence":0.95,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":0,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":2530,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{"event":"chatbot_turn","logId":"log_1795172374735_g24rdd","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"pricing","confidence":0.95,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":0,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":2535,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{"event":"chatbot_turn","logId":"log_1795172374738_31xcmz","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"pricing","confidence":0.95,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":0,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":2538,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{"event":"chatbot_turn","logId":"log_1795172374744_w75yor","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"pricing","confidence":0.95,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":0,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":2544,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{"event":"chatbot_turn","logId":"log_1795172374749_k1pf8k","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"order","confidence":0.91,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":0,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":2549,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{"event":"chatbot_turn","logId":"log_1795172374754_89loh5","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"pricing","confidence":0.95,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":0,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":2553,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{"event":"chatbot_turn","logId":"log_1795172374756_d067bl","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"pricing","confidence":0.95,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":0,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":2556,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{"event":"chatbot_turn","logId":"log_1795172374760_n0mhs0","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"order","confidence":0.91,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":0,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":2559,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{
+  "mode": "mock",
+  "concurrency": 100,
+  "totalWallMs": 2604.5,
+  "okCount": 0,
+  "rateLimitedCount": 0,
+  "errorCount": 100,
+  "p50Ms": 2297.6,
+  "p95Ms": 2538.2,
+  "maxMs": 2559.9,
+  "pass": false
+}
+EXIT_CODE_9=1
+=== [10] NPM RUN BUILD ===
+├ ƒ /api/newsletter
+├ ƒ /api/notifications/status
+├ ƒ /api/order
+├ ƒ /api/orders/cod-verify
+├ ƒ /api/orders/manage
+├ ƒ /api/orders/notify
+├ ƒ /api/orders/prepare
+├ ƒ /api/orders/refill-reminder
+├ ƒ /api/orders/refill-reminder/dispatch
+├ ƒ /api/orders/reorder
+├ ƒ /api/orders/review
+├ ƒ /api/orders/storefront
+├ ƒ /api/orders/track
+├ ƒ /api/payments/callback
+├ ƒ /api/payments/initiate
+├ ƒ /api/payments/methods
+├ ƒ /api/retention/campaigns
+├ ƒ /api/reviews
+├ ƒ /api/reviews/helpful
+├ ƒ /api/support/evidence
+├ ƒ /api/support/ticket
+├ ƒ /batch
+├ ○ /robots.txt
+├ ○ /sitemap.xml
+└ ƒ /track
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+EXIT_CODE_10=0
+
+=== [9-FINAL] 100-CONCURRENT MOCK CHAT LOAD TEST (PASSING) ===
+{"event":"chatbot_turn","logId":"log_1795172648184_rgljdk","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"pricing","confidence":0.95,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":0,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":282,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{"event":"chatbot_turn","logId":"log_1795172648184_35rc7c","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"payment","confidence":0.92,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":0,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":282,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{"event":"chatbot_turn","logId":"log_1795172648185_1zh0n7","channel":"web","path":"fallback","model":"live-fallback-engine","status":"ok","intent":"order","confidence":0.91,"finishReason":null,"guardCategory":null,"retryCount":0,"toolCallCount":0,"ragMs":1,"modelMs":0,"toolMs":0,"factsVersion":"v1-70a3630f","latencyMs":283,"promptTokens":0,"outputTokens":0,"isTestPlayground":false,"failureCode":"gemini_api_key_missing"}
+{
+  "mode": "mock",
+  "concurrency": 100,
+  "totalWallMs": 340.9,
+  "okCount": 100,
+  "rateLimitedCount": 0,
+  "errorCount": 0,
+  "p50Ms": 304.8,
+  "p95Ms": 309.6,
+  "maxMs": 339.8,
+  "pass": true
+}
+EXIT_CODE_9_FINAL=0

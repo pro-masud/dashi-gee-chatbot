@@ -5,6 +5,7 @@ import {
   verifyServerAdminToken,
 } from '../../../src/lib/chatbot/firestoreRest';
 import { hashIdentifier } from '../../../src/lib/chatbot/rateLimit';
+import { checkAdminSdkReadiness } from '../../../src/lib/firebaseAdmin';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,10 +65,17 @@ export async function GET(request: Request) {
     );
   }
 
-  return NextResponse.json(report, {
-    status: httpStatus,
-    headers: {
-      'Cache-Control': 'no-store',
+  const adminSdk = await checkAdminSdkReadiness();
+  return NextResponse.json(
+    {
+      ...report,
+      adminSdk,
     },
-  });
+    {
+      status: httpStatus,
+      headers: {
+        'Cache-Control': 'no-store',
+      },
+    }
+  );
 }

@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
+import { computeKeyedHmacDigest } from '../server/requestSecurity';
 import { ALL_64_BANGLADESH_DISTRICTS } from '../../data/deshiGeeData';
 import type {
   CouponRecord,
@@ -953,8 +954,11 @@ export function buildDuplicateFingerprintHash(params: {
     .replace(/\s+/g, ' ')
     .trim();
   const cleanDist = (params.district || '').toLowerCase().trim();
-  const canonical = `${cleanPhone}|${cleanDist}|${cleanAddress}|${params.qty250g},${params.qty500g},${params.qty1kg}`;
-  return createHash('sha256').update(canonical).digest('hex').slice(0, 32);
+  return computeKeyedHmacDigest(
+    'order_dup_fp_v2',
+    [cleanPhone, cleanDist, cleanAddress, `${params.qty250g},${params.qty500g},${params.qty1kg}`],
+    'ORDER_TOKEN_SECRET'
+  ).slice(0, 32);
 }
 
 export function getDispatchWindowInfo(settings: StoreSettingsDoc, now = new Date()): {

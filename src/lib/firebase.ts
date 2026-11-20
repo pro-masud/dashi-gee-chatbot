@@ -166,101 +166,46 @@ export async function saveStoreSettings(settings: StoreSettingsDoc): Promise<voi
   }
 }
 
+/**
+ * Stage 2.3: Direct browser Firestore order writes are permanently disabled.
+ * Storefront orders MUST go through POST /api/orders/storefront (Admin SDK atomic transaction).
+ */
 export async function createOrderAtomically(
-  order: Omit<OrderRecord, 'createdAt' | 'updatedAt'>
+  _order: Omit<OrderRecord, 'createdAt' | 'updatedAt'>
 ): Promise<void> {
-  const orderRef = doc(db, 'orders', order.orderNumber);
-  const trackingId = `${order.orderNumber}_${order.phone}`;
-  const trackingRef = doc(db, 'order_tracking', trackingId);
-  const settingsRef = doc(db, 'store_settings', 'main');
-  const auditRef = doc(
-    collection(db, 'order_audit_logs'),
-    `aud_${order.orderNumber}_created`
+  void _order;
+  throw new Error(
+    'Direct client Firestore order writes are disabled. Use POST /api/orders/storefront.'
   );
-
-  let settingsData: Partial<StoreSettingsDoc> | null = null;
-  try {
-    const settingsSnap = await getDoc(settingsRef);
-    if (settingsSnap.exists()) {
-      settingsData = settingsSnap.data() as Partial<StoreSettingsDoc>;
-    }
-  } catch {
-    settingsData = null;
-  }
-
-  const batch = writeBatch(db);
-  batch.set(orderRef, {
-    ...order,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-  batch.set(trackingRef, {
-    orderNumber: order.orderNumber,
-    weight: order.weight,
-    qty: order.qty,
-    qty250g: order.qty250g,
-    qty500g: order.qty500g,
-    qty1kg: order.qty1kg,
-    itemsSummary: order.itemsSummary,
-    subtotalBdt: order.subtotalBdt,
-    deliveryFeeBdt: order.deliveryFeeBdt,
-    discountBdt: order.discountBdt,
-    totalBdt: order.totalBdt,
-    couponCode: order.couponCode || '',
-    deliveryZone: order.deliveryZone,
-    district: order.district,
-    paymentMethod: order.paymentMethod,
-    paymentStatus: order.paymentStatus,
-    status: order.status,
-    reviewStatus: order.reviewStatus || 'none',
-    estimatedDelivery: order.estimatedDelivery,
-    updatedAt: serverTimestamp(),
-  });
-  batch.set(auditRef, {
-    orderNumber: order.orderNumber,
-    action: 'created',
-    actorType: 'customer',
-    summary: `Checkout order created (${order.itemsSummary}, Total ৳${order.totalBdt})`,
-    previousStatus: '',
-    nextStatus: order.status,
-    createdAt: serverTimestamp(),
-  });
-
-  if (settingsData) {
-    const cur250 = Number(settingsData.stock250g ?? DEFAULT_STORE_SETTINGS.stock250g);
-    const cur500 = Number(settingsData.stock500g ?? DEFAULT_STORE_SETTINGS.stock500g);
-    const cur1k = Number(settingsData.stock1kg ?? DEFAULT_STORE_SETTINGS.stock1kg);
-    batch.update(settingsRef, {
-      stock250g: Math.max(0, cur250 - Number(order.qty250g || 0)),
-      stock500g: Math.max(0, cur500 - Number(order.qty500g || 0)),
-      stock1kg: Math.max(0, cur1k - Number(order.qty1kg || 0)),
-      lastOrderNumber: order.orderNumber,
-      updatedAt: serverTimestamp(),
-    });
-  }
-
-  try {
-    await batch.commit();
-  } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, `orders/${order.orderNumber}`);
-  }
 }
 
+/**
+ * Decision D14 (Stage 2.4): Order tracking goes through POST /api/orders/track
+ * (supports 192-bit CSPRNG token or rate-limited orderNumber + phone with uniform 404).
+ */
 export async function trackOrderLookup(
   orderNumber: string,
-  phone: string
+  phone: string,
+  trackingToken?: string
 ): Promise<TrackingRecord | null> {
-  const cleanOrder = orderNumber.trim().toUpperCase();
-  const cleanPhone = phone.replace(/[\s-]/g, '');
-  if (!/^DG-[0-9]{4,8}$/.test(cleanOrder) || !/^01[3-9][0-9]{8}$/.test(cleanPhone)) {
-    return null;
-  }
-  const lookupId = `${cleanOrder}_${cleanPhone}`;
   try {
-    const snap = await getDoc(doc(db, 'order_tracking', lookupId));
-    return snap.exists() ? (snap.data() as TrackingRecord) : null;
-  } catch (error) {
-    handleFirestoreError(error, OperationType.GET, `order_tracking/${lookupId}`);
+    const res = await fetch('/api/orders/track', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-requested-with': 'DeshiGeeStorefront',
+      },
+      body: JSON.stringify({
+        trackingToken: trackingToken || undefined,
+        orderNumber: orderNumber.trim().toUpperCase(),
+        phone: phone.replace(/[\s-]/g, ''),
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { ok?: boolean; tracking?: TrackingRecord };
+    return data.ok && data.tracking ? data.tracking : null;
+  } catch {
+    return null;
   }
 }
 
@@ -327,33 +272,33 @@ export async function submitCustomerReview(input: {
   orderNumber: string;
   photoData: string;
 }): Promise<string> {
-  const id = `rev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  try {
-    await setDoc(doc(db, 'reviews', id), {
-      customerName: input.customerName.trim().slice(0, 80),
-      district: input.district.trim().slice(0, 80),
-      rating: Math.max(1, Math.min(5, Math.round(input.rating))),
-      comment: input.comment.trim().slice(0, 600),
-      orderNumber: input.orderNumber.trim().toUpperCase().slice(0, 20),
-      verifiedPurchase: false,
-      helpfulCount: 0,
-      photoData: input.photoData.slice(0, 180000),
-      status: 'pending',
-      createdAt: serverTimestamp(),
-    });
-    return id;
-  } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, `reviews/${id}`);
+  const res = await fetch('/api/reviews', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-requested-with': 'DeshiGeeStorefront',
+    },
+    body: JSON.stringify(input),
+  });
+  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; id?: string; error?: string };
+  if (!res.ok || !data.ok || !data.id) {
+    throw new Error(data.error || 'Could not submit review right now.');
   }
+  return data.id;
 }
 
-export async function incrementReviewHelpful(reviewId: string, currentCount: number): Promise<void> {
-  try {
-    await updateDoc(doc(db, 'reviews', reviewId), {
-      helpfulCount: currentCount + 1,
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `reviews/${reviewId}`);
+export async function incrementReviewHelpful(reviewId: string, _currentCount?: number): Promise<void> {
+  void _currentCount;
+  const res = await fetch('/api/reviews/helpful', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-requested-with': 'DeshiGeeStorefront',
+    },
+    body: JSON.stringify({ reviewId }),
+  });
+  if (!res.ok) {
+    throw new Error('Could not mark review helpful right now.');
   }
 }
 
@@ -372,16 +317,17 @@ export async function subscribeNewsletterEmail(
   email: string,
   lang: 'en' | 'bn'
 ): Promise<void> {
-  const clean = email.trim().toLowerCase();
-  const id = `sub_${clean.replace(/[^a-z0-9]/g, '_').slice(0, 96)}`;
-  try {
-    await setDoc(doc(db, 'subscribers', id), {
-      email: clean,
-      lang,
-      createdAt: serverTimestamp(),
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, `subscribers/${id}`);
+  const res = await fetch('/api/newsletter', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-requested-with': 'DeshiGeeStorefront',
+    },
+    body: JSON.stringify({ email, lang }),
+  });
+  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Could not subscribe right now.');
   }
 }
 

@@ -59,7 +59,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
         />
       </head>
-      <body>
+      <body suppressHydrationWarning>
         <ErrorBoundary>
           <StorefrontProvider initialSettings={settings}>{children}</StorefrontProvider>
         </ErrorBoundary>

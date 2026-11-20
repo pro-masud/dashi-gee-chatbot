@@ -48,7 +48,7 @@ test('ui_hides_unset_store_values [mock/static]: default store settings are stri
   assert.equal(getConfirmedPriceForWeight(DEFAULT_STORE_SETTINGS, '500g'), null);
   assert.equal(getConfirmedPriceForWeight(DEFAULT_STORE_SETTINGS, '1kg'), null);
   assert.equal(getConfirmedDeliveryFeeForZone(DEFAULT_STORE_SETTINGS, 'dhaka'), null);
-  assert.equal(getConfirmedDeliveryFeeForZone(DEFAULT_STORE_SETTINGS, 'outside_dhaka'), null);
+  assert.equal(getConfirmedDeliveryFeeForZone(DEFAULT_STORE_SETTINGS, 'nationwide'), null);
   assert.equal(isStorefrontOrderingReady(DEFAULT_STORE_SETTINGS), false);
 
   // Batch default is empty (no DG-PAB-2026-042)

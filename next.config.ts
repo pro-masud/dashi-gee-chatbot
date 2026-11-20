@@ -2,6 +2,7 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  serverExternalPackages: ['firebase-admin'],
   allowedDevOrigins: [
     '*.run.app',
     '*.asia-northeast1.run.app',

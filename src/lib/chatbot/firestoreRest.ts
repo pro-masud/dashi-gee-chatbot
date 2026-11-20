@@ -57,65 +57,51 @@ import {
   type SupportPriority,
   type SupportTicketStatus,
 } from './types';
+import {
+  assertNoTestModeInProduction,
+  isTestProcessRuntime,
+  LiveFirestoreWriteBlockedInTestError,
+  ProductionTestModeForbiddenError,
+} from '../server/runtimeGuards';
+import {
+  AdminSdkUnavailableError,
+  checkAdminSdkReadiness,
+  verifyAdminIdTokenStrict,
+} from '../firebaseAdmin';
+import {
+  adminFindTrackingByToken,
+  adminGetDocumentWithMeta,
+  adminListCollection,
+  adminRunStructuredQuery,
+  executeAdminFirestoreCommit,
+  sanitizePublicTrackingRecord,
+  type FsWriteOp,
+} from '../server/adminRepository';
+import {
+  generateTrackingTokenPair,
+  hashTrackingToken,
+  timingSafeHexEqual,
+} from '../server/requestSecurity';
+
+export {
+  assertNoTestModeInProduction,
+  isTestProcessRuntime,
+  LiveFirestoreWriteBlockedInTestError,
+  ProductionTestModeForbiddenError,
+  AdminSdkUnavailableError,
+};
 
 const PROJECT_ID = firebaseConfig.projectId;
 const DATABASE_ID = firebaseConfig.firestoreDatabaseId;
-const API_KEY = firebaseConfig.apiKey;
 const BASE_DOC_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents`;
 const NATIVE_FETCH_AT_LOAD = globalThis.fetch;
 
-/**
- * S0-14 (Fail-Closed Test Guard):
- * Thrown whenever any test runtime attempts a real network write to live Firestore
- * without an active FIRESTORE_EMULATOR_HOST, an active in-memory test mock, or a mocked globalThis.fetch.
- */
-export class LiveFirestoreWriteBlockedInTestError extends Error {
-  readonly code = 'FAIL_CLOSED_LIVE_FIRESTORE_WRITE';
-
-  constructor(operation: string) {
-    super(
-      `FAIL_CLOSED_LIVE_FIRESTORE_WRITE: Refusing live Firestore write (${operation}) during test run without FIRESTORE_EMULATOR_HOST, an active in-memory mock, or mocked globalThis.fetch.`
-    );
-    this.name = 'LiveFirestoreWriteBlockedInTestError';
-  }
-}
-
-export class ProductionTestModeForbiddenError extends Error {
-  readonly code = 'TEST_MODE_FORBIDDEN_IN_PRODUCTION';
-
-  constructor() {
-    super(
-      'CRITICAL_MISCONFIGURATION: DESHI_GEE_TEST_MODE=1 is forbidden when NODE_ENV=production. Refusing to run in-memory/test hooks in production.'
-    );
-    this.name = 'ProductionTestModeForbiddenError';
-  }
-}
-
-export function assertNoTestModeInProduction(): void {
-  if (process.env.NODE_ENV === 'production' && process.env.DESHI_GEE_TEST_MODE === '1') {
-    const err = new ProductionTestModeForbiddenError();
-    console.error(`[SECURITY_FATAL] ${err.message}`);
-    throw err;
-  }
-}
-
-// Fail fast at module evaluation if a production deployment accidentally enables DESHI_GEE_TEST_MODE=1.
-assertNoTestModeInProduction();
-
-export function isTestProcessRuntime(): boolean {
+function shouldUseMockOrEmulatorFetchTransport(): boolean {
   assertNoTestModeInProduction();
-  return (
-    process.env.NODE_ENV === 'test' ||
-    process.env.DESHI_GEE_TEST_MODE === '1' ||
-    Boolean(process.env.NODE_TEST_CONTEXT) ||
-    process.execArgv.some((arg) => arg === '--test' || arg.startsWith('--test-')) ||
-    process.argv.some(
-      (arg) =>
-        arg === '--test' ||
-        arg.startsWith('--test-') ||
-        /(?:^|[/\\])tests[/\\].*\.test\.[cm]?[jt]sx?$/.test(arg)
-    )
-  );
+  if (!isTestProcessRuntime()) return false;
+  const hasEmulator = Boolean((process.env.FIRESTORE_EMULATOR_HOST || '').trim());
+  const hasMockFetch = globalThis.fetch !== NATIVE_FETCH_AT_LOAD;
+  return hasEmulator || hasMockFetch;
 }
 
 function getFirestoreBaseDocUrl(): string {
@@ -137,13 +123,38 @@ export function assertLiveFirestoreWriteAllowed(operation: string): void {
   }
 }
 
+/**
+ * Executes atomic Firestore commit writes:
+ * - In production/non-test runtimes: ALWAYS executes via Firebase Admin SDK (`runTransaction`) using ADC.
+ *   Never uses public API-key REST writes (`?key=`). Fails closed with `AdminSdkUnavailableError` (503, D5).
+ * - In test runtime with active mock fetch or emulator: routes to test mock/emulator transport.
+ */
 async function firestoreCommitFetch(
   init: RequestInit,
   operation = 'firestore_commit'
 ): Promise<Response> {
   assertNoTestModeInProduction();
   assertLiveFirestoreWriteAllowed(operation);
-  return fetch(`${getFirestoreBaseDocUrl()}:commit?key=${encodeURIComponent(API_KEY)}`, init);
+  if (shouldUseMockOrEmulatorFetchTransport()) {
+    return fetch(`${getFirestoreBaseDocUrl()}:commit`, init);
+  }
+
+  let parsedBody: { writes?: FsWriteOp[] } = {};
+  if (typeof init.body === 'string') {
+    try {
+      parsedBody = JSON.parse(init.body) as { writes?: FsWriteOp[] };
+    } catch {
+      parsedBody = {};
+    }
+  }
+  const result = await executeAdminFirestoreCommit(parsedBody.writes || []);
+  return new Response(
+    result.ok ? JSON.stringify({ writeResults: [] }) : result.errorText || 'ADMIN_COMMIT_ERROR',
+    {
+      status: result.status,
+      headers: { 'Content-Type': 'application/json' },
+    }
+  );
 }
 
 type FsValue =
@@ -238,7 +249,10 @@ async function fetchFsGetWithMeta(
   path: string,
   idToken?: string
 ): Promise<{ data: Record<string, unknown>; updateTime?: string } | null> {
-  const url = `${getFirestoreBaseDocUrl()}/${path}?key=${encodeURIComponent(API_KEY)}`;
+  if (!shouldUseMockOrEmulatorFetchTransport()) {
+    return adminGetDocumentWithMeta(path);
+  }
+  const url = `${getFirestoreBaseDocUrl()}/${path}`;
   const headers: Record<string, string> = {};
   if (idToken) {
     headers.Authorization = `Bearer ${idToken}`;
@@ -275,7 +289,10 @@ async function fetchFsCollectionList(
   pageSize = 200,
   idToken?: string
 ): Promise<Record<string, unknown>[]> {
-  const url = `${getFirestoreBaseDocUrl()}/${collectionId}?pageSize=${pageSize}&key=${encodeURIComponent(API_KEY)}`;
+  if (!shouldUseMockOrEmulatorFetchTransport()) {
+    return adminListCollection(collectionId, pageSize);
+  }
+  const url = `${getFirestoreBaseDocUrl()}/${collectionId}?pageSize=${pageSize}`;
   const headers: Record<string, string> = {};
   if (idToken) {
     headers.Authorization = `Bearer ${idToken}`;
@@ -297,7 +314,10 @@ async function runFsStructuredQuery(
   structuredQuery: Record<string, unknown>,
   idToken?: string
 ): Promise<Record<string, unknown>[]> {
-  const url = `${getFirestoreBaseDocUrl()}:runQuery?key=${encodeURIComponent(API_KEY)}`;
+  if (!shouldUseMockOrEmulatorFetchTransport()) {
+    return adminRunStructuredQuery(structuredQuery);
+  }
+  const url = `${getFirestoreBaseDocUrl()}:runQuery`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -322,56 +342,15 @@ async function runFsStructuredQuery(
 
 export async function verifyServerAdminToken(
   authHeader: string | null
-): Promise<{ ok: boolean; email: string; uid: string }> {
+): Promise<{ ok: boolean; email: string; uid: string; emailVerified?: boolean; reason?: string }> {
   if (
     (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
     globalFirestoreTestHooks.__deshiGeeAdminVerifyOverride
   ) {
-    return globalFirestoreTestHooks.__deshiGeeAdminVerifyOverride(authHeader);
+    const res = await globalFirestoreTestHooks.__deshiGeeAdminVerifyOverride(authHeader);
+    return { ...res, emailVerified: res.ok };
   }
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return { ok: false, email: '', uid: '' };
-  }
-  const idToken = authHeader.slice(7).trim();
-  if (!idToken || idToken.length < 20) {
-    return { ok: false, email: '', uid: '' };
-  }
-
-  try {
-    const res = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(API_KEY)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken }),
-        cache: 'no-store',
-      }
-    );
-    if (!res.ok) {
-      return { ok: false, email: '', uid: '' };
-    }
-    const payload = (await res.json()) as {
-      users?: { localId?: string; email?: string; emailVerified?: boolean }[];
-    };
-    const user = payload.users?.[0];
-    if (!user || !user.emailVerified || !user.localId) {
-      return { ok: false, email: '', uid: '' };
-    }
-
-    if (user.email === 'kinboni.bd@gmail.com') {
-      return { ok: true, email: user.email, uid: user.localId };
-    }
-
-    // Check /admins/{uid} collection using admin's own Bearer token
-    const adminDoc = await fetchFsGet(`admins/${user.localId}`, idToken);
-    if (adminDoc) {
-      return { ok: true, email: user.email || '', uid: user.localId };
-    }
-    return { ok: false, email: user.email || '', uid: user.localId };
-  } catch (__fsGuardErr) {
-    if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
-    return { ok: false, email: '', uid: '' };
-  }
+  return verifyAdminIdTokenStrict(authHeader);
 }
 
 export async function fetchServerStoreSettingsWithMeta(): Promise<{
@@ -594,6 +573,7 @@ export async function checkAndIncrementFirestoreRateLimit(
   }
 
   try {
+    assertLiveFirestoreWriteAllowed('checkAndIncrementFirestoreRateLimit');
     const existing = await fetchFsGet(path);
     const prevWindowStart = Number(existing?.windowStartMs || 0);
     const prevCount = Number(existing?.count || 0);
@@ -705,11 +685,49 @@ export async function checkRecentOrderFingerprint(
   }
 }
 
+export async function fetchServerOrderTrackingByToken(
+  token: string
+): Promise<(TrackingRecord & { maskedPhone?: string }) | null> {
+  const clean = String(token || '').trim();
+  if (clean.length < 24 || clean.length > 96) return null;
+  const targetHash = hashTrackingToken(clean);
+
+  if (
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
+    globalFirestoreTestHooks.__deshiGeeOrderMemoryState?.enabled
+  ) {
+    const mem = globalFirestoreTestHooks.__deshiGeeOrderMemoryState;
+    for (const [key, rec] of mem.tracking.entries()) {
+      const storedHash = String(rec.trackingTokenHash || '');
+      if (storedHash && timingSafeHexEqual(storedHash, targetHash)) {
+        const phonePart = key.includes('_') ? key.split('_').slice(1).join('_') : '';
+        return sanitizePublicTrackingRecord(rec as unknown as Record<string, unknown>, phonePart);
+      }
+    }
+    return null;
+  }
+
+  return adminFindTrackingByToken(clean);
+}
+
 export async function createServerOrderAtomically(
   order: Omit<OrderRecord, 'createdAt' | 'updatedAt'>,
   tokenMeta?: { tokenId: string; sessionId: string; idemKey: string },
   options?: { fingerprintHash?: string }
-): Promise<{ ok: boolean; error?: string; conflict?: boolean; outOfStock?: boolean }> {
+): Promise<{
+  ok: boolean;
+  error?: string;
+  conflict?: boolean;
+  outOfStock?: boolean;
+  couponExhausted?: boolean;
+  serviceUnavailable?: boolean;
+  trackingToken?: string;
+}> {
+  const { trackingToken, trackingTokenHash } = generateTrackingTokenPair();
+  const orderWithToken: Omit<OrderRecord, 'createdAt' | 'updatedAt'> = {
+    ...order,
+    trackingTokenHash,
+  };
   const trackingPayload: Omit<TrackingRecord, 'updatedAt'> = {
     orderNumber: order.orderNumber,
     weight: order.weight,
@@ -730,6 +748,7 @@ export async function createServerOrderAtomically(
     status: order.status,
     reviewStatus: order.reviewStatus || 'none',
     estimatedDelivery: order.estimatedDelivery,
+    trackingTokenHash,
   };
 
   // Deterministic atomic memory store for integration/concurrency testing
@@ -748,6 +767,26 @@ export async function createServerOrderAtomically(
     }
     if (mem.orders.has(order.orderNumber)) {
       return { ok: false, conflict: true, error: 'ALREADY_EXISTS' };
+    }
+
+    // Atomic coupon cap validation + increment in memory store
+    const cleanCoupon = String(order.couponCode || '').trim().toUpperCase();
+    const couponMap = globalFirestoreTestHooks.__deshiGeeTestCouponsMap;
+    let matchedCoupon: CouponRecord | null = null;
+    if (cleanCoupon && couponMap) {
+      matchedCoupon = couponMap.get(cleanCoupon) || null;
+      if (matchedCoupon) {
+        const used = Number(matchedCoupon.usedCount || 0);
+        const cap = Number(matchedCoupon.maxUses || 0);
+        if (!matchedCoupon.active || (cap > 0 && used >= cap)) {
+          return {
+            ok: false,
+            conflict: true,
+            couponExhausted: true,
+            error: 'COUPON_USAGE_LIMIT_REACHED',
+          };
+        }
+      }
     }
 
     const inv = globalFirestoreTestHooks.__deshiGeeTestStoreSettings || { ...DEFAULT_STORE_SETTINGS };
@@ -770,8 +809,15 @@ export async function createServerOrderAtomically(
     inv.lastOrderNumber = order.orderNumber;
     globalFirestoreTestHooks.__deshiGeeTestStoreSettings = inv;
 
+    if (matchedCoupon && couponMap) {
+      couponMap.set(cleanCoupon, {
+        ...matchedCoupon,
+        usedCount: Number(matchedCoupon.usedCount || 0) + 1,
+      });
+    }
+
     const nowIso = new Date().toISOString();
-    mem.orders.set(order.orderNumber, { ...order, createdAt: nowIso, updatedAt: nowIso });
+    mem.orders.set(order.orderNumber, { ...orderWithToken, createdAt: nowIso, updatedAt: nowIso });
     mem.tracking.set(`${order.orderNumber}_${order.phone}`, {
       ...trackingPayload,
       updatedAt: nowIso,
@@ -796,22 +842,40 @@ export async function createServerOrderAtomically(
       nextTotalBdt: order.totalBdt,
       createdAt: nowIso,
     });
-    return { ok: true };
+    return { ok: true, trackingToken };
   }
 
   const orderPath = docName('orders', order.orderNumber);
   const trackingPath = docName('order_tracking', `${order.orderNumber}_${order.phone}`);
   const auditId = `audit_${order.orderNumber}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const cleanCoupon = String(order.couponCode || '').trim().toUpperCase();
 
-  // Optimistic retry loop (up to 2 attempts) for store_settings stock contention
+  // Optimistic retry loop (up to 2 attempts) for store_settings / coupon contention inside Admin SDK transaction
   for (let attempt = 0; attempt < 2; attempt++) {
-    const storeMeta = await fetchFsGetWithMeta('store_settings/main');
+    let storeMeta: { data: Record<string, unknown>; updateTime?: string } | null = null;
+    let couponMeta: { data: Record<string, unknown>; updateTime?: string } | null = null;
+    try {
+      storeMeta = await fetchFsGetWithMeta('store_settings/main');
+      if (cleanCoupon) {
+        couponMeta = await fetchFsGetWithMeta(`coupons/${encodeURIComponent(cleanCoupon)}`);
+      }
+    } catch (err) {
+      if (err instanceof AdminSdkUnavailableError) {
+        return {
+          ok: false,
+          serviceUnavailable: true,
+          error: err.customerMessageEn,
+        };
+      }
+      throw err;
+    }
+
     const writes: Record<string, unknown>[] = [
       {
         currentDocument: { exists: false },
         update: {
           name: orderPath,
-          fields: encodeFsFields(order as unknown as Record<string, unknown>),
+          fields: encodeFsFields(orderWithToken as unknown as Record<string, unknown>),
         },
         updateTransforms: [
           { fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' },
@@ -870,6 +934,32 @@ export async function createServerOrderAtomically(
       });
     }
 
+    if (cleanCoupon && couponMeta?.updateTime) {
+      const used = Number(couponMeta.data.usedCount ?? 0);
+      const maxUses = Number(couponMeta.data.maxUses ?? 0);
+      const active = couponMeta.data.active !== false;
+      if (!active || (maxUses > 0 && used >= maxUses)) {
+        return {
+          ok: false,
+          conflict: true,
+          couponExhausted: true,
+          error: 'COUPON_USAGE_LIMIT_REACHED',
+        };
+      }
+      writes.push({
+        currentDocument: { updateTime: couponMeta.updateTime },
+        update: {
+          name: docName('coupons', cleanCoupon),
+          fields: encodeFsFields({
+            usedCount: used + 1,
+          }),
+        },
+        updateMask: {
+          fieldPaths: ['usedCount'],
+        },
+      });
+    }
+
     if (tokenMeta) {
       writes.push(
         {
@@ -903,6 +993,7 @@ export async function createServerOrderAtomically(
           fields: encodeFsFields({
             orderNumber: order.orderNumber,
             createdAtMs: Date.now(),
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
           }),
         },
         updateTransforms: [{ fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' }],
@@ -917,12 +1008,11 @@ export async function createServerOrderAtomically(
         cache: 'no-store',
       });
       if (res.ok) {
-        return { ok: true };
+        return { ok: true, trackingToken };
       }
       const errText = await res.text().catch(() => '');
       const isStoreRace =
         errText.includes('FAILED_PRECONDITION') &&
-        errText.includes('store_settings/main') &&
         attempt === 0;
       if (isStoreRace) {
         continue;
@@ -933,7 +1023,14 @@ export async function createServerOrderAtomically(
         errText.includes('FAILED_PRECONDITION');
       return { ok: false, conflict, error: errText.slice(0, 220) || `HTTP ${res.status}` };
     } catch (err) {
-    if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
+      if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
+      if (err instanceof AdminSdkUnavailableError) {
+        return {
+          ok: false,
+          serviceUnavailable: true,
+          error: err.customerMessageEn,
+        };
+      }
       return {
         ok: false,
         error: err instanceof Error ? err.message : 'Order write failed',
@@ -2380,7 +2477,7 @@ export async function recordPersistentDailyCost(
 
 export async function checkServerFirestoreHealth(
   timeoutMs = 3500
-): Promise<{ reachable: boolean; latencyMs: number; detail: string }> {
+): Promise<{ reachable: boolean; latencyMs: number; detail: string; mode?: string }> {
   if (
     (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
     globalFirestoreTestHooks.__deshiGeeFirestoreHealthOverride
@@ -2389,36 +2486,39 @@ export async function checkServerFirestoreHealth(
   }
 
   const startedAt = Date.now();
+  if (!shouldUseMockOrEmulatorFetchTransport()) {
+    const report = await checkAdminSdkReadiness();
+    return {
+      reachable: report.ok,
+      latencyMs: report.latencyMs,
+      detail: `${report.code}: ${report.detail}`,
+      mode: report.mode,
+    };
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-
   try {
-    const url = `${BASE_DOC_URL}/store_settings/main?key=${encodeURIComponent(API_KEY)}`;
+    const url = `${getFirestoreBaseDocUrl()}/store_settings/main`;
     const res = await fetch(url, {
       method: 'GET',
       cache: 'no-store',
       signal: controller.signal,
     });
     const latencyMs = Date.now() - startedAt;
-
-    if (res.status === 200) {
+    if (res.status === 200 || res.status === 404) {
       return {
         reachable: true,
         latencyMs,
-        detail: 'Firestore REST reachable (store_settings/main readable)',
-      };
-    }
-    if (res.status === 404) {
-      return {
-        reachable: true,
-        latencyMs,
-        detail: 'Firestore REST reachable (store_settings/main not yet seeded)',
+        detail: 'Firestore test/emulator reachable',
+        mode: 'emulator_or_mock',
       };
     }
     return {
       reachable: false,
       latencyMs,
-      detail: `Firestore REST HTTP ${res.status}`,
+      detail: `Firestore HTTP ${res.status}`,
+      mode: 'emulator_or_mock',
     };
   } catch (err) {
     if (err instanceof LiveFirestoreWriteBlockedInTestError) throw err;
@@ -4956,19 +5056,9 @@ export async function fetchServerOrderForAdmin(
   }
 
   try {
-    const res = await fetch(
-      `${BASE_DOC_URL}/orders/${encodeURIComponent(cleanOrder)}?key=${encodeURIComponent(API_KEY)}`,
-      {
-        headers: {
-          Authorization: `Bearer ${adminIdToken}`,
-        },
-        cache: 'no-store',
-      }
-    );
-    if (!res.ok) return null;
-    const raw = (await res.json()) as { fields?: Record<string, FsValue> };
-    if (!raw.fields) return null;
-    return decodeFsFields(raw.fields) as unknown as OrderRecord;
+    const doc = await fetchFsGet(`orders/${encodeURIComponent(cleanOrder)}`, adminIdToken);
+    if (!doc) return null;
+    return doc as unknown as OrderRecord;
   } catch (__fsGuardErr) {
     if (__fsGuardErr instanceof LiveFirestoreWriteBlockedInTestError) throw __fsGuardErr;
     return null;

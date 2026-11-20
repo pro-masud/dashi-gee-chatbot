@@ -9,6 +9,7 @@ import {
   normalizeBangladeshPhone,
   verifySignedOrderManageToken,
 } from '../../../../src/lib/chatbot/orderToken';
+import { publishBusinessEventSafe } from '../../../../src/lib/notifications/engine';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -105,6 +106,27 @@ export async function POST(request: Request) {
           ? 404
           : 400;
 
+    if (result.ok) {
+      void publishBusinessEventSafe({
+        type: p.action === 'cancel' ? 'ORDER_CANCELLED' : 'ORDER_UPDATED',
+        idempotencyKey: `order_${p.action}_${p.orderNumber}_${Date.now()}`,
+        title:
+          p.action === 'cancel'
+            ? `Order Cancelled — ${p.orderNumber}`
+            : `Order Address Updated — ${p.orderNumber}`,
+        summary:
+          p.action === 'cancel'
+            ? `Customer confirmed cancellation via chat (${p.reason || 'no reason given'}).`
+            : `Customer updated delivery address to ${[p.area, p.district].filter(Boolean).join(', ')}.`,
+        orderNumber: p.orderNumber,
+        customerPhone: p.phone,
+        district: p.district,
+        area: p.area,
+        orderStatus: p.action === 'cancel' ? 'cancelled' : 'updated',
+        adminPath: '/admin',
+      });
+    }
+
     return NextResponse.json({ ...result, confirmedViaToken: true }, { status: statusCode });
   }
 
@@ -145,6 +167,29 @@ export async function POST(request: Request) {
       adminIdToken: idToken,
       actorEmail: admin.email,
     });
+    if (result.ok) {
+      const isCancelOp = action === 'admin_cancel' || action === 'admin_review_reject';
+      void publishBusinessEventSafe({
+        type: isCancelOp ? 'ORDER_CANCELLED' : 'ORDER_UPDATED',
+        idempotencyKey: `order_${action}_${orderNumber}_${Date.now()}`,
+        title: isCancelOp
+          ? `Order Cancelled by Admin — ${orderNumber}`
+          : `Order Updated by Admin — ${orderNumber}`,
+        summary:
+          action === 'admin_update_courier'
+            ? `Courier details updated (${String(body.courierPartner || 'courier')}${body.markShipped ? ', marked shipped' : ''}) by ${admin.email}.`
+            : `Admin action "${action}" completed by ${admin.email}${reason ? ` (${reason})` : ''}.`,
+        orderNumber,
+        orderStatus: isCancelOp
+          ? 'cancelled'
+          : body.markShipped
+            ? 'shipped'
+            : action === 'admin_review_approve'
+              ? 'confirmed'
+              : 'updated',
+        adminPath: '/admin',
+      });
+    }
     return NextResponse.json(result, { status: result.ok ? 200 : 400 });
   }
 
@@ -172,6 +217,27 @@ export async function POST(request: Request) {
       : result.code === 'order_not_found'
         ? 404
         : 400;
+
+  if (result.ok && (action === 'cancel' || action === 'edit_address')) {
+    void publishBusinessEventSafe({
+      type: action === 'cancel' ? 'ORDER_CANCELLED' : 'ORDER_UPDATED',
+      idempotencyKey: `order_${action}_${orderNumber}_${Date.now()}`,
+      title:
+        action === 'cancel'
+          ? `Order Cancelled — ${orderNumber}`
+          : `Order Updated — ${orderNumber}`,
+      summary:
+        action === 'cancel'
+          ? `Order ${orderNumber} was cancelled (${reason || 'customer request'}).`
+          : `Delivery address updated for ${orderNumber} (${[area, district].filter(Boolean).join(', ')}).`,
+      orderNumber,
+      customerPhone: phone,
+      district: district || undefined,
+      area: area || undefined,
+      orderStatus: action === 'cancel' ? 'cancelled' : 'updated',
+      adminPath: '/admin',
+    });
+  }
 
   return NextResponse.json(result, { status: statusCode });
 }

@@ -8,6 +8,8 @@ import {
   sendDirectEmail,
   sendDirectSms,
 } from './messagingGateway';
+import { publishBusinessEventSafe } from '../notifications/engine';
+import { fetchNotificationRules } from '../notifications/store';
 
 export interface ServerOrderNotifyPayload {
   orderNumber: string;
@@ -55,6 +57,50 @@ export async function dispatchOrderNotificationsServerSide(
   const canDirectSms =
     directReadiness.anyDirectSms && /^01[3-9]\d{8}$/.test(phone.replace(/\D/g, ''));
   const canDirectEmail = directReadiness.anyDirectEmail && ownerEmail.includes('@');
+
+  // Non-blocking publish to Central Notification Engine (Telegram, Discord, WhatsApp)
+  void publishBusinessEventSafe({
+    type: 'ORDER_CREATED',
+    idempotencyKey: `order_created_${orderNumber}`,
+    title: `New Order ${orderNumber}`,
+    summary: `${customerName} placed an order (${itemsSummary}) for ৳${Math.round(totalBdt)}.`,
+    orderNumber,
+    customerName,
+    customerPhone: phone,
+    itemsSummary,
+    totalBdt,
+    paymentMethod: typeof payload.paymentMethod === 'string' ? payload.paymentMethod : 'cod',
+    orderStatus: 'pending',
+    district: typeof payload.district === 'string' ? payload.district : undefined,
+    area: typeof payload.area === 'string' ? payload.area : undefined,
+    whatsappOptIn: payload.whatsappOptIn === true,
+    adminPath: '/admin',
+  });
+
+  if (typeof payload.remainingStock === 'number' && Number.isFinite(payload.remainingStock)) {
+    const remaining = Math.max(0, Math.round(payload.remainingStock));
+    const variantWeight =
+      typeof payload.variantWeight === 'string' && payload.variantWeight.trim()
+        ? payload.variantWeight.trim()
+        : itemsSummary;
+    void fetchNotificationRules()
+      .then((rules) => {
+        if (remaining <= rules.lowStockThreshold) {
+          return publishBusinessEventSafe({
+            type: 'LOW_STOCK',
+            idempotencyKey: `low_stock_${variantWeight.replace(/[^a-zA-Z0-9]/g, '_')}_${remaining}`,
+            title: `Low Stock Alert — ${variantWeight}`,
+            summary: `${variantWeight} has only ${remaining} jar(s) remaining (threshold: ${rules.lowStockThreshold}).`,
+            variantWeight,
+            remainingStock: remaining,
+            priority: remaining === 0 ? 'urgent' : 'high',
+            adminPath: '/admin',
+          });
+        }
+        return null;
+      })
+      .catch(() => {});
+  }
 
   if (activeTargets.length === 0 && !canDirectSms && !canDirectEmail) {
     const logEntry: NotificationAttemptLog = {

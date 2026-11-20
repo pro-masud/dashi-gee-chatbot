@@ -1,4 +1,4 @@
-import type { StoreSettingsDoc } from './storeTypes';
+import { isStoreFieldConfirmed, type StoreSettingsDoc } from './storeTypes';
 
 export interface StorefrontStructuredData {
   '@context': string;
@@ -6,9 +6,9 @@ export interface StorefrontStructuredData {
 }
 
 /**
- * S0-10: Build dynamic Storefront JSON-LD grounded in live StoreSettings.
- * When `confirmedFromDb` is false (e.g. `store_settings/main` missing or unreachable),
- * omits Product `offers` entirely so search engines never index stale fallback prices or stock.
+ * S0-10 & Stage 4.10: Build dynamic Storefront JSON-LD grounded in owner-confirmed StoreSettings.
+ * When `confirmedFromDb` is false or individual variant prices are not owner-confirmed,
+ * omits unconfirmed Product `offers` so search engines never index unconfirmed fallback prices.
  */
 export function buildStorefrontStructuredData(params: {
   settings: StoreSettingsDoc;
@@ -32,26 +32,30 @@ export function buildStorefrontStructuredData(params: {
       sku: string;
       price: number;
       stock: number;
+      confirmed: boolean;
     }> = [
       {
         name: 'Deshi Gee 250g Sealed Glass Jar',
         sku: 'DG-250G',
         price: Math.round(settings.price250g),
         stock: Math.round(settings.stock250g),
+        confirmed: isStoreFieldConfirmed(settings, 'price250g'),
       },
       {
         name: 'Deshi Gee 500g Sealed Glass Jar',
         sku: 'DG-500G',
         price: Math.round(settings.price500g),
         stock: Math.round(settings.stock500g),
+        confirmed: isStoreFieldConfirmed(settings, 'price500g'),
       },
       {
         name: 'Deshi Gee 1kg Sealed Glass Jar',
         sku: 'DG-1KG',
         price: Math.round(settings.price1kg),
         stock: Math.round(settings.stock1kg),
+        confirmed: isStoreFieldConfirmed(settings, 'price1kg'),
       },
-    ].filter((v) => Number.isFinite(v.price) && v.price > 0);
+    ].filter((v) => v.confirmed && Number.isFinite(v.price) && v.price > 0);
 
     if (variants.length > 0) {
       const prices = variants.map((v) => v.price);

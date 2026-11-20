@@ -29,6 +29,7 @@ import {
 import { generateLiveFallbackReply } from '../../../src/lib/chatbot/liveFallbackEngine';
 import { tryCreateSignedTtsToken } from '../../../src/lib/chatbot/orderToken';
 import { checkCompositeChatRateLimit } from '../../../src/lib/chatbot/rateLimit';
+import { buildStructuredChatTurnContract } from '../../../src/lib/chatbot/responseContract';
 import { validateChatbotResponse } from '../../../src/lib/chatbot/responseValidator';
 import { validateChatRequestPayload } from '../../../src/lib/chatbot/schema';
 import {
@@ -209,6 +210,18 @@ interface NdjsonReplyPayload {
 }
 
 function encodeMetaEvent(payload: NdjsonReplyPayload): string {
+  const contract = buildStructuredChatTurnContract({
+    replyText: payload.text,
+    intent: payload.intent,
+    confidence: payload.diagnostics?.confidence,
+    sources: payload.sources,
+    suggestedReplies: payload.suggestedReplies,
+    productCards: payload.productCards,
+    orderSummary: payload.orderSummary,
+    orderManageProposal: payload.orderManageProposal,
+    trackingCard: payload.trackingCard,
+    actions: payload.actions,
+  });
   return `${JSON.stringify({
     type: 'meta',
     actions: payload.actions || [],
@@ -228,6 +241,7 @@ function encodeMetaEvent(payload: NdjsonReplyPayload): string {
     isError: Boolean(payload.isError),
     errorCode: payload.errorCode || '',
     factsVersion: payload.factsVersion || '',
+    contract,
   })}\n`;
 }
 

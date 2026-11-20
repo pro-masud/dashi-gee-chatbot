@@ -8,10 +8,12 @@ import { POST as feedbackPost } from '../app/api/chatbot/feedback/route';
 import { POST as parseDocPost } from '../app/api/chatbot/parse-doc/route';
 import { classifyDomainRequest } from '../src/lib/chatbot/domain-guard';
 import {
+  setAdminAuthOverrideForTests,
   setChatLogObserverForTests,
   setCostLedgerOverrideForTests,
   setFeedbackMemoryObserverForTests,
   setFirestoreHealthOverrideForTests,
+  setInventoryMemoryModeForTests,
   setKnowledgeChunkTestStore,
   setRateLimitMemoryModeForTests,
   setSessionDraftMemoryModeForTests,
@@ -38,7 +40,6 @@ import {
   getMissingOrderDraftFields,
 } from '../src/lib/chatbot/sessionStore';
 import {
-  DEFAULT_CHATBOT_CONFIG,
   type ChatbotFaqDoc,
   type ChatbotFeedbackDoc,
   type KnowledgeChunkRecord,
@@ -47,7 +48,10 @@ import {
   clearGeminiHealthCacheForTests,
   setGeminiClientFactoryForTests,
 } from '../src/lib/gemini/client';
-import { DEFAULT_STORE_SETTINGS } from '../src/lib/storeTypes';
+import {
+  TEST_CONFIRMED_CHATBOT_CONFIG as DEFAULT_CHATBOT_CONFIG,
+  TEST_CONFIRMED_STORE_SETTINGS as DEFAULT_STORE_SETTINGS,
+} from './helpers/testStoreFixture';
 
 const ORIGINAL_ENV = {
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
@@ -114,6 +118,12 @@ describe('Phase 1 — Hybrid RAG, Session Slots, Intent Router, Guards, Streamin
     setCostLedgerOverrideForTests(null);
     setRateLimitMemoryModeForTests(true);
     setSessionDraftMemoryModeForTests(true);
+    setInventoryMemoryModeForTests({ ...DEFAULT_STORE_SETTINGS });
+    setAdminAuthOverrideForTests(async (authHeader) =>
+      authHeader?.includes('test_valid_admin_token')
+        ? { ok: true, email: 'kinboni.bd@gmail.com', uid: 'uid_admin_p1' }
+        : { ok: false, email: '', uid: '' }
+    );
     setFirestoreHealthOverrideForTests(async () => ({
       reachable: true,
       latencyMs: 5,
@@ -134,6 +144,8 @@ describe('Phase 1 — Hybrid RAG, Session Slots, Intent Router, Guards, Streamin
     setCostLedgerOverrideForTests(null);
     setRateLimitMemoryModeForTests(false);
     setSessionDraftMemoryModeForTests(false);
+    setInventoryMemoryModeForTests(null);
+    setAdminAuthOverrideForTests(null);
     setFirestoreHealthOverrideForTests(null);
   });
 
@@ -212,9 +224,17 @@ describe('Phase 1 — Hybrid RAG, Session Slots, Intent Router, Guards, Streamin
   });
 
   it('Hybrid RAG achieves >= 90% top-3 relevance across Bangla/Banglish/English paraphrase queries, excludes internal docs, and reports noVerifiedMatch honestly', async () => {
+    // D11: Starter KB pack MUST default to unpublished draft until owner reviews & publishes
+    assert.equal(
+      CURATED_PRODUCT_KNOWLEDGE_PACK.every((item) => item.active === false && item.published === false),
+      true,
+      'Starter KB pack entries must remain draft (active=false, published=false) by default'
+    );
     const seededFaqs: ChatbotFaqDoc[] = CURATED_PRODUCT_KNOWLEDGE_PACK.map((item, idx) => ({
       id: `curated_${idx + 1}`,
       ...item,
+      active: true,
+      published: true,
     }));
     const storedChunks: KnowledgeChunkRecord[] = [
       {

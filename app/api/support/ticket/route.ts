@@ -7,6 +7,7 @@ import {
 import { normalizeBangladeshPhone } from '../../../../src/lib/chatbot/orderToken';
 import { computeSupportSlaTarget } from '../../../../src/lib/chatbot/supportEngine';
 import type { SupportCategory, SupportPriority } from '../../../../src/lib/chatbot/types';
+import { publishBusinessEventSafe } from '../../../../src/lib/notifications/engine';
 
 export const dynamic = 'force-dynamic';
 
@@ -128,6 +129,19 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+
+  void publishBusinessEventSafe({
+    type: 'SUPPORT_REQUESTED',
+    idempotencyKey: `support_ticket_${created.ticketNumber || created.requestId}`,
+    title: `Support Ticket ${created.ticketNumber || created.requestId}`,
+    summary: `[${category.replace(/_/g, ' ')}] ${issueSummary}`,
+    ticketId: created.ticketNumber || created.requestId,
+    orderNumber: orderNumber || undefined,
+    customerName,
+    customerPhone: phone,
+    priority: priority === 'urgent' ? 'urgent' : 'normal',
+    adminPath: '/admin',
+  });
 
   return NextResponse.json(
     {

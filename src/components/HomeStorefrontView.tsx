@@ -832,7 +832,7 @@ export function HomeStorefrontView() {
                 {!orderingReady ? (
                   <span className="inline-flex items-center gap-1.5 rounded-lg bg-amber-900/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-amber-900">
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-700" />
-                    {bn ? 'অর্ডার এখনও চালু হয়নি' : 'Ordering not available yet'}
+                    {bn ? 'অনলাইন অর্ডার সাময়িকভাবে অনুপলব্ধ' : 'Ordering is temporarily unavailable'}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5 rounded-lg bg-[#2D6A4F]/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-[#2D6A4F]">
@@ -912,14 +912,18 @@ export function HomeStorefrontView() {
 
               {/* Quantity Stepper + Add to Bag + Buy Now OR Ordering Unavailable Notice (D7) */}
               {!orderingReady ? (
-                <div className="mt-6 rounded-2xl border border-amber-300/60 bg-amber-50/70 p-4 text-sm text-[#1E1710]">
+                <div
+                  role="status"
+                  data-testid="storefront-ordering-unavailable"
+                  className="mt-6 rounded-2xl border border-amber-300/60 bg-amber-50/70 p-4 text-sm text-[#1E1710]"
+                >
                   <p className="font-semibold">
-                    {bn ? 'অর্ডার এখনও চালু হয়নি' : 'Ordering not available yet'}
+                    {bn ? 'অনলাইন অর্ডার সাময়িকভাবে অনুপলব্ধ' : 'Ordering is temporarily unavailable'}
                   </p>
                   <p className="mt-1 text-xs leading-relaxed text-[#635647]">
                     {bn
-                      ? 'মূল্য ও ডেলিভারি চার্জ মালিকের দ্বারা চূড়ান্ত নিশ্চিত হলে সরাসরি অনলাইন অর্ডার চালু হবে। আপডেট জানতে কলব্যাক অনুরোধ করুন।'
-                      : 'Online checkout opens as soon as store pricing and delivery rates are confirmed by the owner. Request a callback to be notified.'}
+                      ? 'মূল্য, ডেলিভারি চার্জ ও অর্ডার সিস্টেম চূড়ান্ত নিশ্চিত হলে সরাসরি অনলাইন অর্ডার চালু হবে। আপডেট জানতে কলব্যাক অনুরোধ করুন।'
+                      : 'Online checkout is temporarily unavailable while store pricing and ordering services are being finalized. Please check back shortly or request a callback.'}
                   </p>
                   <button
                     type="button"

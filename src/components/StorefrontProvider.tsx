@@ -1021,8 +1021,8 @@ export function StorefrontProvider({
 
               {/* Bottom Copyright & Provenance Note */}
               <div className="flex flex-col items-center justify-between gap-4 pt-8 text-xs text-[#8A7867] sm:flex-row">
-                <p>
-                  © {new Date().getFullYear()} Deshi Gee.{' '}
+                <p suppressHydrationWarning>
+                  © {new Date().getUTCFullYear()} Deshi Gee.{' '}
                   {bn ? 'সর্বস্বত্ব সংরক্ষিত।' : 'All rights reserved.'}
                 </p>
                 <p className="font-mono text-[11px] text-[#B47B2B]">

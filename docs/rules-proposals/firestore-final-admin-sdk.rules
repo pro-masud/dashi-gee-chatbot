@@ -1,0 +1,196 @@
+rules_version = '2';
+
+// DESHI GEE — FINAL ADMIN-SDK LOCKDOWN PROPOSAL (Stage 2.11)
+// DO NOT AUTO-DEPLOY. Owner deploys manually ONLY after granting roles/datastore.user
+// to the runtime service account per docs/DEPLOY_RUNBOOK.md.
+//
+// Security Model:
+// - ALL customer mutations (orders, tracking, reviews, helpful votes, newsletter,
+//   support tickets, evidence uploads, chat sessions/logs/drafts, rate limits,
+//   coupon usage increments) happen strictly on Next.js API routes via Firebase
+//   Admin SDK (ADC), which bypasses client rules safely on the server.
+// - ZERO unauthenticated client writes are permitted on ANY collection.
+// - Sensitive collections (orders, order_tracking, chatbot_config/published,
+//   chatbot_config/draft, rate_limits, order_audit_logs, order_fingerprints,
+//   chatbot_used_tokens, chatbot_order_idempotency, support_evidence,
+//   chat_sessions, order_drafts, chatbot_cost_ledger, payment_gateway_events)
+//   are strictly Admin-only for client SDK access.
+// - Admin access requires Firebase Auth with email_verified == true AND
+//   either bootstrapped admin email ('kinboni.bd@gmail.com') or /admins/{uid}.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedAdmin() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && (
+          request.auth.token.email == 'kinboni.bd@gmail.com'
+          || exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        );
+    }
+
+    // Admin allowlist: only verified admins can read/manage
+    match /admins/{uid} {
+      allow read: if isVerifiedAdmin() || (isSignedIn() && request.auth.uid == uid);
+      allow write: if isVerifiedAdmin();
+    }
+
+    // Storefront public read-only catalog settings (writes strictly verified admin or Admin SDK)
+    match /store_settings/{docId} {
+      allow get: if docId == 'main' || isVerifiedAdmin();
+      allow list: if isVerifiedAdmin();
+      allow write: if isVerifiedAdmin();
+    }
+
+    // Public batch verification records (read-only for storefront, admin-only writes)
+    match /batches/{batchCode} {
+      allow get, list: if true;
+      allow write: if isVerifiedAdmin();
+    }
+
+    // Approved reviews are publicly readable; ALL writes go through Admin SDK API routes or verified Admin
+    match /reviews/{reviewId} {
+      allow get, list: if resource.data.status == 'approved' || isVerifiedAdmin();
+      allow write: if isVerifiedAdmin();
+    }
+
+    // Coupons: strictly server-side validation via /api/coupons/validate (Admin SDK) + Admin Console
+    match /coupons/{code} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    // Subscribers: strictly server-side write via /api/newsletter + Admin Console read
+    match /subscribers/{subId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    // Orders & Tracking: strictly server-side via Admin SDK (/api/order, /api/orders/*) + Admin Console
+    match /orders/{orderNumber} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /order_tracking/{trackingId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /order_audit_logs/{auditId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /order_fingerprints/{fpHash} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    // Chatbot config (D2): BOTH published and draft are server/admin-only!
+    // Storefront reads safe public projection via GET /api/chatbot/public-config.
+    match /chatbot_config/{docId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /chatbot_config_versions/{versionId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    // Published public FAQs & KB docs: admin-managed, server RAG reads via Admin SDK
+    match /chatbot_faqs/{faqId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /chatbot_kb_docs/{docId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /chatbot_kb_chunks/{chunkId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    // Chatbot internal state, replay tokens, idempotency, rate limits, cost ledger, sessions, drafts
+    match /chatbot_used_tokens/{tokenId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /chatbot_order_idempotency/{idemKey} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /rate_limits/{keyId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /chatbot_cost_ledger/{dayId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /chatbot_logs/{logId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /chatbot_feedback/{fbId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /chat_sessions/{sessionId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /order_drafts/{draftId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    // Support inbox, private evidence uploads, retention, channels, payment gateway events
+    match /support_requests/{reqId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /support_evidence/{evId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /refill_reminders/{remId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /marketing_consents/{consentId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /channel_webhook_events/{evId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /payment_gateway_events/{evId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    // AI Support & Social Notification Ecosystem collections (strictly Admin-only; written by server Admin SDK)
+    match /integration_settings/{docId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /notification_rules/{docId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /notification_events/{eventKey} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /notification_jobs/{jobId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    match /notification_logs/{logId} {
+      allow read, write: if isVerifiedAdmin();
+    }
+
+    // Default deny for everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

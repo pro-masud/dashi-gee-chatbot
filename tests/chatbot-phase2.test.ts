@@ -9,6 +9,7 @@ import { BANGLADESH_DISTRICTS } from '../src/data/deshiGeeData';
 import {
   getInventoryMemoryStateForTests,
   getOrderStorageMemoryStateForTests,
+  setAdminAuthOverrideForTests,
   setChatLogObserverForTests,
   setCouponsMemoryForTests,
   setFirestoreHealthOverrideForTests,
@@ -30,10 +31,13 @@ import {
   tryCreateSignedOrderToken,
 } from '../src/lib/chatbot/orderToken';
 import { buildStoreFactsSnapshot, getSeededVerifiedMonetaryAmounts } from '../src/lib/chatbot/storeFacts';
-import { DEFAULT_CHATBOT_CONFIG } from '../src/lib/chatbot/types';
 import { clearGeminiHealthCacheForTests, setGeminiClientFactoryForTests } from '../src/lib/gemini/client';
 import { CHATBOT_FUNCTION_DECLARATIONS, executeChatbotTool } from '../src/lib/gemini/tools';
-import { DEFAULT_ACTIVE_BATCH, DEFAULT_STORE_SETTINGS } from '../src/lib/storeTypes';
+import {
+  TEST_CONFIRMED_BATCH as DEFAULT_ACTIVE_BATCH,
+  TEST_CONFIRMED_CHATBOT_CONFIG as DEFAULT_CHATBOT_CONFIG,
+  TEST_CONFIRMED_STORE_SETTINGS as DEFAULT_STORE_SETTINGS,
+} from './helpers/testStoreFixture';
 
 const ORIGINAL_ENV = {
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
@@ -91,9 +95,14 @@ describe('Phase 2 (T2.1-T2.6) — Transactional Safety, 64 Districts, 4-Zone Pri
     setKnowledgeChunkTestStore([]);
     setRateLimitMemoryModeForTests(true);
     setSessionDraftMemoryModeForTests(true);
-    setInventoryMemoryModeForTests({});
+    setInventoryMemoryModeForTests({ ...DEFAULT_STORE_SETTINGS });
     setCouponsMemoryForTests(null);
     setOrderStorageMemoryModeForTests(true);
+    setAdminAuthOverrideForTests(async (authHeader) =>
+      authHeader?.includes('test_valid_admin_token')
+        ? { ok: true, email: 'kinboni.bd@gmail.com', uid: 'uid_admin_p2' }
+        : { ok: false, email: '', uid: '' }
+    );
     setFirestoreHealthOverrideForTests(async () => ({
       reachable: true,
       latencyMs: 4,
@@ -114,6 +123,7 @@ describe('Phase 2 (T2.1-T2.6) — Transactional Safety, 64 Districts, 4-Zone Pri
     setInventoryMemoryModeForTests(null);
     setCouponsMemoryForTests(null);
     setOrderStorageMemoryModeForTests(false);
+    setAdminAuthOverrideForTests(null);
     setFirestoreHealthOverrideForTests(null);
     resetDevOrderTokenSecretForTests();
   });
@@ -205,7 +215,7 @@ describe('Phase 2 (T2.1-T2.6) — Transactional Safety, 64 Districts, 4-Zone Pri
     assert.equal(quoteRes.totalBdt, 2070);
 
     // 2. Concurrent stock race: only 1 jar of 500g in stock, 2 buyers click Confirm simultaneously
-    setInventoryMemoryModeForTests({ stock500g: 1 });
+    setInventoryMemoryModeForTests({ ...DEFAULT_STORE_SETTINGS, stock500g: 1 });
     const tokenA = tryCreateSignedOrderToken({
       sessionId: 'sess_race_a',
       draft: {
@@ -353,7 +363,7 @@ describe('Phase 2 (T2.1-T2.6) — Transactional Safety, 64 Districts, 4-Zone Pri
     assert.equal(mismatchRes.status, 403);
 
     // Admin raises 250g price to 720 while summary is open -> 409 priceChanged with updatedSummary & fresh token
-    setInventoryMemoryModeForTests({ price250g: 720, stock250g: 10 });
+    setInventoryMemoryModeForTests({ ...DEFAULT_STORE_SETTINGS, price250g: 720, stock250g: 10 });
     const staleRes = await orderPost(
       new Request('http://localhost:3000/api/order', {
         method: 'POST',
@@ -657,7 +667,7 @@ describe('Phase 2 (T2.1-T2.6) — Transactional Safety, 64 Districts, 4-Zone Pri
     assert.equal(manageIntent.allowedToolNames.includes('request_address_change'), true);
 
     // Create a bKash pre-dispatch order in Dhaka (qty=1x 500g)
-    setInventoryMemoryModeForTests({ stock500g: 10 });
+    setInventoryMemoryModeForTests({ ...DEFAULT_STORE_SETTINGS, stock500g: 10 });
     const tok = tryCreateSignedOrderToken({
       sessionId: 'sess_manage_flow',
       draft: {

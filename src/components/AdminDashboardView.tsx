@@ -51,6 +51,7 @@ import { buildOrdersCsv } from '../lib/chatbot/supportEngine';
 import type { RefillReminderDoc } from '../lib/chatbot/types';
 import { formatBdt } from '../data/deshiGeeData';
 import { AdminChatbotPanel } from './AdminChatbotPanel';
+import { AdminEcosystemPanel } from './AdminEcosystemPanel';
 import { useStorefront } from './StorefrontProvider';
 
 interface AdminDashboardViewProps {
@@ -59,7 +60,7 @@ interface AdminDashboardViewProps {
   onBackHome: () => void;
 }
 
-type AdminTab = 'overview' | 'orders' | 'store' | 'batches' | 'reviews' | 'chatbot';
+type AdminTab = 'overview' | 'orders' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
 
 export function AdminDashboardView({
   settings,
@@ -627,6 +628,7 @@ export function AdminDashboardView({
     { id: 'batches', label: 'Batches & Coupons' },
     { id: 'reviews', label: `Reviews (${reviews.length}) & Subscribers` },
     { id: 'chatbot', label: 'AI Chatbot' },
+    { id: 'ecosystem', label: 'Integrations & Alerts' },
   ];
   const activeTabLabel = adminTabs.find((t) => t.id === tab)?.label || 'Overview';
 
@@ -2046,6 +2048,19 @@ export function AdminDashboardView({
         <AdminChatbotPanel
           settings={settings}
           onPublishedConfig={(cfg) => setChatbotConfig(cfg)}
+        />
+      )}
+
+      {/* TAB 7: INTEGRATIONS & NOTIFICATION ECOSYSTEM */}
+      {tab === 'ecosystem' && (
+        <AdminEcosystemPanel
+          getIdToken={async () => (user ? user.getIdToken() : '')}
+          onOpenChatbot={() => setTab('chatbot')}
+          orderMetrics={{
+            total: metrics.total,
+            pending: metrics.pending,
+            totalSales: metrics.totalSales,
+          }}
         />
       )}
       </section>

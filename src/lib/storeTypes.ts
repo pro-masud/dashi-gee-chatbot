@@ -279,6 +279,16 @@ export interface OrderRecord {
   codVerificationStatus?: 'not_required' | 'not_configured' | 'pending' | 'verified';
   sourceChannel?: ChannelSource;
   attributedSessionId?: string;
+  trackingTokenHash?: string;
+  paymentLifecycleStatus?:
+    | 'unpaid'
+    | 'pending'
+    | 'verification_required'
+    | 'paid'
+    | 'failed'
+    | 'expired'
+    | 'refunded'
+    | 'partially_refunded';
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -307,6 +317,17 @@ export interface TrackingRecord {
   consignmentId?: string;
   courierTrackingUrl?: string;
   dispatchedAtIso?: string;
+  trackingTokenHash?: string;
+  maskedPhone?: string;
+  paymentLifecycleStatus?:
+    | 'unpaid'
+    | 'pending'
+    | 'verification_required'
+    | 'paid'
+    | 'failed'
+    | 'expired'
+    | 'refunded'
+    | 'partially_refunded';
   updatedAt?: unknown;
 }
 

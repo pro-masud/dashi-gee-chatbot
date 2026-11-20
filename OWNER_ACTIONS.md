@@ -8,21 +8,22 @@ Every item below requires owner credentials, owner business confirmation, or own
 
 - [ ] **OA-01 (D4 / S1-01):** Grant `roles/datastore.user` (only — no Owner/Editor, no JSON key file) to the preview runtime service account `ais-sandbox@ais-asia-northeast1-51d7c07c6b.iam.gserviceaccount.com` on GCP project `qualified-transit-lpd8p` (or your dedicated Cloud Run runtime SA for production). See `docs/DEPLOY_RUNBOOK.md` Step 1.
 - [ ] **OA-02 (O-02 / 0-11):** Install Java 17+ locally (or in CI) and run `npm run test:rules` and `npm run test:rules:s013` against the Firebase Firestore Emulator to verify all `ATK-A..ATK-I`, `S0-13`, `S1-01..S1-09`, and 12 Dirty Dozen security rules cases with real `PERMISSION_DENIED`.
-- [ ] **OA-03 (5-10 / 6-09):** After Emulator tests pass and Admin SDK IAM is verified, explicitly approve and deploy `firestore.rules` from branch `rules-final-admin-sdk` to database `ai-studio-deshigee-20fc0392-83a6-4282-be32-68447c38436f` (never `(default)`).
-- [ ] **OA-04 (X-10 / D6):** Deploy production service to Google Cloud Run with a dedicated service account (`roles/datastore.user` + `roles/secretmanager.secretAccessor`), custom domain HTTPS, Firebase Authorized Domains, and Secret Manager secrets.
+- [ ] **OA-03 (5-10 / 6-09):** After Emulator tests pass (`firebase emulators:exec --only firestore "npm run test:rules"`) and Admin SDK IAM is verified, explicitly approve and deploy `docs/rules-proposals/firestore-final-admin-sdk.rules` (copied to `firestore.rules`) to database `ai-studio-deshigee-20fc0392-83a6-4282-be32-68447c38436f` (never `(default)`). See `docs/DEPLOY_RUNBOOK.md` Steps 5–6.
+- [ ] **OA-04 (X-10 / D6):** Deploy production service to Google Cloud Run with a dedicated service account (`roles/datastore.user` + `roles/secretmanager.secretAccessor`), custom domain HTTPS, Firebase Authorized Domains, and Secret Manager secrets. See `docs/DEPLOY_RUNBOOK.md` Steps 1–3.
 
 ## 2. Secrets & Environment Variables (Server-Only / Secret Manager)
 
 - [ ] **OA-05 (O-01 / O-06 / O-07):** Provision and rotate any previously shared keys; set in Secret Manager / `.env.local` (never in git or chat):
   - `GEMINI_API_KEY` (required for live AI replies + live model list / latency check)
-  - `ORDER_TOKEN_SECRET` (32+ random bytes; signs order confirmation tokens, action tokens, tracking hashes, session cookies, and HMAC fingerprints)
+  - `ORDER_TOKEN_SECRET` (32+ random bytes; signs order confirmation tokens, action tokens, session cookies, and duplicate fingerprints)
+  - `TRACKING_TOKEN_SECRET` (32+ random bytes; hashes 192-bit order tracking tokens)
+  - `CHANNEL_SESSION_SECRET` (32+ random bytes; keys omnichannel session HMAC IDs)
   - `CRON_SECRET` (32+ random bytes; authenticates scheduled refill/retention endpoints)
-  - `CHANNEL_SESSION_HMAC_SECRET` (optional dedicated secret; falls back to `ORDER_TOKEN_SECRET` if unset)
   - `NEXT_PUBLIC_SITE_URL` (canonical HTTPS production URL)
-  - `GEMINI_DAILY_COST_CAP_USD` (daily AI spend circuit breaker)
+  - `GEMINI_DAILY_COST_CAP_USD` (daily AI spend circuit breaker) and optional `GEMINI_MODEL_COST_RATES_JSON`
 - [ ] **OA-06 (O-18 / Paid Integrations — Optional, stays "Not configured" until set):**
   - Payment gateways (sandbox first): SSLCommerz (`SSLCOMMERZ_STORE_ID`, `SSLCOMMERZ_STORE_PASSWD`) and/or bKash (`BKASH_*`)
-  - Couriers (sandbox first): Steadfast, Pathao, RedX API credentials
+  - Couriers (sandbox first): Steadfast, Pathao, RedX API credentials + `COURIER_WEBHOOK_SECRET`
   - Messaging / Channels: BulkSMSBD, Twilio, Resend, Meta Messenger/Instagram/WhatsApp webhook secrets & tokens
 
 ## 3. Owner-Confirmed Business Facts (Enter in `/admin` & Mark `Owner Confirmed`)

@@ -204,9 +204,26 @@ export function computeSupportSlaTarget(params: {
   const cfg = params.config;
   const openHour = Math.max(0, Math.min(23, Number(cfg.openHourBst ?? 9)));
   const closeHour = Math.max(0, Math.min(23, Number(cfg.closeHourBst ?? 21)));
-  const standardMins = Math.max(15, Math.min(1440, Math.round(Number(cfg.slaStandardMinutes ?? 120))));
-  const urgentMins = Math.max(5, Math.min(720, Math.round(Number(cfg.slaUrgentMinutes ?? 30))));
+  const rawStandard = Number(cfg.slaStandardMinutes ?? 0);
+  const rawUrgent = Number(cfg.slaUrgentMinutes ?? 0);
+  const standardMins = rawStandard > 0 ? Math.max(15, Math.min(1440, Math.round(rawStandard))) : 0;
+  const urgentMins = rawUrgent > 0 ? Math.max(5, Math.min(720, Math.round(rawUrgent))) : 0;
   const slaMinutes = params.priority === 'urgent' ? urgentMins : standardMins;
+
+  if (slaMinutes <= 0) {
+    return {
+      slaMinutes: 0,
+      slaDueAtIso: '',
+      isOpenNow: false,
+      currentTimeBst: getBusinessHoursStatus(cfg, now).currentTimeBst,
+      nextOpenLabelEn: cfg.businessHours || 'Support hours pending confirmation',
+      nextOpenLabelBn: cfg.businessHours || 'সাপোর্ট সময়সূচী নিশ্চিতকরণ প্রক্রিয়াধীন',
+      expectationEn:
+        'Your support request has been logged. Our human team will review it and follow up as soon as possible.',
+      expectationBn:
+        'আপনার সাপোর্ট অনুরোধটি নথিভুক্ত হয়েছে। আমাদের সাপোর্ট টিম যত দ্রুত সম্ভব আপনার সাথে যোগাযোগ করবে।',
+    };
+  }
 
   const hoursStatus = getBusinessHoursStatus(cfg, now);
   const closedLower = String(cfg.closedDays || '').toLowerCase();
