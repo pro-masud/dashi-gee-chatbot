@@ -21,12 +21,16 @@ import {
 } from 'lucide-react';
 import {
   CouponRecord,
-  DEFAULT_STORE_SETTINGS,
   DeliveryZone,
   OrderRecord,
   PaymentMethod,
   StoreSettingsDoc,
   WeightKey,
+  getConfirmedDeliveryFeeForZone,
+  getConfirmedPriceForWeight,
+  hasValidRealPhone,
+  isStoreFieldConfirmed,
+  isStorefrontOrderingReady,
 } from '../lib/firebase';
 import {
   BANGLADESH_DISTRICTS,
@@ -233,11 +237,23 @@ export function BagCheckoutDrawer({
     }
   }, [open, cart.length, step]);
 
-  const getPriceForWeight = (weight: WeightKey): number => {
-    if (weight === '250g') return settings.price250g;
-    if (weight === '500g') return settings.price500g;
-    return settings.price1kg;
-  };
+  const orderingReady = isStorefrontOrderingReady(settings);
+  const bkashManualConfigured = hasValidRealPhone(settings.bkashNumber);
+  const nagadManualConfigured = hasValidRealPhone(settings.nagadNumber);
+  const availableMethods: PaymentMethod[] = [
+    'cod',
+    ...(bkashManualConfigured ? (['bkash'] as PaymentMethod[]) : []),
+    ...(nagadManualConfigured ? (['nagad'] as PaymentMethod[]) : []),
+  ];
+
+  useEffect(() => {
+    if (!availableMethods.includes(paymentMethod)) {
+      setPaymentMethod('cod');
+    }
+  }, [bkashManualConfigured, nagadManualConfigured, paymentMethod]);
+
+  const getPriceForWeight = (weight: WeightKey): number =>
+    getConfirmedPriceForWeight(settings, weight) ?? 0;
 
   const getStockForWeight = (weight: WeightKey): number => {
     if (weight === '250g') return settings.stock250g;
@@ -255,35 +271,47 @@ export function BagCheckoutDrawer({
     area,
     address
   );
-  const suburbanFee = settings.dhakaSuburbanFee ?? DEFAULT_STORE_SETTINGS.dhakaSuburbanFee ?? 90;
-  const remoteFee = settings.remoteDistrictFee ?? DEFAULT_STORE_SETTINGS.remoteDistrictFee ?? 170;
-  const qualifiesFree = subtotal >= settings.freeDeliveryThreshold;
+  const confirmedZoneFee = getConfirmedDeliveryFeeForZone(settings, deliveryZone);
+  const freeThresholdConfirmed =
+    isStoreFieldConfirmed(settings, 'freeDeliveryThreshold') &&
+    settings.freeDeliveryThreshold > 0;
+  const qualifiesFree = freeThresholdConfirmed && subtotal >= settings.freeDeliveryThreshold;
   const deliveryFee =
-    cart.length === 0 || qualifiesFree
-      ? 0
-      : deliveryZone === 'dhaka'
-        ? settings.insideDhakaFee
-        : deliveryZone === 'suburban'
-          ? suburbanFee
-          : deliveryZone === 'remote'
-            ? remoteFee
-            : settings.outsideDhakaFee;
+    cart.length === 0 || qualifiesFree ? 0 : (confirmedZoneFee ?? 0);
 
   const estimatedDeliveryWindow =
     deliveryZone === 'dhaka'
-      ? settings.estimatedDhakaDays
+      ? isStoreFieldConfirmed(settings, 'estimatedDhakaDays')
+        ? settings.estimatedDhakaDays
+        : ''
       : deliveryZone === 'suburban'
-        ? settings.estimatedSuburbanDays || DEFAULT_STORE_SETTINGS.estimatedSuburbanDays || '2-3 days'
+        ? isStoreFieldConfirmed(settings, 'estimatedSuburbanDays')
+          ? settings.estimatedSuburbanDays || ''
+          : ''
         : deliveryZone === 'remote'
-          ? settings.estimatedRemoteDays || DEFAULT_STORE_SETTINGS.estimatedRemoteDays || '4-6 days'
-          : settings.estimatedOutsideDays;
+          ? isStoreFieldConfirmed(settings, 'estimatedRemoteDays')
+            ? settings.estimatedRemoteDays || ''
+            : ''
+          : isStoreFieldConfirmed(settings, 'estimatedOutsideDays')
+            ? settings.estimatedOutsideDays
+            : '';
+
+  const cutoffNotice = bn
+    ? isStoreFieldConfirmed(settings, 'cutoffNoticeBn')
+      ? settings.cutoffNoticeBn || ''
+      : ''
+    : isStoreFieldConfirmed(settings, 'cutoffNoticeEn')
+      ? settings.cutoffNoticeEn || ''
+      : '';
 
   const addressCheck = address.trim()
     ? clientAssessAddressCompleteness(address, area, district)
     : { complete: true };
 
   const advanceDiscountPct =
-    paymentMethod !== 'cod' && settings.advanceDiscountPct > 0
+    paymentMethod !== 'cod' &&
+    isStoreFieldConfirmed(settings, 'advanceDiscountPct') &&
+    settings.advanceDiscountPct > 0
       ? settings.advanceDiscountPct
       : 0;
   const couponAllowedWithPayment =
@@ -297,12 +325,13 @@ export function BagCheckoutDrawer({
   const totalDiscount = Math.round(
     (subtotal * Math.min(50, advanceDiscountPct + couponPct)) / 100
   );
-  const grandTotal = Math.max(1, subtotal + deliveryFee - totalDiscount);
-  const remainingForFree = Math.max(0, settings.freeDeliveryThreshold - subtotal);
-  const freeProgressPct =
-    settings.freeDeliveryThreshold > 0
-      ? Math.min(100, Math.round((subtotal / settings.freeDeliveryThreshold) * 100))
-      : 100;
+  const grandTotal = Math.max(0, subtotal + deliveryFee - totalDiscount);
+  const remainingForFree = freeThresholdConfirmed
+    ? Math.max(0, settings.freeDeliveryThreshold - subtotal)
+    : 0;
+  const freeProgressPct = freeThresholdConfirmed
+    ? Math.min(100, Math.round((subtotal / settings.freeDeliveryThreshold) * 100))
+    : 0;
 
   const handleApplyCoupon = async () => {
     const code = couponInput.trim().toUpperCase();
@@ -417,6 +446,14 @@ export function BagCheckoutDrawer({
   const handleSubmitOrder = async (e: FormEvent) => {
     e.preventDefault();
     if (!primaryItem || submitting) return;
+    if (!orderingReady || subtotal <= 0) {
+      setFormError(
+        bn
+          ? 'অর্ডার এখনও চালু হয়নি। মূল্য ও ডেলিভারি চার্জ নিশ্চিত হলে অর্ডার করা যাবে।'
+          : 'Ordering is not available yet until store pricing and delivery fees are confirmed.'
+      );
+      return;
+    }
 
     const cleanPhone = phone.replace(/[\s-]/g, '');
     if (customerName.trim().length < 2) {
@@ -935,7 +972,7 @@ export function BagCheckoutDrawer({
                     type="text"
                     value={couponInput}
                     onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
-                    placeholder="DESHI10"
+                    placeholder={bn ? 'কুপন কোড লিখুন' : 'Enter promo code'}
                     className="min-h-[44px] flex-1 rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 font-mono text-base uppercase text-[#1E1710] focus:border-[#B47B2B] focus:outline-none sm:text-xs"
                   />
                   <button
@@ -972,12 +1009,11 @@ export function BagCheckoutDrawer({
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-[#635647]">
-                  {estimatedDeliveryWindow} ·{' '}
-                  {bn
-                    ? settings.cutoffNoticeBn || DEFAULT_STORE_SETTINGS.cutoffNoticeBn
-                    : settings.cutoffNoticeEn || DEFAULT_STORE_SETTINGS.cutoffNoticeEn}
-                </p>
+                {(estimatedDeliveryWindow || cutoffNotice) && (
+                  <p className="text-xs text-[#635647]">
+                    {[estimatedDeliveryWindow, cutoffNotice].filter(Boolean).join(' · ')}
+                  </p>
+                )}
               </div>
             </div>
           ) : (
@@ -1104,7 +1140,7 @@ export function BagCheckoutDrawer({
                   {bn ? 'পেমেন্ট মাধ্যম' : 'Payment Method'}
                 </span>
                 <div className="grid grid-cols-3 gap-2">
-                  {(['cod', 'bkash', 'nagad'] as PaymentMethod[]).map((method) => {
+                  {availableMethods.map((method) => {
                     const active = paymentMethod === method;
                     return (
                       <button

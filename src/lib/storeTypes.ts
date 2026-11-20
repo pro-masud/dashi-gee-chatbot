@@ -48,8 +48,10 @@ export interface StoreSettingsDoc {
   dispatchCutoffHourBst?: number;
   cutoffNoticeEn?: string;
   cutoffNoticeBn?: string;
+  maxJarsPerOrder?: number;
   codConfirmEnabled?: boolean;
   codHighValueThresholdBdt?: number;
+  codRiskThresholdScore?: number;
   lastOrderNumber?: string;
   bkashNumber: string;
   nagadNumber: string;
@@ -58,48 +60,185 @@ export interface StoreSettingsDoc {
   supportPhone: string;
   supportEmail: string;
   businessAddress: string;
+  googleMapsUrl?: string;
   facebookUrl: string;
   instagramUrl: string;
   activeBatchCode: string;
+  ownerConfirmedFields?: Record<string, boolean>;
 }
 
+/**
+ * All unconfirmed business facts start `unset` (0 or '').
+ * Never invent prices, fees, ETAs, cut-offs, stock, contacts, or claims in code defaults.
+ * Values reach customers/chatbot ONLY once entered and confirmed by the owner in Admin.
+ */
 export const DEFAULT_STORE_SETTINGS: StoreSettingsDoc = {
   productNameEn: 'Deshi Gee — Pabna Grass-Fed Cow Ghee',
   productNameBn: 'দেশী ঘি — পাবনার খাঁটি গাওয়া ঘি',
   taglineEn: 'Pure Pabna cow ghee, wooden-churned to golden danadar.',
   taglineBn: 'পাবনার চারণভূমির দুধে কাঠের বিলোনার সোনালী দানাদার ঘি।',
-  originLocation: 'Bera & Faridpur, Pabna, Bangladesh',
-  price250g: 680,
-  price500g: 1290,
-  price1kg: 2480,
-  stock250g: 42,
-  stock500g: 36,
-  stock1kg: 20,
-  insideDhakaFee: 80,
-  dhakaSuburbanFee: 100,
-  outsideDhakaFee: 130,
-  remoteDistrictFee: 160,
-  freeDeliveryThreshold: 2500,
-  estimatedDhakaDays: '24–48 Hours (Inside Dhaka)',
-  estimatedSuburbanDays: '2–3 Business Days (Dhaka Suburbs)',
-  estimatedOutsideDays: '2–4 Business Days (Nationwide)',
-  estimatedRemoteDays: '3–5 Business Days (Remote / Hill & Coastal)',
-  dispatchCutoffHourBst: 14,
-  cutoffNoticeEn: 'Orders confirmed before 2:00 PM BST dispatch same day.',
-  cutoffNoticeBn: 'দুপুর ২টার (BST) আগে কনফার্ম হওয়া অর্ডার একই দিনে ডিসপ্যাচ হয়।',
+  originLocation: 'Pabna, Bangladesh',
+  price250g: 0,
+  price500g: 0,
+  price1kg: 0,
+  stock250g: 0,
+  stock500g: 0,
+  stock1kg: 0,
+  insideDhakaFee: 0,
+  dhakaSuburbanFee: 0,
+  outsideDhakaFee: 0,
+  remoteDistrictFee: 0,
+  freeDeliveryThreshold: 0,
+  estimatedDhakaDays: '',
+  estimatedSuburbanDays: '',
+  estimatedOutsideDays: '',
+  estimatedRemoteDays: '',
+  dispatchCutoffHourBst: undefined,
+  cutoffNoticeEn: '',
+  cutoffNoticeBn: '',
+  maxJarsPerOrder: 0,
   codConfirmEnabled: false,
-  codHighValueThresholdBdt: 5000,
-  bkashNumber: 'Configure in Admin',
-  nagadNumber: 'Configure in Admin',
+  codHighValueThresholdBdt: 0,
+  codRiskThresholdScore: 0,
+  bkashNumber: '',
+  nagadNumber: '',
   advanceDiscountPct: 0,
-  whatsappNumber: 'Configure in Admin',
-  supportPhone: 'Configure in Admin',
-  supportEmail: 'hello@deshigee.com',
-  businessAddress: 'House & Road Address (Configurable in Admin)',
+  whatsappNumber: '',
+  supportPhone: '',
+  supportEmail: '',
+  businessAddress: '',
+  googleMapsUrl: '',
   facebookUrl: '',
   instagramUrl: '',
-  activeBatchCode: 'DG-PAB-2026-042',
+  activeBatchCode: '',
+  ownerConfirmedFields: {},
 };
+
+const PLACEHOLDER_PATTERNS = [
+  /configure\s+in\s+admin/i,
+  /pending\s+admin/i,
+  /configurable\s+in\s+admin/i,
+  /placeholder/i,
+  /000000/,
+  /hello@deshigee\.com/i,
+  /example\.com/i,
+  /house\s*&\s*road\s*address/i,
+  /^coming\s*soon$/i,
+  /^tbd$/i,
+  /^n\/?a$/i,
+  /^unset$/i,
+];
+
+export function isPlaceholderContactValue(val: string | undefined | null): boolean {
+  const clean = String(val || '').trim();
+  if (!clean) return true;
+  return PLACEHOLDER_PATTERNS.some((rx) => rx.test(clean));
+}
+
+export function hasValidRealPhone(val: string | undefined | null): boolean {
+  if (isPlaceholderContactValue(val)) return false;
+  const digits = String(val || '').replace(/[^0-9]/g, '');
+  return digits.length >= 10 && digits.length <= 15;
+}
+
+export function hasValidRealContact(val: string | undefined | null): boolean {
+  return !isPlaceholderContactValue(val);
+}
+
+export function hasValidRealUrl(val: string | undefined | null): boolean {
+  if (isPlaceholderContactValue(val)) return false;
+  const clean = String(val || '').trim();
+  return /^https:\/\/[^\s]+$/i.test(clean);
+}
+
+/**
+ * Checks whether a specific store setting field is confirmed by the owner.
+ * - If `ownerConfirmedFields` explicitly marks the field `false`, returns `false` even if a value is stored.
+ * - If `ownerConfirmedFields` explicitly marks the field `true`, validates that the value is non-placeholder/non-empty.
+ * - For legacy Firestore docs that lack `ownerConfirmedFields` keys, treats non-zero/non-placeholder values as confirmed
+ *   while `DEFAULT_STORE_SETTINGS` (all 0 / '') returns `false` for every business fact.
+ */
+export function isStoreFieldConfirmed(
+  settings: StoreSettingsDoc | null | undefined,
+  field: keyof StoreSettingsDoc
+): boolean {
+  if (!settings) return false;
+  const map = settings.ownerConfirmedFields;
+  if (map && Object.prototype.hasOwnProperty.call(map, field)) {
+    if (!map[field]) return false;
+  }
+  const value = settings[field];
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0;
+  }
+  if (typeof value === 'string') {
+    return !isPlaceholderContactValue(value);
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  return false;
+}
+
+export function getConfirmedPriceForWeight(
+  settings: StoreSettingsDoc | null | undefined,
+  weight: WeightKey
+): number | null {
+  if (!settings) return null;
+  const field: keyof StoreSettingsDoc =
+    weight === '250g' ? 'price250g' : weight === '500g' ? 'price500g' : 'price1kg';
+  if (!isStoreFieldConfirmed(settings, field)) return null;
+  const price = Number(settings[field] || 0);
+  return Number.isFinite(price) && price > 0 ? Math.round(price) : null;
+}
+
+export function getConfirmedDeliveryFeeForZone(
+  settings: StoreSettingsDoc | null | undefined,
+  zone: DeliveryZone
+): number | null {
+  if (!settings) return null;
+  const field: keyof StoreSettingsDoc =
+    zone === 'dhaka'
+      ? 'insideDhakaFee'
+      : zone === 'suburban'
+        ? 'dhakaSuburbanFee'
+        : zone === 'remote'
+          ? 'remoteDistrictFee'
+          : 'outsideDhakaFee';
+
+  const map = settings.ownerConfirmedFields;
+  if (map && Object.prototype.hasOwnProperty.call(map, field) && !map[field]) {
+    return null;
+  }
+  const raw = settings[field];
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+    return Math.round(raw);
+  }
+  if (map?.[field] === true && typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
+    return Math.round(raw);
+  }
+  return null;
+}
+
+export function isStorefrontOrderingReady(settings: StoreSettingsDoc | null | undefined): boolean {
+  if (!settings) return false;
+  const hasAnyPrice =
+    getConfirmedPriceForWeight(settings, '250g') !== null ||
+    getConfirmedPriceForWeight(settings, '500g') !== null ||
+    getConfirmedPriceForWeight(settings, '1kg') !== null;
+  const hasBaseFee =
+    getConfirmedDeliveryFeeForZone(settings, 'dhaka') !== null ||
+    getConfirmedDeliveryFeeForZone(settings, 'nationwide') !== null;
+  return hasAnyPrice && hasBaseFee;
+}
+
+export function getEffectiveMaxJarsPerOrder(settings: StoreSettingsDoc | null | undefined): number {
+  if (settings && isStoreFieldConfirmed(settings, 'maxJarsPerOrder')) {
+    const val = Math.round(Number(settings.maxJarsPerOrder || 0));
+    if (val >= 1 && val <= 100) return val;
+  }
+  return 10;
+}
 
 export interface OrderRecord {
   orderNumber: string;
@@ -207,16 +346,19 @@ export interface BatchRecord {
   active: boolean;
 }
 
+/**
+ * Empty batch template — never invent batch codes, production/expiry dates, or lab status.
+ */
 export const DEFAULT_ACTIVE_BATCH: BatchRecord = {
-  batchCode: 'DG-PAB-2026-042',
-  originDistrict: 'Pabna, Rajshahi Division',
-  milkSource: 'Whole Cultured Grass-Fed Deshi Cow Milk (100%)',
-  productionDate: 'November 2026',
-  expiryDate: 'November 2027',
-  labReportStatus: 'Batch Lab PDF Upload Slot (Admin Configurable)',
+  batchCode: '',
+  originDistrict: '',
+  milkSource: '',
+  productionDate: '',
+  expiryDate: '',
+  labReportStatus: '',
   labReportUrl: '',
-  licenceDetails: 'Regulatory Licence Number Pending Admin Entry',
-  active: true,
+  licenceDetails: '',
+  active: false,
 };
 
 export interface ReviewRecord {

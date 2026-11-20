@@ -1,0 +1,134 @@
+=== STAGE 0 BASELINE EVIDENCE (2026-11-19T11:47:59Z) ===
+HEAD: 20f1259
+
+--- 1. npx eslint firestore.rules ---
+EXIT_CODE: 0
+
+--- 2. npm run lint ---
+EXIT_CODE: 0
+
+> material-flask@1.0.0 prelint
+> [ -d node_modules/.bin ] || npm install
+
+
+> material-flask@1.0.0 lint
+> tsc --noEmit
+
+
+--- 3. npm test ---
+EXIT_CODE: 0
+      duration_ms: 3.320468
+      type: 'test'
+      ...
+    # Subtest: GET /api/orders/refill-reminder validates order+phone format and rejects invalid credentials in Bangla
+    ok 3 - GET /api/orders/refill-reminder validates order+phone format and rejects invalid credentials in Bangla
+      ---
+      duration_ms: 2.68002
+      type: 'test'
+      ...
+    # Subtest: 4-05 production start script uses next start directly and next-cli.mjs guards port cleanup to dev only
+    ok 4 - 4-05 production start script uses next start directly and next-cli.mjs guards port cleanup to dev only
+      ---
+      duration_ms: 1.439697
+      type: 'test'
+      ...
+    1..4
+ok 12 - UI/UX & P0 API hardening regressions
+  ---
+  duration_ms: 22.669839
+  type: 'suite'
+  ...
+1..12
+# tests 143
+# suites 12
+# pass 143
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 12659.184914
+
+--- 4. npm run test:chatbot ---
+EXIT_CODE: 0
+      ---
+      duration_ms: 4.338628
+      type: 'test'
+      ...
+    # Subtest: Case \#62 (Chat Address-Edit Two-Step Confirm Card): request_address_change asks typo clarification on Chitagong, proposes signed token on valid district, and mutates only after Confirm
+    ok 64 - Case \#62 (Chat Address-Edit Two-Step Confirm Card): request_address_change asks typo clarification on Chitagong, proposes signed token on valid district, and mutates only after Confirm
+      ---
+      duration_ms: 3.380132
+      type: 'test'
+      ...
+    1..64
+ok 1 - T0.10 Bilingual Chatbot Regression Suite (62 Curated & Order-Safety Scenarios)
+  ---
+  duration_ms: 453.496484
+  type: 'suite'
+  ...
+1..1
+# tests 64
+# suites 1
+# pass 64
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1357.742707
+
+--- 5. npm run build ---
+EXIT_CODE: 0
+├ ƒ /api/courier/book
+├ ƒ /api/courier/webhook
+├ ƒ /api/health
+├ ƒ /api/integrations/status
+├ ƒ /api/notifications/status
+├ ƒ /api/order
+├ ƒ /api/orders/cod-verify
+├ ƒ /api/orders/manage
+├ ƒ /api/orders/notify
+├ ƒ /api/orders/prepare
+├ ƒ /api/orders/refill-reminder
+├ ƒ /api/orders/refill-reminder/dispatch
+├ ƒ /api/orders/reorder
+├ ƒ /api/orders/review
+├ ƒ /api/orders/storefront
+├ ƒ /api/payments/callback
+├ ƒ /api/payments/initiate
+├ ƒ /api/payments/methods
+├ ƒ /api/retention/campaigns
+├ ƒ /api/support/evidence
+├ ƒ /api/support/ticket
+├ ƒ /batch
+├ ○ /robots.txt
+├ ○ /sitemap.xml
+└ ƒ /track
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+
+--- 6. NODE_ENV=production DESHI_GEE_TEST_MODE=1 refusal check ---
+EXIT_CODE: 1 (expected non-zero)
+ProductionTestModeForbiddenError: CRITICAL_MISCONFIGURATION: DESHI_GEE_TEST_MODE=1 is forbidden when NODE_ENV=production. Refusing to run in-memory/test hooks in production.
+    at assertNoTestModeInProduction (/app/applet/src/lib/chatbot/firestoreRest.ts:96:17)
+    at rows (/app/applet/src/lib/chatbot/firestoreRest.ts:103:1)
+    at Object.<anonymous> (/app/applet/src/lib/chatbot/firestoreRest.ts:5284:23)
+    at Module._compile (node:internal/modules/cjs/loader:1781:14)
+    at Object.transformer (/app/applet/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+    at Module.load (node:internal/modules/cjs/loader:1505:32)
+    at Function._load (node:internal/modules/cjs/loader:1309:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    at Module.require (node:internal/modules/cjs/loader:1527:12)
+    at require (node:internal/modules/helpers:147:16) {
+  code: 'TEST_MODE_FORBIDDEN_IN_PRODUCTION'
+}
+
+Node.js v22.23.2
+
+--- 7. Security & Repo Hygiene Checks (0.3) ---
+Java available: NO_JAVA
+public/ markdown/spec files: 0
+.gitignore .env* match: 5:.env*
+SUMMARY_EXITS: eslint=0 lint=0 test=0 chatbot=0 build=0 prod_test_guard=1

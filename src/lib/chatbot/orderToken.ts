@@ -721,25 +721,25 @@ export function resolveZoneDeliveryFeeAndEta(
 ): { feeBdt: number; etaText: string } {
   if (deliveryZone === 'dhaka') {
     return {
-      feeBdt: Math.round(settings.insideDhakaFee ?? 80),
-      etaText: settings.estimatedDhakaDays || '24–48 Hours (Inside Dhaka)',
+      feeBdt: Math.max(0, Math.round(Number(settings.insideDhakaFee) || 0)),
+      etaText: (settings.estimatedDhakaDays || '').trim(),
     };
   }
   if (deliveryZone === 'suburban') {
     return {
-      feeBdt: Math.round(settings.dhakaSuburbanFee ?? 100),
-      etaText: settings.estimatedSuburbanDays || '2–3 Business Days (Dhaka Suburbs)',
+      feeBdt: Math.max(0, Math.round(Number(settings.dhakaSuburbanFee) || 0)),
+      etaText: (settings.estimatedSuburbanDays || '').trim(),
     };
   }
   if (deliveryZone === 'remote') {
     return {
-      feeBdt: Math.round(settings.remoteDistrictFee ?? 160),
-      etaText: settings.estimatedRemoteDays || '3–5 Business Days (Remote / Hill & Coastal)',
+      feeBdt: Math.max(0, Math.round(Number(settings.remoteDistrictFee) || 0)),
+      etaText: (settings.estimatedRemoteDays || '').trim(),
     };
   }
   return {
-    feeBdt: Math.round(settings.outsideDhakaFee ?? 130),
-    etaText: settings.estimatedOutsideDays || '2–4 Business Days (Nationwide)',
+    feeBdt: Math.max(0, Math.round(Number(settings.outsideDhakaFee) || 0)),
+    etaText: (settings.estimatedOutsideDays || '').trim(),
   };
 }
 
@@ -836,7 +836,8 @@ export function computeOrderPricingInPoisha(params: {
         : Math.round(settings.stock500g);
 
   const zoneInfo = resolveZoneDeliveryFeeAndEta(settings, deliveryZone);
-  const freeDeliveryApplied = subtotalBdt >= Math.round(settings.freeDeliveryThreshold);
+  const freeThreshold = Math.round(Number(settings.freeDeliveryThreshold) || 0);
+  const freeDeliveryApplied = freeThreshold > 0 && subtotalBdt >= freeThreshold;
   const deliveryFeeBdt = freeDeliveryApplied ? 0 : zoneInfo.feeBdt;
   const deliveryPoisha = deliveryFeeBdt * 100;
 
@@ -963,12 +964,23 @@ export function getDispatchWindowInfo(settings: StoreSettingsDoc, now = new Date
   noticeEn: string;
   noticeBn: string;
 } {
-  const cutoff = Math.max(0, Math.min(23, Math.round(settings.dispatchCutoffHourBst ?? 14)));
+  const rawCutoff = Number(settings.dispatchCutoffHourBst || 0);
   const bstHour = (now.getUTCHours() + 6) % 24;
-  const beforeCutoff = bstHour < cutoff;
-
   const customNoticeEn = (settings.cutoffNoticeEn || '').trim();
   const customNoticeBn = (settings.cutoffNoticeBn || '').trim();
+
+  if (!Number.isFinite(rawCutoff) || rawCutoff <= 0) {
+    return {
+      beforeCutoff: true,
+      cutoffHourBst: 0,
+      currentBstHour: bstHour,
+      noticeEn: customNoticeEn,
+      noticeBn: customNoticeBn,
+    };
+  }
+
+  const cutoff = Math.max(1, Math.min(23, Math.round(rawCutoff)));
+  const beforeCutoff = bstHour < cutoff;
 
   const noticeEn = beforeCutoff
     ? customNoticeEn || `Orders confirmed before ${cutoff}:00 BST dispatch same day.`
@@ -995,6 +1007,7 @@ export function assessOrderRiskSignals(params: {
   paymentMethod: PaymentMethod;
   totalBdt: number;
   codHighValueThresholdBdt?: number;
+  codRiskThresholdScore?: number;
 }): {
   riskScore: number;
   riskSignals: string[];
@@ -1027,13 +1040,14 @@ export function assessOrderRiskSignals(params: {
     score += 25;
   }
 
-  const codLimit = Math.max(1500, Math.round(params.codHighValueThresholdBdt ?? 5000));
-  if (params.paymentMethod === 'cod' && params.totalBdt >= codLimit) {
+  const rawCodLimit = Number(params.codHighValueThresholdBdt ?? 0);
+  if (params.paymentMethod === 'cod' && rawCodLimit > 0 && params.totalBdt >= Math.round(rawCodLimit)) {
     signals.push('high_value_cod');
     score += 25;
   }
 
-  const reviewStatus: OrderRiskReviewStatus = score >= 45 ? 'manual_review' : 'none';
+  const riskThreshold = Math.max(20, Math.min(95, Math.round(params.codRiskThresholdScore ?? 45)));
+  const reviewStatus: OrderRiskReviewStatus = score >= riskThreshold ? 'manual_review' : 'none';
   if (reviewStatus === 'manual_review') {
     return {
       riskScore: Math.min(100, score),

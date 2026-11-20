@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 import {
   BatchRecord,
-  DEFAULT_ACTIVE_BATCH,
   fetchBatchRecord,
 } from '../lib/firebase';
 import { Lang } from '../data/deshiGeeData';
@@ -28,9 +27,7 @@ export function BatchVerifyView({
   initialBatchCode,
   onBackHome,
 }: BatchVerifyViewProps) {
-  const [codeInput, setCodeInput] = useState(
-    initialBatchCode || DEFAULT_ACTIVE_BATCH.batchCode
-  );
+  const [codeInput, setCodeInput] = useState(initialBatchCode || '');
   const [batch, setBatch] = useState<BatchRecord | null>(null);
   const [qrUrl, setQrUrl] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -40,12 +37,16 @@ export function BatchVerifyView({
 
   const lookupBatch = async (code: string) => {
     const clean = code.trim().toUpperCase();
-    if (!clean) return;
+    if (!clean) {
+      setBatch(null);
+      setNotFound(false);
+      return;
+    }
     setLoading(true);
     setNotFound(false);
     try {
       const record = await fetchBatchRecord(clean);
-      if (!record) {
+      if (!record || !record.batchCode) {
         setBatch(null);
         setNotFound(true);
       } else {
@@ -59,14 +60,17 @@ export function BatchVerifyView({
         setQrUrl(qrData);
       }
     } catch {
-      setBatch(DEFAULT_ACTIVE_BATCH);
+      setBatch(null);
+      setNotFound(true);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    lookupBatch(initialBatchCode || DEFAULT_ACTIVE_BATCH.batchCode);
+    if (initialBatchCode) {
+      lookupBatch(initialBatchCode);
+    }
   }, [initialBatchCode]);
 
   const handleSubmit = (e: FormEvent) => {
@@ -104,14 +108,14 @@ export function BatchVerifyView({
           type="text"
           value={codeInput}
           onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
-          placeholder="DG-PAB-2026-042"
+          placeholder={bn ? 'জারের গায়ে থাকা ব্যাচ কোড লিখুন' : 'Enter batch code from jar label'}
           aria-label="Batch code"
           className="min-h-[46px] flex-1 rounded-xl border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-4 py-2.5 font-mono text-base uppercase text-[#1E1710] shadow-xs focus:border-[#B47B2B] focus:outline-none sm:text-sm"
         />
         <button
           type="submit"
-          disabled={loading}
-          className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#B47B2B] to-[#96621B] px-7 py-2.5 text-sm font-bold text-[#FFFDF9] shadow-xs hover:scale-[1.01] transition-all"
+          disabled={loading || !codeInput.trim()}
+          className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#B47B2B] to-[#96621B] px-7 py-2.5 text-sm font-bold text-[#FFFDF9] shadow-xs hover:scale-[1.01] disabled:opacity-50 transition-all"
         >
           {loading ? (
             <Loader2 className="h-4 w-4 animate-spin text-[#FFFDF9]" />
@@ -122,15 +126,28 @@ export function BatchVerifyView({
         </button>
       </form>
 
-      {notFound && (
+      {!loading && !batch && !notFound && (
         <div className="mt-8 rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6 text-center sm:p-8">
-          <p className="font-display text-xl font-semibold text-[#1E1710]">
-            {bn ? 'এই ব্যাচ কোডটি পাওয়া যায়নি' : 'Batch Record Not Found'}
+          <p className="font-display text-lg font-semibold text-[#1E1710]">
+            {bn ? 'ব্যাচ কোড দিয়ে যাচাই করুন' : 'Enter a Batch Code to Verify'}
           </p>
           <p className="mt-2 text-sm text-[#635647]">
             {bn
-              ? 'জারের গলার ট্যাগে থাকা ব্যাচ কোড মিলিয়ে আবার চেষ্টা করুন।'
-              : 'Check the batch code printed on your jar neck tag and try again.'}
+              ? 'জারের ট্যাগে থাকা ব্যাচ কোড লিখুন। কোনো ব্যাচ এখনো যুক্ত না হয়ে থাকলে রেকর্ডটি পেন্ডিং হিসেবে দেখাবে।'
+              : 'Enter the batch code printed on your jar label. Unrecorded batches will show as pending entry.'}
+          </p>
+        </div>
+      )}
+
+      {notFound && (
+        <div className="mt-8 rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6 text-center sm:p-8">
+          <p className="font-display text-xl font-semibold text-[#1E1710]">
+            {bn ? 'ব্যাচ পাওয়া যায়নি / এন্ট্রি পেন্ডিং' : 'Batch Not Found / Pending Entry'}
+          </p>
+          <p className="mt-2 text-sm text-[#635647]">
+            {bn
+              ? 'এই ব্যাচ কোডটি এখনো আমাদের যাচাইকৃত রেকর্ডে যুক্ত হয়নি। জারের ট্যাগ মিলিয়ে আবার চেষ্টা করুন।'
+              : 'This batch code is not yet recorded in our verified registry. Please check your jar tag or contact support.'}
           </p>
         </div>
       )}

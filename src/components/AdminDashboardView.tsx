@@ -113,10 +113,10 @@ export function AdminDashboardView({
   // New Batch Form
   const [batchDraft, setBatchDraft] = useState<BatchRecord>(DEFAULT_ACTIVE_BATCH);
   const [couponDraft, setCouponDraft] = useState<CouponRecord>({
-    code: 'DESHI10',
-    discountPct: 10,
-    minSubtotalBdt: 1000,
-    active: true,
+    code: '',
+    discountPct: 0,
+    minSubtotalBdt: 0,
+    active: false,
     expiresAt: '',
     maxUses: 0,
     usedCount: 0,
@@ -1393,11 +1393,7 @@ export function AdminDashboardView({
                 <input
                   type="number"
                   min={0}
-                  value={
-                    draftSettings.dhakaSuburbanFee ??
-                    DEFAULT_STORE_SETTINGS.dhakaSuburbanFee ??
-                    90
-                  }
+                  value={draftSettings.dhakaSuburbanFee ?? 0}
                   onChange={(e) =>
                     setDraftSettings({
                       ...draftSettings,
@@ -1427,11 +1423,7 @@ export function AdminDashboardView({
                 <input
                   type="number"
                   min={0}
-                  value={
-                    draftSettings.remoteDistrictFee ??
-                    DEFAULT_STORE_SETTINGS.remoteDistrictFee ??
-                    170
-                  }
+                  value={draftSettings.remoteDistrictFee ?? 0}
                   onChange={(e) =>
                     setDraftSettings({
                       ...draftSettings,
@@ -1447,11 +1439,8 @@ export function AdminDashboardView({
                 <label className="block text-xs text-[#635647]">Suburban ETA</label>
                 <input
                   type="text"
-                  value={
-                    draftSettings.estimatedSuburbanDays ??
-                    DEFAULT_STORE_SETTINGS.estimatedSuburbanDays ??
-                    '2-3 days'
-                  }
+                  placeholder="Unset"
+                  value={draftSettings.estimatedSuburbanDays ?? ''}
                   onChange={(e) =>
                     setDraftSettings({
                       ...draftSettings,
@@ -1465,11 +1454,8 @@ export function AdminDashboardView({
                 <label className="block text-xs text-[#635647]">Remote ETA</label>
                 <input
                   type="text"
-                  value={
-                    draftSettings.estimatedRemoteDays ??
-                    DEFAULT_STORE_SETTINGS.estimatedRemoteDays ??
-                    '4-6 days'
-                  }
+                  placeholder="Unset"
+                  value={draftSettings.estimatedRemoteDays ?? ''}
                   onChange={(e) =>
                     setDraftSettings({
                       ...draftSettings,
@@ -1483,17 +1469,13 @@ export function AdminDashboardView({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-[#635647]">
-                  Cutoff Hour (BST 0-23)
+                  Cutoff Hour (BST 0-23, 0=Unset)
                 </label>
                 <input
                   type="number"
                   min={0}
                   max={23}
-                  value={
-                    draftSettings.dispatchCutoffHourBst ??
-                    DEFAULT_STORE_SETTINGS.dispatchCutoffHourBst ??
-                    14
-                  }
+                  value={draftSettings.dispatchCutoffHourBst ?? 0}
                   onChange={(e) =>
                     setDraftSettings({
                       ...draftSettings,
@@ -1505,16 +1487,12 @@ export function AdminDashboardView({
               </div>
               <div>
                 <label className="block text-xs text-[#635647]">
-                  High-Value COD Flag (৳)
+                  High-Value COD Flag (৳, 0=Unset)
                 </label>
                 <input
                   type="number"
-                  min={500}
-                  value={
-                    draftSettings.codHighValueThresholdBdt ??
-                    DEFAULT_STORE_SETTINGS.codHighValueThresholdBdt ??
-                    5000
-                  }
+                  min={0}
+                  value={draftSettings.codHighValueThresholdBdt ?? 0}
                   onChange={(e) =>
                     setDraftSettings({
                       ...draftSettings,

@@ -248,14 +248,16 @@ export function detectLanguageAndSignals(
     };
   }
 
-  // Default 'auto': Bangla or Banglish -> polite Bangla script; English -> English (or uiLang for pure greetings)
-  if (detectedInputLang === 'bn' || detectedInputLang === 'banglish') {
-    return {
-      detectedInputLang,
-      replyLang: 'bn',
-      explicitSwitchRequested: null,
-      scriptPreference: 'bn_script',
-    };
+  // D1 default 'bangla_script' (and 'auto'): Bangla or Banglish -> polite Bangla script; English -> English (or uiLang for pure greetings)
+  if (behavior === 'bangla_script' || behavior === 'auto') {
+    if (detectedInputLang === 'bn' || detectedInputLang === 'banglish') {
+      return {
+        detectedInputLang,
+        replyLang: 'bn',
+        explicitSwitchRequested: null,
+        scriptPreference: 'bn_script',
+      };
+    }
   }
   if (/^(hi|hello|hey|assalamu alaikum|salam)\b/i.test(lower) && uiLang === 'bn') {
     return {

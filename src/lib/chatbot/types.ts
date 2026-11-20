@@ -1,6 +1,7 @@
 export type ResponseTone = 'warm' | 'concise' | 'formal';
 export type ResponseLength = 'short' | 'balanced' | 'detailed';
 export type LanguageBehavior =
+  | 'bangla_script'
   | 'auto'
   | 'prefer_bn'
   | 'prefer_en'
@@ -155,6 +156,7 @@ export interface ChatbotConfigDoc {
   quickQuestionsEn: string[];
   retentionDays: number;
   dailyRequestLimit: number;
+  enableVoiceFeatures?: boolean;
   version: number;
   lastSyncStatus: string;
   updatedAt?: unknown;
@@ -164,81 +166,61 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfigDoc = {
   enabled: true,
   maintenanceMode: false,
   maintenanceMessageEn:
-    'Our AI assistant is briefly updating. Please reach us directly via WhatsApp or phone for immediate help.',
+    'Our AI assistant is briefly updating. Please submit a callback request for assistance.',
   maintenanceMessageBn:
-    'আমাদের AI Assistant সাময়িক রক্ষণাবেক্ষণে রয়েছে। দ্রুত সহায়তার জন্য WhatsApp বা ফোনে যোগাযোগ করুন।',
+    'আমাদের AI Assistant সাময়িক রক্ষণাবেক্ষণে রয়েছে। সহায়তার জন্য কলব্যাক অনুরোধ পাঠান।',
   botName: 'Deshi Gee Assistant',
   brandName: 'Deshi Gee',
   brandIntro:
-    'Deshi Gee is a single-product Bangladeshi artisanal food brand offering authentic Pabna grass-fed bilona cow ghee in clear apothecary glass jars.',
+    'Deshi Gee is a single-product Bangladeshi artisanal food brand offering Pabna bilona cow ghee in clear apothecary glass jars.',
   brandStory:
-    'Sourced fresh at dawn from rural dairy households across Bera & Faridpur in Pabna, whole cow milk is cultured overnight in earthen clay pots, hand-churned with a traditional wooden bilona, and slow-clarified in small batches.',
+    'Sourced from dairy households in Pabna, whole cow milk is cultured into curd in earthen pots, hand-churned with a traditional wooden bilona, and slow-clarified.',
   brandMission:
-    'To bring unadulterated, batch-traceable Pabna cow ghee prepared with patience and transparency directly to Bangladeshi kitchens.',
+    'To bring carefully prepared, batch-traceable Pabna cow ghee directly to Bangladeshi kitchens.',
   founderInfo:
-    'Founded in partnership with Pabna dairy families using traditional earthen-pot fermentation and wooden bilona churning.',
+    'Crafted in partnership with Pabna dairy households using earthen-pot fermentation and wooden bilona churning.',
   productDescription:
-    'Single-origin Pabna grass-fed cow ghee churned by traditional wooden bilona from whole cultured curd and sealed warm in clear apothecary glass jars (250g, 500g, and 1kg weight variants).',
+    'Single-origin Pabna cow ghee churned by traditional wooden bilona from whole cultured curd and sealed in clear apothecary glass jars (250g, 500g, and 1kg sizes).',
   ingredients:
-    'Cultured cow milkfat from Pabna grass-fed cows. No vegetable oil, vanaspati, artificial colour, or preservatives.',
-  taste: 'Rich, clean, deeply nutty traditional Bengali cow ghee flavour without greasiness.',
-  aroma: 'Warm caramelized roasted-butter aroma characteristic of slow earthen clarification.',
+    'Clarified cultured cow milkfat. No added vegetable oil, vanaspati, or artificial colour.',
+  taste: 'Rich, clean, nutty traditional Bengali cow ghee flavour.',
+  aroma: 'Warm roasted-butter aroma characteristic of slow clarification.',
   texture:
-    'Naturally granular (danadar) golden crystals at cool room temperature (around 18°C–24°C) and clear liquid gold when warm (above 34°C).',
+    'Naturally granular (danadar) crystals in cooler environments and clear liquid gold when warm.',
   productionMethod:
-    'Fresh dawn milk from Pabna cows is gently boiled, fermented overnight into whole curd inside earthen pots, hand-churned before sunrise using a wooden bilona to separate cultured makkhan, and slow-simmered over low flame before straining through clean muslin into glass jars.',
-  shelfLife: '12 months from packaging date when kept tightly sealed.',
+    'Whole cow milk is gently boiled, cultured overnight into curd in earthen pots, hand-churned with a wooden bilona to separate makkhan, and slow-clarified before sealing in glass jars.',
+  shelfLife: '',
   storageInstructions:
-    'Store in a cool, dry place away from direct sunlight and kitchen stove heat. Always scoop using a clean, completely dry spoon. Refrigeration is unnecessary.',
-  approvedClaims:
-    'Single-origin Pabna milk sourcing; wooden bilona cultured curd churning; zero vegetable oils or preservatives; batch-traceable glass packaging.',
+    'Store tightly sealed in a cool, dry place away from direct sunlight and moisture. Always use a clean, dry spoon.',
+  approvedClaims: '',
   blockedClaims:
     'lab-verified; A2; organic; BSTI certified; 100% pure; cures disease',
-  approvedClaimsMeta: [
-    {
-      claim: 'Single-origin Pabna milk sourcing',
-      evidenceNote: 'Daily milk collection records from Bera & Faridpur dairy partners in Pabna.',
-    },
-    {
-      claim: 'Wooden bilona cultured curd churning',
-      evidenceNote: 'Overnight clay-pot dahi fermentation & morning wooden bilona separation.',
-    },
-    {
-      claim: 'Zero vegetable oils or preservatives',
-      evidenceNote: 'Single-ingredient clarified cow milkfat only.',
-    },
-  ],
+  approvedClaimsMeta: [],
   claimAuditHistory: [],
-  currentOffers:
-    'Free nationwide delivery on orders of ৳2,500 or above (or active advance MFS/coupon promotions configured in Store Settings).',
-  district: 'Dhaka / Pabna',
-  city: 'Dhaka',
+  currentOffers: '',
+  district: '',
+  city: '',
   googleMapsUrl: '',
   directionsUrl: '',
-  businessHours: 'Saturday – Thursday, 9:00 AM – 9:00 PM (BST)',
-  openHourBst: 9,
-  closeHourBst: 21,
-  closedDays: 'Friday',
-  supportAvailabilityNote:
-    'Our customer support team replies within business hours via Phone and WhatsApp.',
+  businessHours: '',
+  openHourBst: 0,
+  closeHourBst: 0,
+  closedDays: '',
+  supportAvailabilityNote: '',
   humanSupportEnabled: true,
-  slaStandardMinutes: 120,
-  slaUrgentMinutes: 30,
-  deliveryPolicy:
-    'Orders inside Dhaka typically arrive within 24–48 hours; nationwide orders outside Dhaka arrive within 2–4 business days. Free delivery applies automatically at or above the configured threshold.',
-  returnPolicy:
-    'If a glass jar arrives cracked, leaking, or with a compromised tamper seal, contact support with a photo within 24 hours of delivery for replacement or refund.',
-  replacementPolicy:
-    'Damaged or leaking jars verified with a delivery-day photo are replaced promptly at no extra delivery charge.',
-  otherPaymentInfo:
-    'Cash on Delivery (COD) is available nationwide. Advance payment via configured bKash or Nagad numbers remains Pending Verification until matched by our team.',
+  slaStandardMinutes: 0,
+  slaUrgentMinutes: 0,
+  deliveryPolicy: '',
+  returnPolicy: '',
+  replacementPolicy: '',
+  otherPaymentInfo: '',
   supportInstructions:
-    'Greet respectfully, keep answers concise (3–4 short sentences max), confirm weight & total before order placement, and never ask for PIN, OTP, or banking passwords.',
+    'Greet respectfully, keep answers concise, confirm weight & total before order placement, never invent unconfirmed facts or policies, and never ask for PIN, OTP, or banking passwords.',
   customInstructions:
-    'Recommend the 500g glass jar gently when a customer asks for a regular household option without being pushy. Always highlight exact prices with the ৳ symbol and offer Cash on Delivery or verified bKash/Nagad checkout.',
+    'Use only verified store settings and owner-approved facts. If a price, fee, ETA, or policy is not configured, inform the customer honestly and offer human support.',
   responseTone: 'warm',
   responseLength: 'short',
-  languageBehavior: 'auto',
+  languageBehavior: 'bangla_script',
   synonyms: {
     dam: ['price', 'cost', 'taka', 'tk', 'rate', 'দাম', 'মূল্য', 'কত'],
     khati: ['pure', 'authentic', 'original', 'খাঁটি', 'আসল', 'ভেজাল'],
@@ -248,13 +230,13 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfigDoc = {
     pabna: ['পাবনা', 'bera', 'faridpur', 'গ্রাস-ফেড', 'bilona', 'বিলোনা'],
   },
   fallbackMessageBn:
-    'দুঃখিত, এই তথ্যটা আমার কাছে নেই। সঠিক তথ্যের জন্য আমাদের কাস্টমার সাপোর্টের সঙ্গে যোগাযোগ করতে পারেন।',
+    'দুঃখিত, এই তথ্যটা আমার কাছে যাচাইকৃতভাবে নেই। সঠিক তথ্যের জন্য আমাদের সাপোর্ট টিমের সঙ্গে যোগাযোগ বা কলব্যাক অনুরোধ করতে পারেন।',
   fallbackMessageEn:
-    "Sorry, I don't have verified information about that. Please contact our customer support team for accurate assistance.",
+    "Sorry, I don't have owner-verified information about that yet. Please contact our support team or request a callback for accurate assistance.",
   welcomeMessageBn:
-    'আসসালামু আলাইকুম! স্বাগতম Deshi Gee-তে। আমি আপনার Deshi Gee AI Assistant। আমাদের ঘি, দাম, সাইজ, অর্ডার ও ডেলিভারি সম্পর্কে যেকোনো প্রশ্নে সাহায্য করতে পারি।',
+    'আসসালামু আলাইকুম! স্বাগতম Deshi Gee-তে। আমি আপনার Deshi Gee Assistant। আমাদের ঘি, সাইজ, অর্ডার ও ডেলিভারি সম্পর্কে যেকোনো প্রশ্নে সাহায্য করতে পারি।',
   welcomeMessageEn:
-    "Welcome to Deshi Gee! I'm your virtual assistant. I can help you with our ghee, pricing, available sizes, orders, delivery, and customer support.",
+    "Welcome to Deshi Gee! I'm your virtual assistant. I can help you with our ghee, available sizes, orders, delivery, and customer support.",
   quickQuestionsBn: [
     'আমাদের ঘির দাম কত?',
     'কোন সাইজটা আমার জন্য ভালো হবে?',
@@ -273,8 +255,9 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfigDoc = {
   ],
   retentionDays: 30,
   dailyRequestLimit: 2000,
+  enableVoiceFeatures: false,
   version: 1,
-  lastSyncStatus: 'Initialized with verified Deshi Gee facts',
+  lastSyncStatus: 'Awaiting owner configuration in Admin',
 };
 
 export interface ChatbotFaqDoc {

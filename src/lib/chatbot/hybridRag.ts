@@ -424,43 +424,57 @@ function sanitizeXmlAttr(val: string): string {
 }
 
 /**
- * Phase 1 T1.11 Default Verified Knowledge Base Pack (Can be seeded into Admin KB / FAQs).
+ * D11 / 1-13: Draft Starter Knowledge Pack (NEVER auto-published).
+ * Admin must explicitly review, verify against confirmed product facts, and publish each entry.
  */
-export const CURATED_PRODUCT_KNOWLEDGE_PACK: Omit<ChatbotFaqDoc, 'id'>[] = [
+export interface CuratedStarterFaqEntry extends Omit<ChatbotFaqDoc, 'id'> {
+  sourceRef: string;
+  draftNotice: string;
+}
+
+export const CURATED_PRODUCT_KNOWLEDGE_PACK: CuratedStarterFaqEntry[] = [
   {
-    question: 'Is Deshi Gee safe for cooking at high heat, halua, polao, or paratha?',
+    question: 'Is Deshi Gee suitable for everyday cooking, halua, polao, or paratha?',
     answer:
-      'Yes! Clarified cultured bilona cow ghee has a naturally high smoke point compared to raw butter, making it ideal for daily cooking, bhaat, khichuri, polao, halua, and shallow-frying paratha without burning easily.',
+      'Clarified cow ghee is widely used for daily cooking, bhaat, khichuri, polao, halua, and shallow-frying paratha. Please store in a cool, dry place with a dry spoon.',
     lang: 'both',
     category: 'Cooking & Usage',
-    active: true,
-    published: true,
+    active: false,
+    published: false,
+    sourceRef: 'draft:starter-pack:cooking-usage (owner review required)',
+    draftNotice: 'Draft starter pack – owner review required',
   },
   {
     question: 'Why does Deshi Gee look granular (danadar) in winter or liquid in summer?',
     answer:
-      'Natural bilona cow ghee forms golden granular (danadar) crystals in cool temperatures (18°C–24°C) and melts into clear golden liquid above ~32°C–34°C because it contains no stabilizers or hydrogenated oils. Both textures are completely normal.',
+      'Natural cow ghee crystallizes into granular (danadar) texture in cool weather and becomes clear golden liquid in warm weather. Both seasonal textures are normal.',
     lang: 'both',
     category: 'Texture & Climate',
-    active: true,
-    published: true,
+    active: false,
+    published: false,
+    sourceRef: 'draft:starter-pack:texture-climate (owner review required)',
+    draftNotice: 'Draft starter pack – owner review required',
   },
   {
-    question: 'প্লাস্টিক নয় কেন? আপনারা কি কাঁচের জারে ঘি দেন?',
+    question: 'আপনারা কি কাঁচের জারে ঘি দেন?',
     answer:
-      'হ্যাঁ, আমাদের ২৫০ গ্রাম, ৫০০ গ্রাম এবং ১ কেজি—তিনটি সাইজই খাদ্য-উপযোগী স্পষ্ট অ্যাপোথেকারি কাঁচের বয়ামে এয়ারটাইট ট্যাম্পার-সিলসহ প্যাকেজ করা হয়, যাতে ঘিয়ের প্রাকৃতিক সুবাস ও গুণাগুণ দীর্ঘদিন অটুট থাকে।',
+      'হ্যাঁ, আমাদের ২৫০ গ্রাম, ৫০০ গ্রাম এবং ১ কেজি—তিনটি সাইজই সিল করা কাঁচের বয়ামে প্যাকেজ করা হয়।',
     lang: 'bn',
     category: 'Packaging & Quality',
-    active: true,
-    published: true,
+    active: false,
+    published: false,
+    sourceRef: 'draft:starter-pack:packaging (owner review required)',
+    draftNotice: 'Draft starter pack – owner review required',
   },
   {
     question: 'Which jar size should I choose — 250g, 500g, or 1kg?',
     answer:
-      '250g works great as a first-time trial or solo kitchen jar, 500g is our most popular everyday family jar, and 1kg offers the best per-gram value for regular households, cooking, or gifting.',
+      '250g is convenient for trying out or smaller kitchens, 500g suits regular family use, and 1kg is suited for larger households or frequent cooking.',
     lang: 'both',
     category: 'Size Recommendation',
-    active: true,
-    published: true,
+    active: false,
+    published: false,
+    sourceRef: 'draft:starter-pack:size-guide (owner review required)',
+    draftNotice: 'Draft starter pack – owner review required',
   },
 ];

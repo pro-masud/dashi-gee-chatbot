@@ -270,7 +270,6 @@ export async function fetchBatchRecord(batchCode: string): Promise<BatchRecord |
   try {
     const snap = await getDoc(doc(db, 'batches', clean));
     if (snap.exists()) return snap.data() as BatchRecord;
-    if (clean === DEFAULT_ACTIVE_BATCH.batchCode) return DEFAULT_ACTIVE_BATCH;
     return null;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `batches/${clean}`);
@@ -280,8 +279,7 @@ export async function fetchBatchRecord(batchCode: string): Promise<BatchRecord |
 export async function fetchAllBatches(): Promise<BatchRecord[]> {
   try {
     const snap = await getDocs(collection(db, 'batches'));
-    const list = snap.docs.map((d) => d.data() as BatchRecord);
-    return list.length > 0 ? list : [DEFAULT_ACTIVE_BATCH];
+    return snap.docs.map((d) => d.data() as BatchRecord);
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, 'batches');
   }

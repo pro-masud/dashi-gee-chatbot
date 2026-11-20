@@ -1,11 +1,21 @@
 import { createHash } from 'crypto';
-import type { BatchRecord, StoreSettingsDoc } from '../storeTypes';
+import {
+  getConfirmedDeliveryFeeForZone,
+  getConfirmedPriceForWeight,
+  hasValidRealPhone,
+  isPlaceholderContactValue,
+  isStoreFieldConfirmed,
+  isStorefrontOrderingReady,
+  type BatchRecord,
+  type StoreSettingsDoc,
+} from '../storeTypes';
 import type { ApprovedClaimMeta, ChatbotConfigDoc } from './types';
 import { convertBanglaDigitsToEnglish } from './domain-guard';
 
 export interface StoreFactsSnapshot {
   factsVersion: string;
   generatedAt: string;
+  orderingReady: boolean;
   brandName: string;
   productNameEn: string;
   productNameBn: string;
@@ -39,6 +49,8 @@ export interface StoreFactsSnapshot {
     codAvailable: boolean;
     bkashNumber: string;
     nagadNumber: string;
+    bkashConfigured: boolean;
+    nagadConfigured: boolean;
     advanceDiscountPct: number;
     otherPaymentInfo: string;
   };
@@ -83,8 +95,7 @@ export interface StoreFactsSnapshot {
 }
 
 function isPlaceholderValue(val: string): boolean {
-  const lower = (val || '').toLowerCase();
-  return !lower || lower.includes('configure') || lower.includes('000000');
+  return isPlaceholderContactValue(val);
 }
 
 export function detectStoreFactConflicts(params: {
@@ -94,10 +105,10 @@ export function detectStoreFactConflicts(params: {
   const { settings, config } = params;
   const conflicts: string[] = [];
 
-  if (isPlaceholderValue(settings.supportPhone)) {
+  if (!hasValidRealPhone(settings.supportPhone)) {
     conflicts.push('Store Settings supportPhone appears unconfigured or placeholder.');
   }
-  if (isPlaceholderValue(settings.whatsappNumber)) {
+  if (!hasValidRealPhone(settings.whatsappNumber)) {
     conflicts.push('Store Settings whatsappNumber appears unconfigured or placeholder.');
   }
 
@@ -106,17 +117,19 @@ export function detectStoreFactConflicts(params: {
     /(\d),(\d)/g,
     '$1$2'
   );
-  for (const m of offerAscii.matchAll(/(?:৳|bdt|tk\.?)\s*([0-9]{3,6})/gi)) {
-    const mentioned = Number(m[1]);
-    if (
-      Number.isFinite(mentioned) &&
-      mentioned >= 500 &&
-      mentioned !== Math.round(settings.freeDeliveryThreshold) &&
-      /free\s*delivery|ফ্রি\s*ডেলিভারি/i.test(offerAscii)
-    ) {
-      conflicts.push(
-        `Chatbot offers note mentions ৳${mentioned}, while live Store Settings freeDeliveryThreshold is ৳${Math.round(settings.freeDeliveryThreshold)}. Using Store Settings value.`
-      );
+  if (settings.freeDeliveryThreshold > 0) {
+    for (const m of offerAscii.matchAll(/(?:৳|bdt|tk\.?)\s*([0-9]{3,6})/gi)) {
+      const mentioned = Number(m[1]);
+      if (
+        Number.isFinite(mentioned) &&
+        mentioned >= 500 &&
+        mentioned !== Math.round(settings.freeDeliveryThreshold) &&
+        /free\s*delivery|ফ্রি\s*ডেলিভারি/i.test(offerAscii)
+      ) {
+        conflicts.push(
+          `Chatbot offers note mentions ৳${mentioned}, while live Store Settings freeDeliveryThreshold is ৳${Math.round(settings.freeDeliveryThreshold)}. Using Store Settings value.`
+        );
+      }
     }
   }
 
@@ -125,26 +138,45 @@ export function detectStoreFactConflicts(params: {
 
 export function buildStoreFactsSnapshot(params: {
   settings: StoreSettingsDoc;
-  batch: BatchRecord;
+  batch: BatchRecord | null;
   config: ChatbotConfigDoc;
 }): StoreFactsSnapshot {
   const { settings, batch, config } = params;
   const conflicts = detectStoreFactConflicts({ settings, config });
 
+  const price250g = getConfirmedPriceForWeight(settings, '250g') ?? 0;
+  const price500g = getConfirmedPriceForWeight(settings, '500g') ?? 0;
+  const price1kg = getConfirmedPriceForWeight(settings, '1kg') ?? 0;
+
+  const insideDhakaFee = getConfirmedDeliveryFeeForZone(settings, 'dhaka') ?? 0;
+  const dhakaSuburbanFee = getConfirmedDeliveryFeeForZone(settings, 'suburban') ?? 0;
+  const outsideDhakaFee = getConfirmedDeliveryFeeForZone(settings, 'nationwide') ?? 0;
+  const remoteDistrictFee = getConfirmedDeliveryFeeForZone(settings, 'remote') ?? 0;
+
+  const freeDeliveryThreshold = isStoreFieldConfirmed(settings, 'freeDeliveryThreshold')
+    ? Math.round(settings.freeDeliveryThreshold)
+    : 0;
+  const advanceDiscountPct = isStoreFieldConfirmed(settings, 'advanceDiscountPct')
+    ? Math.round(settings.advanceDiscountPct)
+    : 0;
+  const dispatchCutoffHourBst = isStoreFieldConfirmed(settings, 'dispatchCutoffHourBst')
+    ? Math.round(Number(settings.dispatchCutoffHourBst || 0))
+    : 0;
+
   const canonical = {
-    price250g: Math.round(settings.price250g),
-    price500g: Math.round(settings.price500g),
-    price1kg: Math.round(settings.price1kg),
-    stock250g: Math.round(settings.stock250g),
-    stock500g: Math.round(settings.stock500g),
-    stock1kg: Math.round(settings.stock1kg),
-    insideDhakaFee: Math.round(settings.insideDhakaFee),
-    dhakaSuburbanFee: Math.round(settings.dhakaSuburbanFee ?? 100),
-    outsideDhakaFee: Math.round(settings.outsideDhakaFee),
-    remoteDistrictFee: Math.round(settings.remoteDistrictFee ?? 160),
-    freeDeliveryThreshold: Math.round(settings.freeDeliveryThreshold),
-    advanceDiscountPct: Math.round(settings.advanceDiscountPct),
-    batchCode: batch.batchCode,
+    price250g,
+    price500g,
+    price1kg,
+    stock250g: isStoreFieldConfirmed(settings, 'stock250g') ? Math.round(settings.stock250g) : Math.max(0, Math.round(settings.stock250g || 0)),
+    stock500g: isStoreFieldConfirmed(settings, 'stock500g') ? Math.round(settings.stock500g) : Math.max(0, Math.round(settings.stock500g || 0)),
+    stock1kg: isStoreFieldConfirmed(settings, 'stock1kg') ? Math.round(settings.stock1kg) : Math.max(0, Math.round(settings.stock1kg || 0)),
+    insideDhakaFee,
+    dhakaSuburbanFee,
+    outsideDhakaFee,
+    remoteDistrictFee,
+    freeDeliveryThreshold,
+    advanceDiscountPct,
+    batchCode: batch?.batchCode || '',
     configVersion: config.version || 1,
     approvedClaims: config.approvedClaims || '',
     blockedClaims: config.blockedClaims || '',
@@ -155,9 +187,13 @@ export function buildStoreFactsSnapshot(params: {
     .digest('hex')
     .slice(0, 8);
 
+  const bkashConfigured = hasValidRealPhone(settings.bkashNumber);
+  const nagadConfigured = hasValidRealPhone(settings.nagadNumber);
+
   return {
     factsVersion: `v${canonical.configVersion}-${hash}`,
     generatedAt: new Date().toISOString(),
+    orderingReady: isStorefrontOrderingReady(settings),
     brandName: config.brandName || 'Deshi Gee',
     productNameEn: settings.productNameEn,
     productNameBn: settings.productNameBn,
@@ -178,62 +214,74 @@ export function buildStoreFactsSnapshot(params: {
       outsideDhakaFeeBdt: canonical.outsideDhakaFee,
       remoteDistrictFeeBdt: canonical.remoteDistrictFee,
       freeDeliveryThresholdBdt: canonical.freeDeliveryThreshold,
-      estimatedDhakaDays: settings.estimatedDhakaDays,
-      estimatedSuburbanDays:
-        settings.estimatedSuburbanDays || '2–3 Business Days (Dhaka Suburbs)',
-      estimatedOutsideDays: settings.estimatedOutsideDays,
-      estimatedRemoteDays:
-        settings.estimatedRemoteDays || '3–5 Business Days (Remote / Hill & Coastal)',
-      dispatchCutoffHourBst: Math.round(settings.dispatchCutoffHourBst ?? 14),
-      cutoffNoticeEn:
-        settings.cutoffNoticeEn || 'Orders confirmed before 2:00 PM BST dispatch same day.',
-      cutoffNoticeBn:
-        settings.cutoffNoticeBn || 'দুপুর ২টার (BST) আগে কনফার্ম হওয়া অর্ডার একই দিনে ডিসপ্যাচ হয়।',
-      policy: config.deliveryPolicy,
+      estimatedDhakaDays: isStoreFieldConfirmed(settings, 'estimatedDhakaDays')
+        ? settings.estimatedDhakaDays
+        : '',
+      estimatedSuburbanDays: isStoreFieldConfirmed(settings, 'estimatedSuburbanDays')
+        ? settings.estimatedSuburbanDays || ''
+        : '',
+      estimatedOutsideDays: isStoreFieldConfirmed(settings, 'estimatedOutsideDays')
+        ? settings.estimatedOutsideDays
+        : '',
+      estimatedRemoteDays: isStoreFieldConfirmed(settings, 'estimatedRemoteDays')
+        ? settings.estimatedRemoteDays || ''
+        : '',
+      dispatchCutoffHourBst,
+      cutoffNoticeEn: isStoreFieldConfirmed(settings, 'cutoffNoticeEn')
+        ? settings.cutoffNoticeEn || ''
+        : '',
+      cutoffNoticeBn: isStoreFieldConfirmed(settings, 'cutoffNoticeBn')
+        ? settings.cutoffNoticeBn || ''
+        : '',
+      policy: config.deliveryPolicy || '',
     },
     payments: {
       codAvailable: true,
-      bkashNumber: settings.bkashNumber,
-      nagadNumber: settings.nagadNumber,
+      bkashNumber: bkashConfigured ? settings.bkashNumber : '',
+      nagadNumber: nagadConfigured ? settings.nagadNumber : '',
+      bkashConfigured,
+      nagadConfigured,
       advanceDiscountPct: canonical.advanceDiscountPct,
-      otherPaymentInfo: config.otherPaymentInfo,
+      otherPaymentInfo: config.otherPaymentInfo || '',
     },
     contact: {
-      supportPhone: settings.supportPhone,
-      whatsappNumber: settings.whatsappNumber,
-      supportEmail: settings.supportEmail,
-      businessAddress: settings.businessAddress,
-      district: config.district,
-      city: config.city,
-      googleMapsUrl: config.googleMapsUrl,
-      directionsUrl: config.directionsUrl,
-      facebookUrl: settings.facebookUrl,
-      instagramUrl: settings.instagramUrl,
-      phoneConfigured: !isPlaceholderValue(settings.supportPhone),
-      whatsappConfigured: !isPlaceholderValue(settings.whatsappNumber),
+      supportPhone: hasValidRealPhone(settings.supportPhone) ? settings.supportPhone : '',
+      whatsappNumber: hasValidRealPhone(settings.whatsappNumber) ? settings.whatsappNumber : '',
+      supportEmail: isPlaceholderValue(settings.supportEmail) ? '' : settings.supportEmail,
+      businessAddress: isPlaceholderValue(settings.businessAddress) ? '' : settings.businessAddress,
+      district: config.district || '',
+      city: config.city || '',
+      googleMapsUrl: isPlaceholderValue(settings.googleMapsUrl || config.googleMapsUrl)
+        ? ''
+        : settings.googleMapsUrl || config.googleMapsUrl,
+      directionsUrl: isPlaceholderValue(config.directionsUrl) ? '' : config.directionsUrl,
+      facebookUrl: settings.facebookUrl || '',
+      instagramUrl: settings.instagramUrl || '',
+      phoneConfigured: hasValidRealPhone(settings.supportPhone),
+      whatsappConfigured: hasValidRealPhone(settings.whatsappNumber),
     },
     policies: {
-      returnPolicy: config.returnPolicy,
-      replacementPolicy: config.replacementPolicy,
+      returnPolicy: config.returnPolicy || '',
+      replacementPolicy: config.replacementPolicy || '',
     },
     craft: {
-      description: config.productDescription,
-      ingredients: config.ingredients,
-      taste: config.taste,
-      aroma: config.aroma,
-      texture: config.texture,
-      productionMethod: config.productionMethod,
-      shelfLife: config.shelfLife,
-      storageInstructions: config.storageInstructions,
+      description: config.productDescription || '',
+      ingredients: config.ingredients || '',
+      taste: config.taste || '',
+      aroma: config.aroma || '',
+      texture: config.texture || '',
+      productionMethod: config.productionMethod || '',
+      shelfLife: config.shelfLife || '',
+      storageInstructions: config.storageInstructions || '',
     },
     approvedClaims: config.approvedClaims || '',
     blockedClaims: config.blockedClaims || '',
     activeBatch: {
-      batchCode: batch.batchCode,
-      originDistrict: batch.originDistrict,
-      productionDate: batch.productionDate,
-      expiryDate: batch.expiryDate,
-      labReportStatus: batch.labReportStatus,
+      batchCode: batch?.batchCode || '',
+      originDistrict: batch?.originDistrict || '',
+      productionDate: batch?.productionDate || '',
+      expiryDate: batch?.expiryDate || '',
+      labReportStatus: batch?.labReportStatus || '',
     },
     conflicts,
   };

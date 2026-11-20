@@ -1,6 +1,12 @@
 import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
-import type { OrderRecord, PaymentMethod, WeightKey } from '../../../../src/lib/storeTypes';
+import {
+  getEffectiveMaxJarsPerOrder,
+  isStorefrontOrderingReady,
+  type OrderRecord,
+  type PaymentMethod,
+  type WeightKey,
+} from '../../../../src/lib/storeTypes';
 import {
   checkAndIncrementFirestoreRateLimit,
   checkRecentOrderFingerprint,
@@ -217,6 +223,27 @@ export async function POST(request: Request) {
     couponCode ? fetchServerCouponByCode(couponCode) : Promise.resolve(null),
   ]);
 
+  if (!isStorefrontOrderingReady(settings)) {
+    return localizedError(
+      uiLang,
+      'Ordering not available yet. Store prices and delivery fees have not been confirmed.',
+      'স্টোরের মূল্য ও ডেলিভারি চার্জ এখনো নির্ধারিত হয়নি। অর্ডার গ্রহণ সাময়িকভাবে বন্ধ আছে।',
+      503,
+      { code: 'ordering_not_available' }
+    );
+  }
+
+  const maxJarsAllowed = getEffectiveMaxJarsPerOrder(settings);
+  if (totalQty > maxJarsAllowed) {
+    return localizedError(
+      uiLang,
+      `Maximum ${maxJarsAllowed} jars per order. Please contact our team for bulk orders.`,
+      `এক অর্ডারে সর্বোচ্চ ${maxJarsAllowed}টি জার অর্ডার করা যাবে।`,
+      400,
+      { code: 'max_jars_exceeded', maxJarsAllowed }
+    );
+  }
+
   const pricing = computeOrderPricingInPoisha({
     settings,
     qty250g,
@@ -225,7 +252,7 @@ export async function POST(request: Request) {
     deliveryZone: zoneResolved.deliveryZone,
     paymentMethod,
     coupon,
-    maxTotalQty: 50,
+    maxTotalQty: maxJarsAllowed,
   });
 
   if (!pricing.stockSufficient) {

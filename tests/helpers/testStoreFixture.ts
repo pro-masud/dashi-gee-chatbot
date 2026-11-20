@@ -1,0 +1,97 @@
+// TEST FIXTURE ONLY — Never imported by production code under src/ or app/.
+// Provides explicitly confirmed store settings, batch record, and chatbot config
+// for unit/mock tests while production defaults in src/lib/storeTypes.ts remain strictly unset.
+
+import {
+  DEFAULT_STORE_SETTINGS,
+  type BatchRecord,
+  type StoreSettingsDoc,
+} from '../../src/lib/storeTypes';
+import {
+  DEFAULT_CHATBOT_CONFIG,
+  type ChatbotConfigDoc,
+} from '../../src/lib/chatbot/types';
+
+export const TEST_CONFIRMED_STORE_SETTINGS: StoreSettingsDoc = {
+  ...DEFAULT_STORE_SETTINGS,
+  price250g: 680,
+  price500g: 1290,
+  price1kg: 2480,
+  stock250g: 42,
+  stock500g: 36,
+  stock1kg: 20,
+  insideDhakaFee: 80,
+  dhakaSuburbanFee: 100,
+  outsideDhakaFee: 130,
+  remoteDistrictFee: 160,
+  freeDeliveryThreshold: 2500,
+  estimatedDhakaDays: '24–48 Hours (Inside Dhaka)',
+  estimatedSuburbanDays: '2–3 Business Days (Dhaka Suburbs)',
+  estimatedOutsideDays: '2–4 Business Days (Nationwide)',
+  estimatedRemoteDays: '3–5 Business Days (Remote)',
+  dispatchCutoffHourBst: 14,
+  cutoffNoticeEn: 'Orders confirmed before 2:00 PM BST dispatch same day.',
+  cutoffNoticeBn: 'দুপুর ২:০০টার আগে কনফার্ম হওয়া অর্ডার একই দিন ডিসপ্যাচ হয়।',
+  advanceDiscountPct: 5,
+  codHighValueThresholdBdt: 5000,
+  maxJarsPerOrder: 20,
+  bkashNumber: '01712345678',
+  nagadNumber: '01812345678',
+  whatsappNumber: '8801712345678',
+  supportPhone: '+880 1712-345678',
+  supportEmail: 'test-support@deshigee.example',
+  businessAddress: 'House 12, Road 4, Dhanmondi, Dhaka',
+  activeBatchCode: 'TEST-BATCH-001',
+  ownerConfirmedFields: {
+    price250g: true,
+    price500g: true,
+    price1kg: true,
+    stock250g: true,
+    stock500g: true,
+    stock1kg: true,
+    insideDhakaFee: true,
+    dhakaSuburbanFee: true,
+    outsideDhakaFee: true,
+    remoteDistrictFee: true,
+    freeDeliveryThreshold: true,
+    estimatedDhakaDays: true,
+    estimatedSuburbanDays: true,
+    estimatedOutsideDays: true,
+    estimatedRemoteDays: true,
+    dispatchCutoffHourBst: true,
+    advanceDiscountPct: true,
+    codHighValueThresholdBdt: true,
+    maxJarsPerOrder: true,
+    bkashNumber: true,
+    nagadNumber: true,
+    whatsappNumber: true,
+    supportPhone: true,
+    businessAddress: true,
+    activeBatchCode: true,
+  },
+};
+
+export const TEST_CONFIRMED_BATCH: BatchRecord = {
+  batchCode: 'TEST-BATCH-001',
+  originDistrict: 'Pabna Dairy Belt (Test Fixture)',
+  milkSource: 'Grass-Fed Native Cow Cultured Curd Bilona',
+  productionDate: '2026-03-01',
+  expiryDate: '2027-03-01',
+  labReportStatus: 'Test Fixture Batch Record',
+  labReportUrl: '',
+  licenceDetails: 'Test Fixture Licence',
+  active: true,
+};
+
+export const TEST_CONFIRMED_CHATBOT_CONFIG: ChatbotConfigDoc = {
+  ...DEFAULT_CHATBOT_CONFIG,
+  district: 'Dhaka',
+  city: 'Dhaka',
+  businessHours: '9:00 AM – 10:00 PM (BST)',
+  closedDays: 'Open Daily',
+  deliveryPolicy: 'Inside Dhaka 24–48 Hours; Nationwide 2–4 Business Days (Test Fixture).',
+  returnPolicy: 'Unopened jars may be reviewed for return within 7 days (Test Fixture).',
+  replacementPolicy: 'Damaged jars are reviewed by support with unboxing photo (Test Fixture).',
+  shelfLife: '12 months sealed at room temperature (Test Fixture).',
+  approvedClaims: 'Cultured curd-churned bilona process; small-batch glass jar packaging',
+};

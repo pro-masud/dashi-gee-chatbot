@@ -24,7 +24,6 @@ import {
 } from 'lucide-react';
 import {
   BatchRecord,
-  DEFAULT_ACTIVE_BATCH,
   DEFAULT_STORE_SETTINGS,
   OrderRecord,
   ReviewRecord,
@@ -33,6 +32,10 @@ import {
   fetchApprovedReviews,
   fetchBatchRecord,
   fetchStoreSettings,
+  hasValidRealContact,
+  hasValidRealPhone,
+  hasValidRealUrl,
+  isStoreFieldConfirmed,
   testFirestoreConnection,
 } from '../lib/firebase';
 import { Lang, formatBdt } from '../data/deshiGeeData';
@@ -48,6 +51,7 @@ import { ChatWidget } from './chatbot/ChatWidget';
 const STORAGE_CART_KEY = 'deshi_gee_single_cart_v1';
 const STORAGE_LANG_KEY = 'deshi_gee_lang_v1';
 const STORAGE_LAST_ORDER_KEY = 'deshi_gee_last_confirmed_v1';
+const ENABLE_POLICY_DRAFTS = process.env.NEXT_PUBLIC_ENABLE_POLICY_DRAFTS === 'true';
 
 type PolicyKey = 'delivery' | 'return' | 'privacy' | 'terms' | null;
 
@@ -56,7 +60,7 @@ interface StorefrontContextValue {
   setLang: Dispatch<SetStateAction<Lang>>;
   settings: StoreSettingsDoc;
   setSettings: Dispatch<SetStateAction<StoreSettingsDoc>>;
-  activeBatch: BatchRecord;
+  activeBatch: BatchRecord | null;
   qrCodeUrl: string;
   reviews: ReviewRecord[];
   setReviews: Dispatch<SetStateAction<ReviewRecord[]>>;
@@ -73,6 +77,7 @@ interface StorefrontContextValue {
   chatbotConfig: ChatbotConfigDoc;
   setChatbotConfig: Dispatch<SetStateAction<ChatbotConfigDoc>>;
   openChatAssistant: () => void;
+  openCallbackRequest: () => void;
 }
 
 const StorefrontContext = createContext<StorefrontContextValue | null>(null);
@@ -108,10 +113,7 @@ export function StorefrontProvider({
   const [chatbotConfig, setChatbotConfig] = useState<ChatbotConfigDoc>(
     DEFAULT_CHATBOT_CONFIG
   );
-  const [activeBatch, setActiveBatch] = useState<BatchRecord>({
-    ...DEFAULT_ACTIVE_BATCH,
-    batchCode: resolvedInitialSettings.activeBatchCode || DEFAULT_ACTIVE_BATCH.batchCode,
-  });
+  const [activeBatch, setActiveBatch] = useState<BatchRecord | null>(null);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const [reviews, setReviews] = useState<ReviewRecord[]>([]);
 
@@ -119,6 +121,12 @@ export function StorefrontProvider({
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
   const [policyModal, setPolicyModal] = useState<PolicyKey>(null);
+  const [callbackModalOpen, setCallbackModalOpen] = useState<boolean>(false);
+  const [cbName, setCbName] = useState('');
+  const [cbPhone, setCbPhone] = useState('');
+  const [cbNote, setCbNote] = useState('');
+  const [cbBusy, setCbBusy] = useState(false);
+  const [cbResult, setCbResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
   const [trackPrefill, setTrackPrefill] = useState<{ order: string; phone: string }>({
     order: '',
@@ -137,6 +145,11 @@ export function StorefrontProvider({
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('deshi-gee-open-chat'));
     }
+  }, []);
+
+  const openCallbackRequest = useCallback(() => {
+    setCbResult(null);
+    setCallbackModalOpen(true);
   }, []);
 
   // Hydrate persisted client preferences cleanly after mount to prevent SSR hydration mismatch
@@ -213,19 +226,24 @@ export function StorefrontProvider({
         setReviews(loadedReviews);
         setChatbotConfig(loadedChatbot);
 
-        const batchRec = await fetchBatchRecord(loadedSettings.activeBatchCode);
-        const resolvedBatch = batchRec || DEFAULT_ACTIVE_BATCH;
-        setActiveBatch(resolvedBatch);
+        const batchRec = loadedSettings.activeBatchCode
+          ? await fetchBatchRecord(loadedSettings.activeBatchCode)
+          : null;
+        setActiveBatch(batchRec && batchRec.batchCode ? batchRec : null);
 
-        const qrLink = `${window.location.origin}/batch?code=${encodeURIComponent(
-          resolvedBatch.batchCode
-        )}`;
-        const qrData = await QRCode.toDataURL(qrLink, {
-          width: 200,
-          margin: 1,
-          color: { dark: '#1E1710', light: '#FAF7F2' },
-        });
-        setQrCodeUrl(qrData);
+        if (batchRec && batchRec.batchCode) {
+          const qrLink = `${window.location.origin}/batch?code=${encodeURIComponent(
+            batchRec.batchCode
+          )}`;
+          const qrData = await QRCode.toDataURL(qrLink, {
+            width: 200,
+            margin: 1,
+            color: { dark: '#1E1710', light: '#FAF7F2' },
+          });
+          setQrCodeUrl(qrData);
+        } else {
+          setQrCodeUrl('');
+        }
       } catch {
         // Fallback / SSR initial settings remain active cleanly
       } finally {
@@ -379,14 +397,79 @@ export function StorefrontProvider({
   }, []);
 
   const totalBagCount = cart.reduce((s, c) => s + c.qty, 0);
-  const whatsappDigits = settings.whatsappNumber.replace(/[^0-9]/g, '');
+  const phoneConfigured = hasValidRealPhone(settings.supportPhone);
+  const whatsappConfigured = hasValidRealPhone(settings.whatsappNumber);
+  const emailConfigured = hasValidRealContact(settings.supportEmail);
+  const addressConfigured = hasValidRealContact(settings.businessAddress);
+  const mapsConfigured = hasValidRealUrl(settings.googleMapsUrl);
+  const hasAnyDirectContact =
+    phoneConfigured || whatsappConfigured || emailConfigured || addressConfigured;
+  const freeThresholdConfirmed =
+    isStoreFieldConfirmed(settings, 'freeDeliveryThreshold') &&
+    settings.freeDeliveryThreshold > 0;
+
+  const whatsappDigits = whatsappConfigured
+    ? settings.whatsappNumber.replace(/[^0-9]/g, '')
+    : '';
   const whatsappChatHref = whatsappDigits
     ? `https://wa.me/${whatsappDigits}?text=${encodeURIComponent(
         bn
           ? 'আসসালামু আলাইকুম, দেশী ঘি সম্পর্কে জানতে চাই।'
           : 'Assalamu Alaikum, I would like to inquire about Deshi Gee.'
       )}`
-    : `https://wa.me/?text=${encodeURIComponent('Hello Deshi Gee')}`;
+    : '';
+
+  const handleSubmitCallback = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCbBusy(true);
+    setCbResult(null);
+    try {
+      const res = await fetch('/api/support/ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+        },
+        body: JSON.stringify({
+          customerName: cbName.trim(),
+          phone: cbPhone.trim(),
+          category: 'general',
+          issueSummary:
+            cbNote.trim() ||
+            (bn ? 'স্টোরফ্রন্ট থেকে কলব্যাক অনুরোধ' : 'Storefront callback request'),
+          consentGranted: true,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCbResult({
+          ok: false,
+          msg:
+            data.error ||
+            (bn
+              ? 'অনুরোধ জমা দেওয়া যায়নি। সঠিক মোবাইল নম্বর (01XXXXXXXXX) দিন।'
+              : 'Could not submit request. Please enter a valid BD mobile number (01XXXXXXXXX).'),
+        });
+      } else {
+        setCbResult({
+          ok: true,
+          msg: bn
+            ? `আপনার কলব্যাক অনুরোধ গৃহীত হয়েছে (${data.ticketNumber || 'Ticket'})। আমাদের টিম যোগাযোগ করবে।`
+            : `Callback request received (${data.ticketNumber || 'Ticket'}). Our team will reach out.`,
+        });
+        setCbName('');
+        setCbPhone('');
+        setCbNote('');
+      }
+    } catch {
+      setCbResult({
+        ok: false,
+        msg: bn ? 'নেটওয়ার্ক ত্রুটি হয়েছে, আবার চেষ্টা করুন।' : 'Network error. Please try again.',
+      });
+    } finally {
+      setCbBusy(false);
+    }
+  };
 
   return (
     <StorefrontContext.Provider
@@ -412,6 +495,7 @@ export function StorefrontProvider({
         chatbotConfig,
         setChatbotConfig,
         openChatAssistant,
+        openCallbackRequest,
       }}
     >
       {isAdminRoute ? (
@@ -440,12 +524,16 @@ export function StorefrontProvider({
               </div>
 
               <div className="hidden shrink-0 items-center gap-4 text-[11px] text-[#C5B8A5] lg:flex">
-                <span className="tabular-nums">
-                  {bn
-                    ? `ফ্রি ডেলিভারি ${formatBdt(settings.freeDeliveryThreshold)}+ অর্ডারে`
-                    : `Free Delivery on Orders ${formatBdt(settings.freeDeliveryThreshold)}+`}
-                </span>
-                <span className="text-[#B47B2B]">·</span>
+                {freeThresholdConfirmed && (
+                  <>
+                    <span className="tabular-nums">
+                      {bn
+                        ? `ফ্রি ডেলিভারি ${formatBdt(settings.freeDeliveryThreshold)}+ অর্ডারে`
+                        : `Free Delivery on Orders ${formatBdt(settings.freeDeliveryThreshold)}+`}
+                    </span>
+                    <span className="text-[#B47B2B]">·</span>
+                  </>
+                )}
                 <Link
                   href="/track"
                   className="text-[#E8DFC5] underline decoration-[#B47B2B]/40 underline-offset-2 transition-colors hover:text-[#FAF7F2]"
@@ -649,16 +737,30 @@ export function StorefrontProvider({
                     >
                       {bn ? 'ব্যাচ যাচাই' : 'Verify Batch'}
                     </Link>
-                    <a
-                      href={whatsappChatHref}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={() => setMobileMenuOpen(false)}
-                      className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-2.5 font-medium text-[#8A5A17] hover:bg-[#F2ECE1]"
-                    >
-                      <MessageCircle className="h-4 w-4" />
-                      <span>{bn ? 'হোয়াটসঅ্যাপ' : 'WhatsApp'}</span>
-                    </a>
+                    {whatsappConfigured ? (
+                      <a
+                        href={whatsappChatHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-2.5 font-medium text-[#8A5A17] hover:bg-[#F2ECE1]"
+                      >
+                        <MessageCircle className="h-4 w-4" />
+                        <span>{bn ? 'হোয়াটসঅ্যাপ' : 'WhatsApp'}</span>
+                      </a>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          openCallbackRequest();
+                        }}
+                        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-2.5 text-left font-medium text-[#8A5A17] hover:bg-[#F2ECE1]"
+                      >
+                        <MessageCircle className="h-4 w-4" />
+                        <span>{bn ? 'কলব্যাক অনুরোধ' : 'Request Callback'}</span>
+                      </button>
+                    )}
                     <Link
                       href="/admin"
                       onClick={() => setMobileMenuOpen(false)}
@@ -698,7 +800,7 @@ export function StorefrontProvider({
                   <div className="flex flex-wrap items-center gap-2.5 pt-2 text-xs text-[#E5B25D]">
                     <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#D4AF37]/30 bg-[#261B12] px-3 py-1.5">
                       <ShieldCheck className="h-3.5 w-3.5 text-[#D4AF37]" />
-                      {bn ? '১০০% পরীক্ষিত খাঁটি ঘি' : '100% Lab Tested Purity'}
+                      {bn ? 'কাঁচের এয়ারটাইট বয়াম' : 'Sealed Apothecary Glass'}
                     </span>
                     <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#D4AF37]/30 bg-[#261B12] px-3 py-1.5">
                       <Sparkles className="h-3.5 w-3.5 text-[#D4AF37]" />
@@ -764,80 +866,136 @@ export function StorefrontProvider({
                   </ul>
                 </div>
 
-                {/* Policies */}
+                {/* Policies (D10: gated behind feature flag as DRAFT until owner reviews) */}
                 <div className="space-y-3 lg:col-span-2">
                   <p className="font-mono text-xs font-semibold uppercase tracking-widest text-[#FAF7F2]">
                     {bn ? 'নীতিমালা' : 'Policies'}
                   </p>
-                  <ul className="space-y-1 text-xs">
-                    <li>
-                      <button
-                        type="button"
-                        onClick={(e) => openPolicy('delivery', e.currentTarget)}
-                        className="inline-flex min-h-[36px] items-center text-left text-[#C5B8A5] transition-colors hover:text-[#FAF7F2]"
-                      >
-                        {bn ? 'ডেলিভারি নীতিমালা' : 'Delivery Policy'}
-                      </button>
-                    </li>
-                    <li>
-                      <button
-                        type="button"
-                        onClick={(e) => openPolicy('return', e.currentTarget)}
-                        className="inline-flex min-h-[36px] items-center text-left text-[#C5B8A5] transition-colors hover:text-[#FAF7F2]"
-                      >
-                        {bn ? 'রিটার্ন ও রিফান্ড' : 'Return & Refund'}
-                      </button>
-                    </li>
-                    <li>
-                      <button
-                        type="button"
-                        onClick={(e) => openPolicy('privacy', e.currentTarget)}
-                        className="inline-flex min-h-[36px] items-center text-left text-[#C5B8A5] transition-colors hover:text-[#FAF7F2]"
-                      >
-                        {bn ? 'প্রাইভেসি পলিসি' : 'Privacy Policy'}
-                      </button>
-                    </li>
-                    <li>
-                      <button
-                        type="button"
-                        onClick={(e) => openPolicy('terms', e.currentTarget)}
-                        className="inline-flex min-h-[36px] items-center text-left text-[#C5B8A5] transition-colors hover:text-[#FAF7F2]"
-                      >
-                        {bn ? 'শর্তাবলী' : 'Terms of Service'}
-                      </button>
-                    </li>
-                  </ul>
+                  {ENABLE_POLICY_DRAFTS ? (
+                    <ul className="space-y-1 text-xs">
+                      <li>
+                        <button
+                          type="button"
+                          onClick={(e) => openPolicy('delivery', e.currentTarget)}
+                          className="inline-flex min-h-[36px] items-center text-left text-[#C5B8A5] transition-colors hover:text-[#FAF7F2]"
+                        >
+                          {bn ? 'ডেলিভারি নীতিমালা (খসড়া)' : 'Delivery Policy (Draft)'}
+                        </button>
+                      </li>
+                      <li>
+                        <button
+                          type="button"
+                          onClick={(e) => openPolicy('return', e.currentTarget)}
+                          className="inline-flex min-h-[36px] items-center text-left text-[#C5B8A5] transition-colors hover:text-[#FAF7F2]"
+                        >
+                          {bn ? 'রিটার্ন ও রিফান্ড (খসড়া)' : 'Return & Refund (Draft)'}
+                        </button>
+                      </li>
+                      <li>
+                        <button
+                          type="button"
+                          onClick={(e) => openPolicy('privacy', e.currentTarget)}
+                          className="inline-flex min-h-[36px] items-center text-left text-[#C5B8A5] transition-colors hover:text-[#FAF7F2]"
+                        >
+                          {bn ? 'প্রাইভেসি পলিসি (খসড়া)' : 'Privacy Policy (Draft)'}
+                        </button>
+                      </li>
+                      <li>
+                        <button
+                          type="button"
+                          onClick={(e) => openPolicy('terms', e.currentTarget)}
+                          className="inline-flex min-h-[36px] items-center text-left text-[#C5B8A5] transition-colors hover:text-[#FAF7F2]"
+                        >
+                          {bn ? 'শর্তাবলী (খসড়া)' : 'Terms of Service (Draft)'}
+                        </button>
+                      </li>
+                    </ul>
+                  ) : (
+                    <p className="text-xs leading-relaxed text-[#8A7867]">
+                      {bn
+                        ? 'স্টোরের চূড়ান্ত নীতিমালা মালিকের অনুমোদনের পর এখানে প্রকাশিত হবে।'
+                        : 'Final store policies will be published here once confirmed by the store owner.'}
+                    </p>
+                  )}
                 </div>
 
-                {/* Direct Support & Address */}
+                {/* Direct Support & Address (D17 / D18: hide unset contacts; offer callback ticket) */}
                 <div className="space-y-3 sm:col-span-2 lg:col-span-3">
                   <p className="font-mono text-xs font-semibold uppercase tracking-widest text-[#FAF7F2]">
                     {bn ? 'যোগাযোগ ও সাপোর্ট' : 'Customer Care'}
                   </p>
-                  <div className="space-y-2 text-xs text-[#C5B8A5]">
-                    <p>
-                      <span className="text-[#8A7867]">{bn ? 'ফোন:' : 'Phone:'}</span>{' '}
-                      <span className="font-mono text-[#FAF7F2] tabular-nums">
-                        {settings.supportPhone}
-                      </span>
-                    </p>
-                    <p>
-                      <span className="text-[#8A7867]">WhatsApp:</span>{' '}
-                      <span className="font-mono text-[#FAF7F2] tabular-nums">
-                        {settings.whatsappNumber}
-                      </span>
-                    </p>
-                    <p>
-                      <span className="text-[#8A7867]">Email:</span>{' '}
-                      <span className="text-[#FAF7F2]">{settings.supportEmail}</span>
-                    </p>
-                    <p className="pt-1 leading-relaxed text-[#8A7867]">
-                      {settings.businessAddress}
-                    </p>
-                  </div>
+                  {hasAnyDirectContact ? (
+                    <div className="space-y-2 text-xs text-[#C5B8A5]">
+                      {phoneConfigured && (
+                        <p>
+                          <span className="text-[#8A7867]">{bn ? 'ফোন:' : 'Phone:'}</span>{' '}
+                          <a
+                            href={`tel:${settings.supportPhone.replace(/[^0-9+]/g, '')}`}
+                            className="font-mono text-[#FAF7F2] tabular-nums hover:underline"
+                          >
+                            {settings.supportPhone}
+                          </a>
+                        </p>
+                      )}
+                      {whatsappConfigured && (
+                        <p>
+                          <span className="text-[#8A7867]">WhatsApp:</span>{' '}
+                          <a
+                            href={whatsappChatHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-mono text-[#FAF7F2] tabular-nums hover:underline"
+                          >
+                            {settings.whatsappNumber}
+                          </a>
+                        </p>
+                      )}
+                      {emailConfigured && (
+                        <p>
+                          <span className="text-[#8A7867]">Email:</span>{' '}
+                          <a
+                            href={`mailto:${settings.supportEmail}`}
+                            className="text-[#FAF7F2] hover:underline"
+                          >
+                            {settings.supportEmail}
+                          </a>
+                        </p>
+                      )}
+                      {addressConfigured && (
+                        <p className="pt-1 leading-relaxed text-[#8A7867]">
+                          {settings.businessAddress}
+                        </p>
+                      )}
+                      {mapsConfigured && (
+                        <a
+                          href={settings.googleMapsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-h-[36px] items-center text-xs text-[#E5B25D] hover:underline"
+                        >
+                          {bn ? 'গুগল ম্যাপে দেখুন ↗' : 'View on Google Maps ↗'}
+                        </a>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5 text-xs text-[#C5B8A5]">
+                      <p className="leading-relaxed text-[#8A7867]">
+                        {bn
+                          ? 'যেকোনো প্রশ্ন বা অর্ডার সহায়তার জন্য কলব্যাক অনুরোধ পাঠান—আমাদের টিম যোগাযোগ করবে।'
+                          : 'Need help with an order or inquiry? Submit a callback request and our team will reach out.'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={openCallbackRequest}
+                        className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-[#D4AF37]/40 bg-[#261B12] px-4 py-2 text-xs font-semibold text-[#F5D692] transition-colors hover:bg-[#332415]"
+                      >
+                        {bn ? 'কলব্যাক অনুরোধ করুন' : 'Request a Callback'}
+                      </button>
+                    </div>
+                  )}
 
                   <div className="flex gap-4 pt-2">
-                    {settings.facebookUrl && (
+                    {hasValidRealUrl(settings.facebookUrl) && (
                       <a
                         href={settings.facebookUrl}
                         target="_blank"
@@ -847,7 +1005,7 @@ export function StorefrontProvider({
                         Facebook ↗
                       </a>
                     )}
-                    {settings.instagramUrl && (
+                    {hasValidRealUrl(settings.instagramUrl) && (
                       <a
                         href={settings.instagramUrl}
                         target="_blank"
@@ -876,17 +1034,19 @@ export function StorefrontProvider({
             </div>
           </footer>
 
-          {/* FLOATING WHATSAPP CUSTOMER SUPPORT (Desktop / Tablet, clear of the AI launcher) */}
-          <a
-            href={whatsappChatHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={bn ? 'হোয়াটসঅ্যাপ সাপোর্ট' : 'WhatsApp Customer Support'}
-            className="no-print fixed right-6 bottom-[92px] z-20 hidden h-11 items-center gap-2 rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2]/95 px-4 text-xs font-medium text-[#1E1710] shadow-md backdrop-blur-sm transition-transform hover:scale-[1.03] md:inline-flex"
-          >
-            <MessageCircle className="h-4 w-4 text-[#8A5A17]" />
-            <span>{bn ? 'হোয়াটসঅ্যাপ' : 'WhatsApp'}</span>
-          </a>
+          {/* FLOATING WHATSAPP CUSTOMER SUPPORT — ONLY WHEN REAL WHATSAPP NUMBER IS CONFIGURED (D18) */}
+          {whatsappConfigured && (
+            <a
+              href={whatsappChatHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={bn ? 'হোয়াটসঅ্যাপ সাপোর্ট' : 'WhatsApp Customer Support'}
+              className="no-print fixed right-6 bottom-[92px] z-20 hidden h-11 items-center gap-2 rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2]/95 px-4 text-xs font-medium text-[#1E1710] shadow-md backdrop-blur-sm transition-transform hover:scale-[1.03] md:inline-flex"
+            >
+              <MessageCircle className="h-4 w-4 text-[#8A5A17]" />
+              <span>{bn ? 'হোয়াটসঅ্যাপ' : 'WhatsApp'}</span>
+            </a>
+          )}
 
           {/* DESHI GEE AI CUSTOMER SUPPORT CHATBOT */}
           <ChatWidget
@@ -900,8 +1060,101 @@ export function StorefrontProvider({
             }}
           />
 
-          {/* BILINGUAL POLICY MODAL */}
-          {policyModal && (
+          {/* REQUEST A CALLBACK TICKET MODAL (D17) */}
+          {callbackModalOpen && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="callback-modal-title"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-[#1E1710]/50 p-4 backdrop-blur-xs"
+              onClick={() => setCallbackModalOpen(false)}
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="w-full max-w-md rounded-2xl border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] p-5 shadow-2xl sm:p-6"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <h3
+                    id="callback-modal-title"
+                    className="font-display text-lg font-semibold text-[#1E1710]"
+                  >
+                    {bn ? 'কলব্যাক অনুরোধ করুন' : 'Request a Callback'}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setCallbackModalOpen(false)}
+                    aria-label={bn ? 'বন্ধ করুন' : 'Close dialog'}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[rgba(30,23,16,0.12)] hover:bg-[#F2ECE1]"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <form onSubmit={handleSubmitCallback} className="mt-4 space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-[#635647]">
+                      {bn ? 'আপনার নাম *' : 'Your Name *'}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={cbName}
+                      onChange={(e) => setCbName(e.target.value)}
+                      className="mt-1 min-h-[44px] w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base text-[#1E1710] sm:text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#635647]">
+                      {bn ? 'মোবাইল নম্বর (01XXXXXXXXX) *' : 'Mobile Number (01XXXXXXXXX) *'}
+                    </label>
+                    <input
+                      type="tel"
+                      inputMode="tel"
+                      required
+                      value={cbPhone}
+                      onChange={(e) => setCbPhone(e.target.value)}
+                      placeholder="017XXXXXXXX"
+                      className="mt-1 min-h-[44px] w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 font-mono text-base text-[#1E1710] sm:text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#635647]">
+                      {bn ? 'সংক্ষিপ্ত বার্তা' : 'Short Message'}
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={cbNote}
+                      onChange={(e) => setCbNote(e.target.value)}
+                      placeholder={bn ? 'আপনার প্রশ্ন বা অর্ডারের বিষয় লিখুন' : 'How can we help you?'}
+                      className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base text-[#1E1710] sm:text-sm"
+                    />
+                  </div>
+                  {cbResult && (
+                    <p
+                      className={`text-xs font-medium ${
+                        cbResult.ok ? 'text-[#2D6A4F]' : 'text-red-700'
+                      }`}
+                    >
+                      {cbResult.msg}
+                    </p>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={cbBusy}
+                    className="min-h-[46px] w-full rounded-xl bg-[#1A120B] px-5 py-2.5 text-sm font-semibold text-[#FAF7F2] hover:bg-[#332415] disabled:opacity-50"
+                  >
+                    {cbBusy
+                      ? '...'
+                      : bn
+                        ? 'কলব্যাক অনুরোধ পাঠান'
+                        : 'Submit Callback Request'}
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* BILINGUAL POLICY MODAL (D10: DRAFT — OWNER REVIEW REQUIRED) */}
+          {ENABLE_POLICY_DRAFTS && policyModal && (
             <div
               role="dialog"
               aria-modal="true"
@@ -913,19 +1166,24 @@ export function StorefrontProvider({
                 onClick={(e) => e.stopPropagation()}
                 className="max-h-[85dvh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-2xl border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] p-5 shadow-2xl sm:p-6"
               >
+                <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+                  {bn
+                    ? 'খসড়া — মালিকের অনুমোদন প্রয়োজন (DRAFT – owner review required)'
+                    : 'DRAFT – owner review required before publishing as final store policy.'}
+                </div>
                 <div className="flex items-center justify-between gap-3">
                   <h3
                     id="policy-modal-title"
                     className="font-display text-lg font-semibold text-[#1E1710] sm:text-xl"
                   >
                     {policyModal === 'delivery' &&
-                      (bn ? 'ডেলিভারি নীতিমালা' : 'Delivery Policy')}
+                      (bn ? 'ডেলিভারি নীতিমালা (খসড়া)' : 'Delivery Policy (Draft)')}
                     {policyModal === 'return' &&
-                      (bn ? 'রিটার্ন ও রিফান্ড নীতিমালা' : 'Return & Refund Policy')}
+                      (bn ? 'রিটার্ন ও রিফান্ড নীতিমালা (খসড়া)' : 'Return & Refund Policy (Draft)')}
                     {policyModal === 'privacy' &&
-                      (bn ? 'প্রাইভেসি পলিসি' : 'Privacy Policy')}
+                      (bn ? 'প্রাইভেসি পলিসি (খসড়া)' : 'Privacy Policy (Draft)')}
                     {policyModal === 'terms' &&
-                      (bn ? 'শর্তাবলী' : 'Terms & Conditions')}
+                      (bn ? 'শর্তাবলী (খসড়া)' : 'Terms & Conditions (Draft)')}
                   </h3>
                   <button
                     ref={policyCloseBtnRef}
@@ -940,20 +1198,20 @@ export function StorefrontProvider({
                 <p className="mt-4 text-sm leading-relaxed text-[#635647]">
                   {policyModal === 'delivery' &&
                     (bn
-                      ? `ঢাকার ভেতরে ডেলিভারি চার্জ ${formatBdt(settings.insideDhakaFee)} (${settings.estimatedDhakaDays})। ঢাকার বাইরে ${formatBdt(settings.outsideDhakaFee)} (${settings.estimatedOutsideDays})। ${formatBdt(settings.freeDeliveryThreshold)} বা তার বেশি অর্ডারে সারাদেশে ফ্রি ডেলিভারি।`
-                      : `Inside Dhaka: ${formatBdt(settings.insideDhakaFee)} (${settings.estimatedDhakaDays}). Outside Dhaka: ${formatBdt(settings.outsideDhakaFee)} (${settings.estimatedOutsideDays}). Orders of ${formatBdt(settings.freeDeliveryThreshold)} or above qualify for free delivery.`)}
+                      ? 'ডেলিভারি চার্জ ও সম্ভাব্য সময় চেকআউটে প্রদর্শিত মালিক-অনুমোদিত সেটিংস অনুযায়ী প্রযোজ্য।'
+                      : 'Delivery fees and estimated timelines follow the owner-confirmed rates shown live at checkout.')}
                   {policyModal === 'return' &&
                     (bn
-                      ? 'আপনার কাঁচের জারটি যদি ফাটা, লিক হওয়া বা টেম্পার সিল নষ্ট অবস্থায় পৌঁছায়, তবে ডেলিভারির ২৪ ঘণ্টার মধ্যে ছবি সহ আমাদের WhatsApp অথবা ট্র্যাক অর্ডার সাপোর্টে জানালে আমরা তাৎক্ষণিক রিপ্লেসমেন্ট বা রিফান্ড দেব।'
-                      : 'If your glass jar arrives cracked, leaking, or with a compromised tamper seal, message us on WhatsApp or open a Track Order support ticket with a photo within 24 hours of delivery for an immediate replacement or refund.')}
+                      ? 'ক্ষতিগ্রস্ত বা সিল খোলা পার্সেল পেলে ছবি সহ আমাদের সাপোর্ট টিমের সাথে যোগাযোগ করুন। রিটার্ন/রিফান্ড সিদ্ধান্ত মালিক-অনুমোদিত নীতিমালা অনুযায়ী টিম পর্যালোচনা করবে।'
+                      : 'If a jar arrives damaged or with an open tamper seal, contact support with a photo for review under our owner-confirmed policy.')}
                   {policyModal === 'privacy' &&
                     (bn
-                      ? 'ক্রেতাদের মোবাইল নম্বর ও ডেলিভারি ঠিকানা শুধুমাত্র অর্ডার ডেলিভারি ও যাচাইয়ের জন্য সংরক্ষণ করা হয়। অর্ডার ট্র্যাকিং পেজে কখনোই ব্যক্তিগত ঠিকানা বা সম্পূর্ণ নাম প্রকাশ করা হয় না।'
-                      : 'Customer phone numbers and delivery addresses are stored strictly for order fulfillment and verification. Public order tracking never exposes personal addresses or full names.')}
+                      ? 'ক্রেতাদের নাম, মোবাইল নম্বর ও ডেলিভারি ঠিকানা শুধুমাত্র অর্ডার ডেলিভারি, সাপোর্ট এবং যাচাইয়ের জন্য সংরক্ষণ করা হয়। চ্যাট ও অর্ডার ডেটা সংরক্ষণের সময়সীমা অ্যাডমিন সেটিংস অনুযায়ী নির্ধারিত।'
+                      : 'Customer names, phone numbers, delivery addresses, and chat transcripts are used solely for fulfillment and support, subject to store retention settings.')}
                   {policyModal === 'terms' &&
                     (bn
-                      ? 'সকল মূল্য বাংলাদেশি টাকায় (BDT) প্রদর্শিত। বিকাশ বা নগদ অগ্রিম পেমেন্টের ক্ষেত্রে আমাদের টিম ট্রানজেকশন যাচাই করার পর অর্ডার নিশ্চিত করা হয়।'
-                      : 'All prices are listed in Bangladeshi Taka (BDT). Mobile financial service payments (bKash/Nagad) remain pending verification until matched by our team.')}
+                      ? 'সকল মূল্য বাংলাদেশি টাকায় (BDT) প্রদর্শিত। মোবাইল পেমেন্ট আমাদের টিম যাচাই করার পর চূড়ান্ত নিশ্চিত হয়।'
+                      : 'All confirmed prices are listed in Bangladeshi Taka (BDT). Mobile payments remain pending verification until confirmed by our team.')}
                 </p>
               </div>
             </div>

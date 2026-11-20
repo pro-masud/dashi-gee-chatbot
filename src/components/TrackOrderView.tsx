@@ -227,8 +227,8 @@ export function TrackOrderView({
     if (!/^DG-[0-9]{4,8}$/.test(cleanOrd)) {
       setErrorMsg(
         bn
-          ? 'সঠিক অর্ডার নম্বর দিন (যেমন DG-1042)।'
-          : 'Enter a valid Order ID (e.g. DG-1042).'
+          ? 'সঠিক অর্ডার নম্বর দিন (যেমন DG-XXXXX)।'
+          : 'Enter a valid Order ID (e.g. DG-XXXXX).'
       );
       return;
     }
@@ -701,7 +701,7 @@ export function TrackOrderView({
             type="text"
             value={orderInput}
             onChange={(e) => setOrderInput(e.target.value.toUpperCase())}
-            placeholder="DG-1042"
+            placeholder="DG-XXXXX"
             className="mt-1.5 w-full rounded-xl border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-4 py-2.5 font-mono text-base uppercase text-[#1E1710] shadow-xs focus:border-[#B47B2B] focus:outline-none sm:text-sm"
           />
         </div>
@@ -756,7 +756,7 @@ export function TrackOrderView({
           </h2>
           <p className="mt-1.5 max-w-md text-sm text-[#635647]">
             {bn
-              ? 'দয়া করে আপনার অর্ডার আইডি (যেমন DG-1042) এবং অর্ডারের সময় ব্যবহৃত মোবাইল নম্বর মিলিয়ে আবার চেষ্টা করুন।'
+              ? 'দয়া করে আপনার অর্ডার আইডি এবং অর্ডারের সময় ব্যবহৃত মোবাইল নম্বর মিলিয়ে আবার চেষ্টা করুন।'
               : 'Double-check your Order ID and the exact 11-digit mobile number entered at checkout.'}
           </p>
         </div>

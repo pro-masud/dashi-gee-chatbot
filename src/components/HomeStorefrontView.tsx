@@ -43,6 +43,9 @@ import { initSpecsCanvas } from '../webgl/specsCanvas';
 import {
   ReviewRecord,
   WeightKey,
+  getConfirmedPriceForWeight,
+  isStoreFieldConfirmed,
+  isStorefrontOrderingReady,
   incrementReviewHelpful,
   submitCustomerReview,
   subscribeNewsletterEmail,
@@ -75,6 +78,7 @@ export function HomeStorefrontView() {
     setDrawerOpen,
     chatbotConfig,
     openChatAssistant,
+    openCallbackRequest,
   } = useStorefront();
 
   const [selectedWeight, setSelectedWeight] = useState<WeightKey>('500g');
@@ -277,22 +281,21 @@ export function HomeStorefrontView() {
     };
   }, []);
 
+  const orderingReady = isStorefrontOrderingReady(settings);
+
   const getPriceForWeight = useCallback(
-    (w: WeightKey): number => {
-      if (w === '250g') return settings.price250g;
-      if (w === '500g') return settings.price500g;
-      return settings.price1kg;
-    },
+    (w: WeightKey): number => getConfirmedPriceForWeight(settings, w) ?? 0,
     [settings]
   );
 
   const getStockForWeight = useCallback(
     (w: WeightKey): number => {
-      if (w === '250g') return settings.stock250g;
-      if (w === '500g') return settings.stock500g;
-      return settings.stock1kg;
+      if (!orderingReady) return 0;
+      if (w === '250g') return Math.max(0, Math.round(settings.stock250g || 0));
+      if (w === '500g') return Math.max(0, Math.round(settings.stock500g || 0));
+      return Math.max(0, Math.round(settings.stock1kg || 0));
     },
-    [settings]
+    [settings, orderingReady]
   );
 
   const selectedVariantMeta = useMemo(
@@ -302,7 +305,20 @@ export function HomeStorefrontView() {
 
   const activePrice = getPriceForWeight(selectedWeight);
   const activeStock = getStockForWeight(selectedWeight);
-  const isOutOfStock = activeStock <= 0;
+  const isVariantUnavailable = !orderingReady || activePrice <= 0;
+  const isOutOfStock = isVariantUnavailable || activeStock <= 0;
+  const confirmedPricesList = [
+    getConfirmedPriceForWeight(settings, '250g'),
+    getConfirmedPriceForWeight(settings, '500g'),
+    getConfirmedPriceForWeight(settings, '1kg'),
+  ].filter((p): p is number => p !== null && p > 0);
+  const minConfirmedPrice =
+    confirmedPricesList.length > 0 ? Math.min(...confirmedPricesList) : null;
+  const maxConfirmedPrice =
+    confirmedPricesList.length > 0 ? Math.max(...confirmedPricesList) : null;
+  const hasConfirmedEtas =
+    isStoreFieldConfirmed(settings, 'estimatedDhakaDays') ||
+    isStoreFieldConfirmed(settings, 'estimatedOutsideDays');
 
   useEffect(() => {
     const stock = getStockForWeight(selectedWeight);
@@ -591,7 +607,7 @@ export function HomeStorefrontView() {
                 </a>
               </div>
 
-              {/* Micro Trust Strip Beneath Hero CTA */}
+              {/* Micro Trust Strip Beneath Hero CTA — truthful craft facts only (D9) */}
               <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-[rgba(30,23,16,0.08)] pt-4 text-xs text-[#635647]">
                 <span className="flex items-center gap-1.5">
                   <Truck className="h-3.5 w-3.5 text-[#B47B2B]" />
@@ -599,11 +615,11 @@ export function HomeStorefrontView() {
                 </span>
                 <span className="flex items-center gap-1.5">
                   <Award className="h-3.5 w-3.5 text-[#B47B2B]" />
-                  {bn ? 'ল্যাব টেস্ট ভেরিফাইড' : 'Lab Tested Authenticity'}
+                  {bn ? 'পাবনার একক উৎস' : 'Single-Origin Pabna Sourcing'}
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <Clock className="h-3.5 w-3.5 text-[#B47B2B]" />
-                  {bn ? '২৪ ঘণ্টার ভেতর রিপ্লেসমেন্ট' : '24h Replacement Guarantee'}
+                  <ShieldCheck className="h-3.5 w-3.5 text-[#B47B2B]" />
+                  {bn ? 'কাঁচের এয়ারটাইট বয়াম' : 'Sealed Apothecary Glass'}
                 </span>
               </div>
             </div>
@@ -635,11 +651,13 @@ export function HomeStorefrontView() {
                     className="h-full w-full object-cover"
                   />
 
-                  {/* Floating Batch Wax Stamp Badge */}
-                  <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 rounded-full border border-[#D4AF37]/60 bg-[#1A120B]/90 px-3 py-1 font-mono text-[11px] font-semibold text-[#F5D692] backdrop-blur-md shadow-md">
-                    <span className="h-2 w-2 rounded-full bg-[#2D6A4F]" />
-                    <span>{activeBatch.batchCode}</span>
-                  </div>
+                  {/* Floating Batch Wax Stamp Badge — shown ONLY when a real batch record exists */}
+                  {activeBatch?.batchCode && (
+                    <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 rounded-full border border-[#D4AF37]/60 bg-[#1A120B]/90 px-3 py-1 font-mono text-[11px] font-semibold text-[#F5D692] backdrop-blur-md shadow-md">
+                      <span className="h-2 w-2 rounded-full bg-[#2D6A4F]" />
+                      <span>{activeBatch.batchCode}</span>
+                    </div>
+                  )}
 
                   {/* Gradient Overlay at Bottom */}
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#140E08]/90 via-[#140E08]/40 to-transparent px-5 pb-5 pt-16 text-[#FAF7F2] sm:px-6 sm:pb-6">
@@ -650,9 +668,13 @@ export function HomeStorefrontView() {
                       <p className="font-display text-lg font-semibold sm:text-xl">
                         {bn ? settings.productNameBn : settings.productNameEn}
                       </p>
-                      <p className="font-mono text-sm font-semibold tabular-nums text-[#F5D692]">
-                        {formatBdt(settings.price250g)} – {formatBdt(settings.price1kg)}
-                      </p>
+                      {orderingReady && minConfirmedPrice !== null && maxConfirmedPrice !== null && (
+                        <p className="font-mono text-sm font-semibold tabular-nums text-[#F5D692]">
+                          {minConfirmedPrice === maxConfirmedPrice
+                            ? formatBdt(minConfirmedPrice)
+                            : `${formatBdt(minConfirmedPrice)} – ${formatBdt(maxConfirmedPrice)}`}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -807,34 +829,43 @@ export function HomeStorefrontView() {
             {/* Right Contiguous Purchase Panel */}
             <div className="flex flex-col justify-center lg:col-span-6">
               <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-[#2D6A4F]/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-[#2D6A4F]">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#2D6A4F]" />
-                  {isOutOfStock
-                    ? bn
-                      ? 'স্টক সমাপ্ত'
-                      : 'Out of Stock'
-                    : bn
-                      ? `স্টকে আছে (${activeStock}টি জার)`
-                      : `In Stock (${activeStock} jars)`}
-                </span>
+                {!orderingReady ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-amber-900/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-amber-900">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-700" />
+                    {bn ? 'অর্ডার এখনও চালু হয়নি' : 'Ordering not available yet'}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-[#2D6A4F]/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-[#2D6A4F]">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#2D6A4F]" />
+                    {isOutOfStock
+                      ? bn
+                        ? 'স্টক সমাপ্ত'
+                        : 'Out of Stock'
+                      : bn
+                        ? `স্টকে আছে (${activeStock}টি জার)`
+                        : `In Stock (${activeStock} jars)`}
+                  </span>
+                )}
               </div>
 
               <div className="mt-2.5 flex flex-wrap items-baseline justify-between gap-3">
                 <h2 className="font-display text-2xl font-bold tracking-tight text-[#1E1710] sm:text-4xl">
                   {bn ? settings.productNameBn : settings.productNameEn}
                 </h2>
-                <span className="font-mono text-2xl font-bold tabular-nums text-[#8A5A17] sm:text-3xl">
-                  {formatBdt(activePrice)}
-                </span>
+                {orderingReady && activePrice > 0 && (
+                  <span className="font-mono text-2xl font-bold tabular-nums text-[#8A5A17] sm:text-3xl">
+                    {formatBdt(activePrice)}
+                  </span>
+                )}
               </div>
 
               <p className="mt-3 text-sm leading-relaxed text-[#635647] sm:text-base">
                 {bn
-                  ? 'সকালের সংগৃহীত দেশী গরুর দুধ দিয়ে মাটির হাঁড়িতে পাতা দই, কাঠের বিলোনার মন্থন এবং মৃদু আঁচে তৈরি খাঁটি সোনালী দানাদার ঘি।'
-                  : 'Prepared strictly in small batches from grass-fed Pabna cow milk curd, wood-churned at dawn, and slow-simmered for nutty golden aroma.'}
+                  ? 'সকালের সংগৃহীত দেশী গরুর দুধ দিয়ে মাটির হাঁড়িতে পাতা দই, কাঠের বিলোনার মন্থন এবং মৃদু আঁচে তৈরি সোনালী দানাদার ঘি।'
+                  : 'Prepared in small batches from cultured Pabna cow milk curd, wood-churned with a traditional bilona, and slow-clarified.'}
               </p>
 
-              {/* Redesigned Weight Selector Cards with "Most Popular" Badge */}
+              {/* Weight Selector Cards */}
               <div className="mt-6 sm:mt-7">
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <span className="font-medium uppercase tracking-wider text-[#635647]">
@@ -850,8 +881,6 @@ export function HomeStorefrontView() {
                     const active = v.key === selectedWeight;
                     const price = getPriceForWeight(v.key);
                     const stock = getStockForWeight(v.key);
-                    const isPopular = v.key === '500g';
-                    const isBestValue = v.key === '1kg';
                     return (
                       <button
                         key={v.key}
@@ -863,103 +892,117 @@ export function HomeStorefrontView() {
                             : 'border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] text-[#635647] hover:border-[rgba(30,23,16,0.28)] hover:text-[#1E1710]'
                         }`}
                       >
-                        {isPopular && (
-                          <span className="absolute -top-2.5 right-1.5 rounded-md bg-gradient-to-r from-[#B47B2B] to-[#D4AF37] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#FFFDF9] shadow-xs sm:right-2 sm:px-2">
-                            {bn ? 'জনপ্রিয়' : 'Popular'}
-                          </span>
-                        )}
-                        {isBestValue && (
-                          <span className="absolute -top-2.5 right-1.5 rounded-md bg-[#1A120B] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#F5D692] shadow-xs sm:right-2 sm:px-2">
-                            {bn ? 'সাশ্রয়ী' : 'Value'}
-                          </span>
-                        )}
                         <span className="font-mono text-xs font-bold text-[#1E1710] sm:text-sm">
                           {bn ? v.labelBn : v.labelEn}
                         </span>
-                        <span className="mt-1 font-mono text-xs font-semibold tabular-nums text-[#8A5A17]">
-                          {stock <= 0
-                            ? bn
-                              ? 'স্টক শেষ'
-                              : 'Out'
-                            : formatBdt(price)}
-                        </span>
+                        {orderingReady && price > 0 && (
+                          <span className="mt-1 font-mono text-xs font-semibold tabular-nums text-[#8A5A17]">
+                            {stock <= 0
+                              ? bn
+                                ? 'স্টক শেষ'
+                                : 'Out'
+                              : formatBdt(price)}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Quantity Stepper + Add to Bag + Buy Now */}
-              <div className="mt-6 grid grid-cols-[auto_1fr] gap-2.5 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
-                <div className="inline-flex min-h-[50px] items-center rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] shadow-xs">
+              {/* Quantity Stepper + Add to Bag + Buy Now OR Ordering Unavailable Notice (D7) */}
+              {!orderingReady ? (
+                <div className="mt-6 rounded-2xl border border-amber-300/60 bg-amber-50/70 p-4 text-sm text-[#1E1710]">
+                  <p className="font-semibold">
+                    {bn ? 'অর্ডার এখনও চালু হয়নি' : 'Ordering not available yet'}
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-[#635647]">
+                    {bn
+                      ? 'মূল্য ও ডেলিভারি চার্জ মালিকের দ্বারা চূড়ান্ত নিশ্চিত হলে সরাসরি অনলাইন অর্ডার চালু হবে। আপডেট জানতে কলব্যাক অনুরোধ করুন।'
+                      : 'Online checkout opens as soon as store pricing and delivery rates are confirmed by the owner. Request a callback to be notified.'}
+                  </p>
                   <button
                     type="button"
-                    disabled={isOutOfStock || purchaseQty <= 1}
-                    onClick={() => setPurchaseQty((q) => Math.max(1, q - 1))}
-                    aria-label="Decrease quantity"
-                    className="flex h-12 w-11 items-center justify-center text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    onClick={openCallbackRequest}
+                    className="mt-3 inline-flex min-h-[44px] items-center justify-center rounded-xl bg-[#1A120B] px-5 py-2 text-xs font-semibold text-[#FAF7F2] hover:bg-[#332415]"
                   >
-                    <Minus className="h-4 w-4" />
-                  </button>
-                  <span className="w-10 text-center font-mono text-sm font-bold tabular-nums">
-                    {purchaseQty}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={isOutOfStock || purchaseQty >= activeStock}
-                    onClick={() =>
-                      setPurchaseQty((q) =>
-                        activeStock > 0 ? Math.min(activeStock, q + 1) : 1
-                      )
-                    }
-                    aria-label="Increase quantity"
-                    className="flex h-12 w-11 items-center justify-center text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  >
-                    <Plus className="h-4 w-4" />
+                    {bn ? 'কলব্যাক অনুরোধ করুন' : 'Request a Callback'}
                   </button>
                 </div>
+              ) : (
+                <div className="mt-6 grid grid-cols-[auto_1fr] gap-2.5 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
+                  <div className="inline-flex min-h-[50px] items-center rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] shadow-xs">
+                    <button
+                      type="button"
+                      disabled={isOutOfStock || purchaseQty <= 1}
+                      onClick={() => setPurchaseQty((q) => Math.max(1, q - 1))}
+                      aria-label="Decrease quantity"
+                      className="flex h-12 w-11 items-center justify-center text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <Minus className="h-4 w-4" />
+                    </button>
+                    <span className="w-10 text-center font-mono text-sm font-bold tabular-nums">
+                      {purchaseQty}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={isOutOfStock || purchaseQty >= activeStock}
+                      onClick={() =>
+                        setPurchaseQty((q) =>
+                          activeStock > 0 ? Math.min(activeStock, q + 1) : 1
+                        )
+                      }
+                      aria-label="Increase quantity"
+                      className="flex h-12 w-11 items-center justify-center text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
 
-                <button
-                  type="button"
-                  disabled={isOutOfStock}
-                  onClick={() => handleAddToCart(false)}
-                  className="inline-flex min-h-[50px] flex-1 items-center justify-center gap-2 rounded-xl border border-[#1E1710] bg-[#FAF7F2] px-5 py-3 text-sm font-semibold text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-45 transition-colors whitespace-nowrap shadow-xs"
-                >
-                  {justAdded ? (
-                    <>
-                      <Check className="h-4 w-4 text-[#8A5A17]" />
-                      <span>{bn ? 'ব্যাগে যোগ হয়েছে ✓' : 'Added to Bag ✓'}</span>
-                    </>
-                  ) : (
-                    <>
-                      <ShoppingBag className="h-4 w-4" />
-                      <span>{bn ? 'ব্যাগে যোগ করুন' : 'Add to Bag'}</span>
-                    </>
-                  )}
-                </button>
+                  <button
+                    type="button"
+                    disabled={isOutOfStock}
+                    onClick={() => handleAddToCart(false)}
+                    className="inline-flex min-h-[50px] flex-1 items-center justify-center gap-2 rounded-xl border border-[#1E1710] bg-[#FAF7F2] px-5 py-3 text-sm font-semibold text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-45 transition-colors whitespace-nowrap shadow-xs"
+                  >
+                    {justAdded ? (
+                      <>
+                        <Check className="h-4 w-4 text-[#8A5A17]" />
+                        <span>{bn ? 'ব্যাগে যোগ হয়েছে ✓' : 'Added to Bag ✓'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShoppingBag className="h-4 w-4" />
+                        <span>{bn ? 'ব্যাগে যোগ করুন' : 'Add to Bag'}</span>
+                      </>
+                    )}
+                  </button>
 
-                <button
-                  type="button"
-                  disabled={isOutOfStock}
-                  onClick={() => handleAddToCart(true)}
-                  className="col-span-2 inline-flex min-h-[50px] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#B47B2B] to-[#96621B] px-6 py-3 text-sm font-semibold text-[#FFFDF9] hover:shadow-[0_8px_20px_rgba(180,123,43,0.35)] disabled:opacity-45 sm:col-span-1 sm:flex-1 transition-all whitespace-nowrap"
-                >
-                  <span>{bn ? 'অর্ডার করুন · ' : 'Buy Now · '}</span>
-                  <span className="font-mono tabular-nums font-bold">
-                    {formatBdt(activePrice * purchaseQty)}
+                  <button
+                    type="button"
+                    disabled={isOutOfStock}
+                    onClick={() => handleAddToCart(true)}
+                    className="col-span-2 inline-flex min-h-[50px] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#B47B2B] to-[#96621B] px-6 py-3 text-sm font-semibold text-[#FFFDF9] hover:shadow-[0_8px_20px_rgba(180,123,43,0.35)] disabled:opacity-45 sm:col-span-1 sm:flex-1 transition-all whitespace-nowrap"
+                  >
+                    <span>{bn ? 'অর্ডার করুন · ' : 'Buy Now · '}</span>
+                    <span className="font-mono tabular-nums font-bold">
+                      {formatBdt(activePrice * purchaseQty)}
+                    </span>
+                  </button>
+                </div>
+              )}
+
+              {/* Delivery ETA Reassurance Box — shown ONLY when owner confirmed ETAs */}
+              {hasConfirmedEtas && (
+                <div className="mt-4 flex items-center gap-2 rounded-xl border border-[rgba(30,23,16,0.08)] bg-[#F4EFE6]/60 px-4 py-2.5 text-xs text-[#635647]">
+                  <Truck className="h-4 w-4 text-[#B47B2B] shrink-0" />
+                  <span>
+                    {bn
+                      ? `${settings.estimatedDhakaDays ? `ঢাকার ভেতরে ${settings.estimatedDhakaDays}` : ''}${settings.estimatedDhakaDays && settings.estimatedOutsideDays ? ' ও ' : ''}${settings.estimatedOutsideDays ? `বাইরে ${settings.estimatedOutsideDays}` : ''} সময়ে ক্যাশ অন ডেলিভারি।`
+                      : `${settings.estimatedDhakaDays ? `Inside Dhaka: ${settings.estimatedDhakaDays}` : ''}${settings.estimatedDhakaDays && settings.estimatedOutsideDays ? ' · ' : ''}${settings.estimatedOutsideDays ? `Nationwide: ${settings.estimatedOutsideDays}` : ''}. Cash on Delivery.`}
                   </span>
-                </button>
-              </div>
-
-              {/* Delivery ETA Reassurance Box */}
-              <div className="mt-4 flex items-center gap-2 rounded-xl border border-[rgba(30,23,16,0.08)] bg-[#F4EFE6]/60 px-4 py-2.5 text-xs text-[#635647]">
-                <Truck className="h-4 w-4 text-[#B47B2B] shrink-0" />
-                <span>
-                  {bn
-                    ? `ঢাকার ভেতরে ${settings.estimatedDhakaDays} ও বাইরে ${settings.estimatedOutsideDays} সময়ে ক্যাশ অন ডেলিভারি।`
-                    : `Delivery in ${settings.estimatedDhakaDays} inside Dhaka; ${settings.estimatedOutsideDays} nationwide. Cash on Delivery.`}
-                </span>
-              </div>
+                </div>
+              )}
 
               {/* Product Transparency Specification Table */}
               <dl className="mt-7 divide-y divide-[rgba(30,23,16,0.08)] border-y border-[rgba(30,23,16,0.08)] text-sm">
@@ -969,8 +1012,8 @@ export function HomeStorefrontView() {
                   </dt>
                   <dd className="text-right font-medium text-[#1E1710]">
                     {bn
-                      ? '১০০% খাঁটি গরুর দুধের ফ্যাট (একক উপাদান)'
-                      : '100% Pure Cultured Cow Milkfat'}
+                      ? 'গরুর দুধের মিল্কফ্যাট (কোনো বনস্পতি বা কৃত্রিম রং নয়)'
+                      : 'Clarified Cultured Cow Milkfat'}
                   </dd>
                 </div>
                 <div className="flex items-baseline justify-between gap-4 py-3">
@@ -985,38 +1028,40 @@ export function HomeStorefrontView() {
                 </div>
                 <div className="flex items-baseline justify-between gap-4 py-3">
                   <dt className="shrink-0 text-[#635647]">
-                    {bn ? 'সংরক্ষণ ও মেয়াদ' : 'Shelf Life & Storage'}
+                    {bn ? 'সংরক্ষণ নির্দেশনা' : 'Storage Guidance'}
                   </dt>
                   <dd className="text-right font-medium text-[#1E1710]">
                     {bn
-                      ? '১২ মাস · শুকনো ও ঠান্ডা স্থানে রাখুন'
-                      : '12 Months · Tightly sealed in cool dry pantry'}
+                      ? 'মুখ শক্ত করে বন্ধ রেখে শুকনো ও ঠান্ডা স্থানে রাখুন'
+                      : 'Keep tightly sealed in a cool, dry pantry'}
                   </dd>
                 </div>
-                <div className="flex items-baseline justify-between gap-4 py-3">
-                  <dt className="shrink-0 text-[#635647]">
-                    {bn ? 'উৎপাদন তথ্য' : 'Production Origin'}
-                  </dt>
-                  <dd className="text-right font-medium text-[#1E1710]">
-                    {settings.originLocation}
-                  </dd>
-                </div>
+                {settings.originLocation && (
+                  <div className="flex items-baseline justify-between gap-4 py-3">
+                    <dt className="shrink-0 text-[#635647]">
+                      {bn ? 'উৎপাদন তথ্য' : 'Production Origin'}
+                    </dt>
+                    <dd className="text-right font-medium text-[#1E1710]">
+                      {settings.originLocation}
+                    </dd>
+                  </div>
+                )}
               </dl>
             </div>
           </div>
         </section>
 
-        {/* SECTION 03: FOUR PILLARS OF PURITY & BATCH PASSPORT */}
+        {/* SECTION 03: CRAFT & BATCH TRANSPARENCY */}
         <section className="border-y border-[rgba(30,23,16,0.08)] bg-[#F4EFE6]/60 py-16 lg:py-20">
           <div className="mx-auto max-w-[1320px] px-5 sm:px-8">
             <div className="max-w-2xl">
               <span className="font-mono text-xs font-semibold uppercase tracking-widest text-[#8A5A17]">
-                {bn ? 'স্বচ্ছতা ও নিশ্চয়তা' : 'Authenticity & Standards'}
+                {bn ? 'স্বচ্ছতা ও প্রক্রিয়া' : 'Craft & Transparency'}
               </span>
               <h2 className="font-display mt-2 text-3xl font-bold tracking-tight text-[#1E1710]">
                 {bn
-                  ? 'উৎস থেকে কাঁচের বয়াম—পূর্ণ নিশ্চয়তা'
-                  : 'Documented provenance from pasture to glass'}
+                  ? 'উৎস থেকে কাঁচের বয়াম—স্বচ্ছ প্রস্তুতপ্রণালী'
+                  : 'Transparent preparation from pasture to glass'}
               </h2>
             </div>
 
@@ -1030,8 +1075,8 @@ export function HomeStorefrontView() {
                 </p>
                 <p className="mt-2 text-sm leading-relaxed text-[#635647]">
                   {bn
-                    ? 'পাবনার চারণভূমির সুস্থ গাভীর সকালের সংগৃহীত দুধ। কাঁচা দুধে পাতা দইয়ের কাঠের বিলোনা মন্থন। কোনো পাম অয়েল বা প্রিজারভেটিভ নেই।'
-                    : 'Whole morning milk sourced directly from Pabna pasture households. Single ingredient only: pure cow milkfat.'}
+                    ? 'পাবনার খামার থেকে সংগৃহীত গরুর দুধ মাটির হাঁড়িতে দই পেতে কাঠের বিলোনায় মন্থন করা হয়।'
+                    : 'Whole cow milk sourced in Pabna, fermented into curd in earthen pots and churned with a wooden bilona.'}
                 </p>
               </div>
 
@@ -1040,22 +1085,34 @@ export function HomeStorefrontView() {
                   <Award className="h-5 w-5" />
                 </div>
                 <p className="mt-4 font-mono text-xs font-semibold uppercase tracking-wider text-[#8A5A17]">
-                  {bn ? 'ব্যাচ ও মেয়াদ পাসপোর্ট' : 'Batch & Shelf Traceability'}
+                  {bn ? 'ব্যাচ পাসপোর্ট' : 'Batch Traceability'}
                 </p>
-                <dl className="mt-3 space-y-2 text-xs">
-                  <div className="flex justify-between border-b border-[rgba(30,23,16,0.06)] pb-1.5">
-                    <dt className="text-[#635647]">{bn ? 'সক্রিয় ব্যাচ' : 'Active Batch'}</dt>
-                    <dd className="font-mono font-bold text-[#1E1710]">{activeBatch.batchCode}</dd>
-                  </div>
-                  <div className="flex justify-between border-b border-[rgba(30,23,16,0.06)] pb-1.5">
-                    <dt className="text-[#635647]">{bn ? 'উৎপাদনের তারিখ' : 'Produced'}</dt>
-                    <dd className="font-mono">{activeBatch.productionDate}</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-[#635647]">{bn ? 'মেয়াদোত্তীর্ণ' : 'Best Before'}</dt>
-                    <dd className="font-mono">{activeBatch.expiryDate}</dd>
-                  </div>
-                </dl>
+                {activeBatch?.batchCode ? (
+                  <dl className="mt-3 space-y-2 text-xs">
+                    <div className="flex justify-between border-b border-[rgba(30,23,16,0.06)] pb-1.5">
+                      <dt className="text-[#635647]">{bn ? 'সক্রিয় ব্যাচ' : 'Active Batch'}</dt>
+                      <dd className="font-mono font-bold text-[#1E1710]">{activeBatch.batchCode}</dd>
+                    </div>
+                    {activeBatch.productionDate && (
+                      <div className="flex justify-between border-b border-[rgba(30,23,16,0.06)] pb-1.5">
+                        <dt className="text-[#635647]">{bn ? 'উৎপাদনের তারিখ' : 'Produced'}</dt>
+                        <dd className="font-mono">{activeBatch.productionDate}</dd>
+                      </div>
+                    )}
+                    {activeBatch.expiryDate && (
+                      <div className="flex justify-between">
+                        <dt className="text-[#635647]">{bn ? 'মেয়াদোত্তীর্ণ' : 'Best Before'}</dt>
+                        <dd className="font-mono">{activeBatch.expiryDate}</dd>
+                      </div>
+                    )}
+                  </dl>
+                ) : (
+                  <p className="mt-2 text-sm leading-relaxed text-[#635647]">
+                    {bn
+                      ? 'বর্তমান ব্যাচের তথ্য অ্যাডমিন প্যানেল থেকে যুক্ত হলে এখানে প্রদর্শিত হবে।'
+                      : 'Active batch details will appear here once recorded by the store team.'}
+                  </p>
+                )}
               </div>
 
               <div className="luxury-card rounded-2xl p-6">
@@ -1063,13 +1120,12 @@ export function HomeStorefrontView() {
                   <ShieldCheck className="h-5 w-5" />
                 </div>
                 <p className="mt-4 font-mono text-xs font-semibold uppercase tracking-wider text-[#8A5A17]">
-                  {bn ? 'সংরক্ষণ ও ল্যাব নিশ্চয়তা' : 'Storage & Lab Records'}
+                  {bn ? 'সংরক্ষণ নির্দেশনা' : 'Care & Storage'}
                 </p>
                 <p className="mt-2 text-sm leading-relaxed text-[#635647]">
-                  {activeBatch.labReportStatus}.{' '}
                   {bn
                     ? 'সর্বদা শুকনো ও পরিষ্কার চামচ ব্যবহার করুন এবং সূর্যের আলো থেকে দূরে সাধারণ তাপমাত্রায় রাখুন।'
-                    : 'Always scoop with a clean, dry spoon and keep sealed away from heat.'}
+                    : 'Always scoop with a clean, dry spoon and keep sealed away from direct heat and sunlight.'}
                 </p>
               </div>
             </div>
@@ -1217,13 +1273,13 @@ export function HomeStorefrontView() {
                     src={IMAGES.textureLiquid}
                     alt={
                       bn
-                        ? '৩৬ ডিগ্রি সেলসিয়াসে উষ্ণ তরল সোনালী দেশী ঘি'
-                        : 'Warm liquid golden Deshi Ghee at 36 degrees Celsius'
+                        ? 'উষ্ণ আবহাওয়ায় তরল সোনালী দেশী ঘি'
+                        : 'Warm liquid golden Deshi Ghee'
                     }
                     className="h-full w-full object-cover"
                   />
                   <div className="pointer-events-none absolute right-3 bottom-3 rounded-full bg-[#140E08]/85 px-3 py-1.5 font-mono text-xs text-[#FAF7F2] backdrop-blur-md border border-[#FAF7F2]/10 sm:right-5 sm:bottom-5">
-                    {bn ? 'উষ্ণ তরল সোনালী · 36°C' : 'Liquid Amber · 36°C'}
+                    {bn ? 'উষ্ণ আবহাওয়ায় · তরল সোনালী' : 'Warm Weather · Liquid Amber'}
                   </div>
                 </div>
 
@@ -1235,13 +1291,13 @@ export function HomeStorefrontView() {
                     src={IMAGES.textureDanadar}
                     alt={
                       bn
-                        ? '১৮ ডিগ্রি সেলসিয়াসে জমে থাকা দানাদার দেশী ঘি'
-                        : 'Chilled granular danadar Deshi Ghee at 18 degrees Celsius'
+                        ? 'শীতল আবহাওয়ায় জমে থাকা দানাদার দেশী ঘি'
+                        : 'Cool-weather granular danadar Deshi Ghee'
                     }
                     className="h-full w-full object-cover"
                   />
                   <div className="pointer-events-none absolute left-3 bottom-3 rounded-full bg-[#140E08]/85 px-3 py-1.5 font-mono text-xs text-[#F5D692] backdrop-blur-md border border-[#F5D692]/20 sm:left-5 sm:bottom-5">
-                    {bn ? 'খাঁটি দানাদার স্ফটিক · 18°C' : 'Danadar Crystals · 18°C'}
+                    {bn ? 'শীতল আবহাওয়ায় · প্রাকৃতিক দানাদার' : 'Cool Weather · Natural Danadar'}
                   </div>
                 </div>
 
@@ -1283,22 +1339,22 @@ export function HomeStorefrontView() {
               <h2 className="font-display mt-2 text-2xl font-bold tracking-tight text-[#1E1710] sm:text-3xl lg:text-4xl">
                 {bn
                   ? 'তাপমাত্রার সাথে দানাদার রূপের স্বাভাবিক পরিবর্তন'
-                  : 'Granular crystals at 18°C, liquid gold at 36°C'}
+                  : 'Granular in cool weather, liquid gold when warm'}
               </h2>
               <p className="mt-4 text-sm leading-relaxed text-[#635647] sm:text-base">
                 {bn
-                  ? 'প্রাকৃতিক খাঁটি মিল্কফ্যাটের বিভিন্ন ফ্যাটি অ্যাসিডের গলনাঙ্ক ভিন্ন। তাই ঠান্ডা আবহাওয়ায় (১৮° সে.) ঘি স্বাভাবিকভাবেই সুষম দানা বাঁধে এবং উষ্ণতায় (৩৬° সে.) গলে গিয়ে সুগন্ধি তরল সোনা হয়ে যায়।'
-                  : 'Natural pasture butterfat gently crystallizes into coarse danadar grains in cool environments (around 18°C) and melts into translucent liquid amber above 36°C.'}
+                  ? 'প্রাকৃতিক মিল্কফ্যাটের বিভিন্ন ফ্যাটি অ্যাসিডের গলনাঙ্ক ভিন্ন। তাই শীতল আবহাওয়ায় ঘি স্বাভাবিকভাবেই দানাদার হয়ে জমে এবং উষ্ণ আবহাওয়ায় গলে গিয়ে সোনালী তরল রূপ নেয়।'
+                  : 'Natural butterfat naturally crystallizes into coarse danadar grains in cool weather and melts into clear golden liquid in warm conditions.'}
               </p>
               <div className="mt-6 rounded-2xl border border-[rgba(30,23,16,0.08)] bg-[#F4EFE6]/70 p-4 text-xs text-[#635647]">
                 <p className="flex items-center gap-1.5 font-semibold text-[#1E1710]">
                   <Lightbulb className="h-4 w-4 shrink-0 text-[#B47B2B]" />
-                  <span>{bn ? 'বিশুদ্ধতার গুরুত্বপূর্ণ তথ্য:' : 'Authenticity Insight:'}</span>
+                  <span>{bn ? 'গুরুত্বপূর্ণ তথ্য:' : 'Craft Note:'}</span>
                 </p>
                 <p className="mt-1.5 leading-relaxed">
                   {bn
-                    ? 'কৃত্রিম রাসায়নিক বা ডালডা দিয়ে দানাদার রূপ নকল করা যায়। তাই কেবল দানাদার হওয়া নয়—সঠিক বিলোনা উৎস ও ল্যাব টেস্টই খাঁটি ঘিয়ের আসল নিশ্চয়তা।'
-                    : 'Authenticity is verified by curd-churned sourcing and laboratory acid value, not grain size alone.'}
+                    ? 'তাপমাত্রাভেদে ঘি জমে যাওয়া বা তরল হওয়া সম্পূর্ণ স্বাভাবিক; এটি কোনো মানগত ত্রুটি নয়।'
+                    : 'Natural shifts between granular and liquid texture across seasons are completely normal for unstabilized dairy fat.'}
                 </p>
               </div>
             </div>
@@ -1313,44 +1369,64 @@ export function HomeStorefrontView() {
           <div className="mx-auto grid max-w-[1320px] grid-cols-1 items-center gap-10 px-4 sm:px-8 md:grid-cols-12">
             <div className="space-y-4 md:col-span-8">
               <span className="font-mono text-xs font-semibold uppercase tracking-widest text-[#8A5A17]">
-                {bn ? 'ল্যাব রিপোর্ট ও ব্যাচ পাসপোর্ট' : 'Provenance & Batch Verification'}
+                {bn ? 'ব্যাচ যাচাই ও রেকর্ড' : 'Provenance & Batch Verification'}
               </span>
               <h2 className="font-display text-2xl font-bold tracking-tight text-[#1E1710] sm:text-3xl lg:text-4xl">
                 {bn
-                  ? 'প্রতিটি জারের সাথে যুক্ত উন্মুক্ত ল্যাব রেকর্ড'
-                  : 'Scan any jar to open its live batch record'}
+                  ? 'ব্যাচ কোড দিয়ে উৎপাদন তথ্য যাচাই করুন'
+                  : 'Inspect published batch records online'}
               </h2>
               <p className="max-w-[54ch] text-sm leading-relaxed text-[#635647] sm:text-base">
                 {bn
-                  ? 'প্রতিটি ব্যাচের দুধ সংগ্রহের খামার, উৎপাদনের তারিখ, মেয়াদ এবং সরকারি মানদণ্ডের অনুমোদিত ল্যাব সার্টিফিকেট সরাসরি অনলাইনে যাচাইযোগ্য।'
-                  : 'Inspect the current harvest batch record, production and expiry dates, regulatory licence status, and downloadable lab certificate.'}
+                  ? 'স্টোর কর্তৃপক্ষ যখন কোনো ব্যাচের তথ্য ও রিপোর্ট প্রকাশ করে, তখন ব্যাচ কোড দিয়ে তার উৎপাদন ও মেয়াদ সংক্রান্ত তথ্য অনলাইনে দেখা যায়।'
+                  : 'When a harvest batch record is published by the store owner, its production dates and any uploaded documentation can be inspected on the batch lookup page.'}
               </p>
 
-              <div className="grid grid-cols-1 gap-4 pt-2 sm:grid-cols-2">
-                <div className="luxury-card rounded-2xl p-4 text-xs">
-                  <p className="text-[#8A5A17] font-mono uppercase tracking-wider font-semibold">{bn ? 'বর্তমান সক্রিয় ব্যাচ' : 'Active Batch'}</p>
-                  <p className="mt-1 font-mono text-base font-bold text-[#1E1710]">
-                    {activeBatch.batchCode}
-                  </p>
-                  <p className="mt-1 text-[#635647]">
-                    {activeBatch.productionDate} → {activeBatch.expiryDate}
-                  </p>
-                </div>
+              {activeBatch?.batchCode ? (
+                <div className="grid grid-cols-1 gap-4 pt-2 sm:grid-cols-2">
+                  <div className="luxury-card rounded-2xl p-4 text-xs">
+                    <p className="text-[#8A5A17] font-mono uppercase tracking-wider font-semibold">{bn ? 'বর্তমান সক্রিয় ব্যাচ' : 'Active Batch'}</p>
+                    <p className="mt-1 font-mono text-base font-bold text-[#1E1710]">
+                      {activeBatch.batchCode}
+                    </p>
+                    {(activeBatch.productionDate || activeBatch.expiryDate) && (
+                      <p className="mt-1 text-[#635647]">
+                        {activeBatch.productionDate || '—'} → {activeBatch.expiryDate || '—'}
+                      </p>
+                    )}
+                  </div>
 
-                <div className="luxury-card rounded-2xl p-4 text-xs">
-                  <p className="text-[#8A5A17] font-mono uppercase tracking-wider font-semibold">
-                    {bn ? 'লাইসেন্স ও ল্যাব স্ট্যাটাস' : 'Licence & Certification'}
-                  </p>
-                  <p className="mt-1 font-medium text-[#1E1710]">
-                    {activeBatch.licenceDetails}
-                  </p>
-                  <p className="mt-1 text-[#2D6A4F] font-semibold">{activeBatch.labReportStatus}</p>
+                  {(activeBatch.licenceDetails || activeBatch.labReportStatus) && (
+                    <div className="luxury-card rounded-2xl p-4 text-xs">
+                      <p className="text-[#8A5A17] font-mono uppercase tracking-wider font-semibold">
+                        {bn ? 'ব্যাচ স্ট্যাটাস' : 'Batch Record Status'}
+                      </p>
+                      {activeBatch.licenceDetails && (
+                        <p className="mt-1 font-medium text-[#1E1710]">
+                          {activeBatch.licenceDetails}
+                        </p>
+                      )}
+                      {activeBatch.labReportStatus && (
+                        <p className="mt-1 text-[#2D6A4F] font-semibold">{activeBatch.labReportStatus}</p>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </div>
+              ) : (
+                <div className="luxury-card rounded-2xl p-4 text-xs text-[#635647]">
+                  {bn
+                    ? 'সক্রিয় ব্যাচের তথ্য এখনো প্রকাশ করা হয়নি। ব্যাচ কোড থাকলে নিচের যাচাই পেজে সার্চ করতে পারেন।'
+                    : 'No active batch record has been published yet. If you have a jar batch code, you can look it up on the batch verification page.'}
+                </div>
+              )}
 
               <div className="flex flex-col gap-3 pt-3 sm:flex-row sm:flex-wrap">
                 <Link
-                  href={`/batch?code=${encodeURIComponent(activeBatch.batchCode)}`}
+                  href={
+                    activeBatch?.batchCode
+                      ? `/batch?code=${encodeURIComponent(activeBatch.batchCode)}`
+                      : '/batch'
+                  }
                   className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-[#1A120B] px-6 py-2.5 text-xs font-semibold text-[#FAF7F2] hover:bg-[#332415] transition-colors sm:w-auto shadow-xs"
                 >
                   <FileCheck2 className="h-4 w-4 text-[#D4AF37]" />
@@ -1359,39 +1435,41 @@ export function HomeStorefrontView() {
                   </span>
                 </Link>
 
-                {activeBatch.labReportUrl && (
+                {activeBatch?.labReportUrl && (
                   <a
                     href={activeBatch.labReportUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-6 py-2.5 text-xs font-semibold text-[#1E1710] hover:bg-[#F2ECE1] transition-colors sm:w-auto"
                   >
-                    <span>{bn ? 'ল্যাব রিপোর্ট ডাউনলোড PDF' : 'Download Lab PDF'}</span>
+                    <span>{bn ? 'ব্যাচ ডকুমেন্ট দেখুন' : 'Open Batch Document'}</span>
                     <ExternalLink className="h-3.5 w-3.5 text-[#8A5A17]" />
                   </a>
                 )}
               </div>
             </div>
 
-            <div className="flex flex-col items-center rounded-3xl border-2 border-[#D4AF37]/30 bg-[#FAF7F2] p-8 md:col-span-4 shadow-[0_15px_40px_-10px_rgba(30,23,16,0.08)]">
-              {qrCodeUrl && (
-                <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] p-2 bg-[#FFFDF9] shadow-xs">
-                  <img
-                    src={qrCodeUrl}
-                    alt={`Batch verification QR for ${activeBatch.batchCode}`}
-                    className="h-44 w-44 rounded-xl"
-                  />
-                </div>
-              )}
-              <p className="mt-4 font-mono text-sm font-bold text-[#1E1710]">
-                {activeBatch.batchCode}
-              </p>
-              <p className="mt-1 text-center text-xs text-[#635647]">
-                {bn
-                  ? 'মোবাইল ক্যামেরা দিয়ে স্ক্যান করে ব্যাচ রিপোর্ট দেখুন'
-                  : 'Scan with camera to inspect lab records'}
-              </p>
-            </div>
+            {activeBatch?.batchCode && (
+              <div className="flex flex-col items-center rounded-3xl border-2 border-[#D4AF37]/30 bg-[#FAF7F2] p-8 md:col-span-4 shadow-[0_15px_40px_-10px_rgba(30,23,16,0.08)]">
+                {qrCodeUrl && (
+                  <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] p-2 bg-[#FFFDF9] shadow-xs">
+                    <img
+                      src={qrCodeUrl}
+                      alt={`Batch verification QR for ${activeBatch.batchCode}`}
+                      className="h-44 w-44 rounded-xl"
+                    />
+                  </div>
+                )}
+                <p className="mt-4 font-mono text-sm font-bold text-[#1E1710]">
+                  {activeBatch.batchCode}
+                </p>
+                <p className="mt-1 text-center text-xs text-[#635647]">
+                  {bn
+                    ? 'মোবাইল ক্যামেরা দিয়ে স্ক্যান করে ব্যাচ তথ্য দেখুন'
+                    : 'Scan with camera to inspect published batch record'}
+                </p>
+              </div>
+            )}
           </div>
         </section>
 
@@ -1668,7 +1746,7 @@ export function HomeStorefrontView() {
                     type="text"
                     value={revOrderNum}
                     onChange={(e) => setRevOrderNum(e.target.value.toUpperCase())}
-                    placeholder="DG-1042"
+                    placeholder={bn ? 'আপনার অর্ডার নম্বর' : 'Your Order ID'}
                     className="mt-1 w-full rounded-xl border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3.5 py-2.5 font-mono text-base sm:text-sm shadow-xs focus:border-[#B47B2B] focus:outline-none"
                   />
                 </div>
@@ -1841,33 +1919,49 @@ export function HomeStorefrontView() {
             )}
 
             <div className="min-w-0 flex-1 text-center">
-              <div className="flex items-baseline justify-center gap-1">
-                <span className="font-mono text-sm font-bold tabular-nums text-[#1E1710]">
-                  {formatBdt(activePrice)}
-                </span>
-                <span className="font-mono text-[11px] font-semibold text-[#8A5A17]">
-                  ({selectedWeight})
-                </span>
-              </div>
+              {orderingReady && activePrice > 0 ? (
+                <div className="flex items-baseline justify-center gap-1">
+                  <span className="font-mono text-sm font-bold tabular-nums text-[#1E1710]">
+                    {formatBdt(activePrice)}
+                  </span>
+                  <span className="font-mono text-[11px] font-semibold text-[#8A5A17]">
+                    ({selectedWeight})
+                  </span>
+                </div>
+              ) : (
+                <p className="truncate text-xs font-semibold text-[#1E1710]">
+                  {bn ? 'অর্ডার চালু হয়নি' : 'Ordering unavailable'}
+                </p>
+              )}
               <p className="truncate text-[10px] text-[#635647]">
                 {bn ? 'পাবনার বিলোনা ঘি' : 'Pabna Bilona Ghee'}
               </p>
             </div>
 
-            <button
-              type="button"
-              disabled={isOutOfStock}
-              onClick={() => handleAddToCart(true)}
-              className="min-h-[44px] shrink-0 rounded-xl bg-gradient-to-r from-[#B47B2B] to-[#96621B] px-4 text-xs font-bold text-[#FFFDF9] shadow-sm disabled:opacity-45 whitespace-nowrap active:scale-95 transition-transform"
-            >
-              {isOutOfStock
-                ? bn
-                  ? 'স্টক শেষ'
-                  : 'Out of Stock'
-                : bn
-                  ? 'অর্ডার করুন'
-                  : 'Buy Now'}
-            </button>
+            {orderingReady ? (
+              <button
+                type="button"
+                disabled={isOutOfStock}
+                onClick={() => handleAddToCart(true)}
+                className="min-h-[44px] shrink-0 rounded-xl bg-gradient-to-r from-[#B47B2B] to-[#96621B] px-4 text-xs font-bold text-[#FFFDF9] shadow-sm disabled:opacity-45 whitespace-nowrap active:scale-95 transition-transform"
+              >
+                {isOutOfStock
+                  ? bn
+                    ? 'স্টক শেষ'
+                    : 'Out of Stock'
+                  : bn
+                    ? 'অর্ডার করুন'
+                    : 'Buy Now'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={openCallbackRequest}
+                className="min-h-[44px] shrink-0 rounded-xl border border-[#1E1710]/20 bg-[#F2ECE1] px-3.5 text-xs font-semibold text-[#1E1710] whitespace-nowrap"
+              >
+                {bn ? 'কলব্যাক' : 'Callback'}
+              </button>
+            )}
           </div>
         </div>
       )}

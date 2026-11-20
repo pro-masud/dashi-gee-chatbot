@@ -1,4 +1,8 @@
-import type { OrderRecord } from '../../../src/lib/storeTypes';
+import {
+  getEffectiveMaxJarsPerOrder,
+  isStorefrontOrderingReady,
+  type OrderRecord,
+} from '../../../src/lib/storeTypes';
 import { CHATBOT_BUILD_CONFIG } from '../../../src/lib/chatbot/build-config';
 import {
   checkAndIncrementFirestoreRateLimit,
@@ -252,6 +256,33 @@ export async function POST(request: Request) {
     checkRecentOrderFingerprint(fingerprintHash),
   ]);
 
+  if (!isStorefrontOrderingReady(settings)) {
+    return jsonResp(
+      {
+        ok: false,
+        code: 'ordering_not_available',
+        error: bn
+          ? 'স্টোরের মূল্য ও ডেলিভারি চার্জ এখনো নির্ধারিত হয়নি। অর্ডার গ্রহণ সাময়িকভাবে বন্ধ আছে।'
+          : 'Ordering not available yet. Store prices and delivery fees have not been confirmed by the owner.',
+      },
+      503
+    );
+  }
+
+  const maxJarsAllowed = getEffectiveMaxJarsPerOrder(settings);
+  if (normVariants.totalQty > maxJarsAllowed) {
+    return jsonResp(
+      {
+        ok: false,
+        code: 'max_jars_exceeded',
+        error: bn
+          ? `এক অর্ডারে সর্বোচ্চ ${maxJarsAllowed}টি জার অর্ডার করা যাবে। বড় অর্ডারের জন্য আমাদের টিমের সাথে যোগাযোগ করুন।`
+          : `Maximum ${maxJarsAllowed} jars per order. Please contact our team for bulk orders.`,
+      },
+      400
+    );
+  }
+
   const livePricing = computeOrderPricingInPoisha({
     settings,
     weight: normVariants.primaryWeight,
@@ -262,6 +293,7 @@ export async function POST(request: Request) {
     deliveryZone: zoneCheck.deliveryZone,
     paymentMethod: payload.paymentMethod,
     coupon,
+    maxTotalQty: maxJarsAllowed,
   });
 
   if (!livePricing.stockSufficient) {
