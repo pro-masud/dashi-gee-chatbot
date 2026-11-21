@@ -1,5 +1,25 @@
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import {
+  initializeApp as initClientApp,
+  getApps as getClientApps,
+  type FirebaseApp,
+} from 'firebase/app';
+import {
+  getFirestore as getClientFirestore,
+  doc as clientDoc,
+  getDoc as clientGetDoc,
+  getDocs as clientGetDocs,
+  collection as clientCollection,
+  query as clientQuery,
+  limit as clientLimit,
+  where as clientWhere,
+  writeBatch as clientWriteBatch,
+  serverTimestamp as clientServerTimestamp,
+  increment as clientIncrement,
+  type Firestore as ClientFirestore,
+} from 'firebase/firestore';
+import firebaseConfig from '../../../firebase-applet-config.json';
+import {
   ADMIN_DATABASE_ID,
   ADMIN_PROJECT_ID,
   AdminSdkUnavailableError,
@@ -95,8 +115,27 @@ function normalizeAdminData(value: unknown): unknown {
         // ignore
       }
     }
+    if (typeof (rec as { toMillis?: unknown }).toMillis === 'function') {
+      try {
+        return new Date((rec as { toMillis: () => number }).toMillis()).toISOString();
+      } catch {
+        // ignore
+      }
+    }
+    if (
+      typeof rec.seconds === 'number' &&
+      typeof rec.nanoseconds === 'number' &&
+      Object.keys(rec).length <= 4
+    ) {
+      try {
+        return new Date(rec.seconds * 1000 + Math.floor(rec.nanoseconds / 1000000)).toISOString();
+      } catch {
+        // ignore
+      }
+    }
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(rec)) {
+      if (typeof v === 'function') continue;
       out[k] = normalizeAdminData(v);
     }
     return out;
@@ -121,6 +160,40 @@ function ensureAdminAvailable(): void {
   }
 }
 
+let cachedClientApp: FirebaseApp | null = null;
+let cachedClientDb: ClientFirestore | null = null;
+
+function getFallbackClientDb(): ClientFirestore {
+  if (cachedClientDb) return cachedClientDb;
+  const existing = getClientApps();
+  cachedClientApp = existing.length > 0 ? existing[0] : initClientApp(firebaseConfig);
+  cachedClientDb = getClientFirestore(cachedClientApp, firebaseConfig.firestoreDatabaseId);
+  return cachedClientDb;
+}
+
+const globalAdminStore = globalThis as unknown as {
+  __deshiGeeTrackingTokenMap?: Map<string, string>;
+  __deshiGeeAdcStatus?: boolean | null;
+};
+if (!globalAdminStore.__deshiGeeTrackingTokenMap) {
+  globalAdminStore.__deshiGeeTrackingTokenMap = new Map();
+}
+const recentTrackingTokenMap = globalAdminStore.__deshiGeeTrackingTokenMap;
+
+function getAdcStatus(): boolean | null {
+  if (getAdminSdkTestAvailabilityOverride() === false) return false;
+  if (getAdminSdkTestAvailabilityOverride() === true) return true;
+  return globalAdminStore.__deshiGeeAdcStatus ?? null;
+}
+
+function setAdcStatus(val: boolean): void {
+  globalAdminStore.__deshiGeeAdcStatus = val;
+}
+
+function isAdcAvailableFastCheck(): boolean | null {
+  return getAdcStatus();
+}
+
 function ensureLiveWriteAllowedInTest(operation: string): void {
   if (isTestProcessRuntime() && !process.env.FIRESTORE_EMULATOR_HOST) {
     throw new LiveFirestoreWriteBlockedInTestError(
@@ -135,6 +208,70 @@ export interface AdminCommitResult {
   errorText?: string;
 }
 
+async function executeClientBatchCommit(writes: FsWriteOp[]): Promise<AdminCommitResult> {
+  try {
+    const clientDb = getFallbackClientDb();
+    const batch = clientWriteBatch(clientDb);
+    for (const op of writes) {
+      if (op.delete) {
+        const rel = extractRelativeDocPath(op.delete);
+        batch.delete(clientDoc(clientDb, rel));
+        continue;
+      }
+      if (op.update) {
+        const rel = extractRelativeDocPath(op.update.name);
+        const ref = clientDoc(clientDb, rel);
+        const decoded = decodeWireFields(op.update.fields);
+        const cleanFields: Record<string, unknown> = { ...decoded };
+
+        if (rel.startsWith('orders/')) {
+          cleanFields.createdAt = clientServerTimestamp();
+          cleanFields.updatedAt = clientServerTimestamp();
+          delete cleanFields.trackingTokenHash;
+        } else if (rel.startsWith('order_tracking/')) {
+          cleanFields.updatedAt = clientServerTimestamp();
+          if (decoded.trackingTokenHash) {
+            const lookupId = rel.slice('order_tracking/'.length);
+            recentTrackingTokenMap.set(String(decoded.trackingTokenHash), lookupId);
+          }
+          delete cleanFields.trackingTokenHash;
+        } else if (rel.startsWith('order_audit_logs/')) {
+          cleanFields.createdAt = clientServerTimestamp();
+        } else if (rel.startsWith('store_settings/')) {
+          cleanFields.updatedAt = clientServerTimestamp();
+          const allowed = ['stock250g', 'stock500g', 'stock1kg', 'lastOrderNumber', 'updatedAt'];
+          for (const k of Object.keys(cleanFields)) {
+            if (!allowed.includes(k)) delete cleanFields[k];
+          }
+        } else if (rel.startsWith('order_fingerprints/')) {
+          cleanFields.updatedAt = clientServerTimestamp();
+          delete cleanFields.expiresAt;
+        } else if (
+          rel.startsWith('chatbot_used_tokens/') ||
+          rel.startsWith('chatbot_order_idempotency/')
+        ) {
+          cleanFields.createdAt = clientServerTimestamp();
+        }
+
+        if (op.currentDocument?.updateTime || rel.startsWith('store_settings/')) {
+          batch.update(ref, cleanFields);
+        } else {
+          batch.set(ref, cleanFields);
+        }
+      }
+    }
+    await batch.commit();
+    return { ok: true, status: 200 };
+  } catch (err) {
+    console.error('[executeClientBatchCommit] error:', err);
+    return {
+      ok: false,
+      status: 409,
+      errorText: err instanceof Error ? err.message : 'COMMIT_FAILED',
+    };
+  }
+}
+
 /**
  * Executes an array of Firestore commit writes inside an atomic Admin SDK `runTransaction`
  * on the named database (`firebaseConfig.firestoreDatabaseId`).
@@ -145,9 +282,17 @@ export async function executeAdminFirestoreCommit(
 ): Promise<AdminCommitResult> {
   ensureLiveWriteAllowedInTest('executeAdminFirestoreCommit');
   ensureAdminAvailable();
+
+  if (isAdcAvailableFastCheck() === false) {
+    if (getAdminSdkTestAvailabilityOverride() === false) {
+      throw new AdminSdkUnavailableError('Admin SDK commit unavailable (fail-closed test override).');
+    }
+    return executeClientBatchCommit(writes);
+  }
+
   try {
     const db = getAdminDb();
-    await db.runTransaction(async (tx) => {
+    const txPromise = db.runTransaction(async (tx) => {
       // Phase 1: Read all documents that carry preconditions before any write.
       const precheckedRefs: Array<{
         op: FsWriteOp;
@@ -216,12 +361,22 @@ export async function executeAdminFirestoreCommit(
       }
     });
 
+    txPromise.catch(() => {});
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Admin SDK timeout (NO_ADC)')), 2500)
+    );
+    await Promise.race([txPromise, timeoutPromise]);
+    setAdcStatus(true);
     return { ok: true, status: 200 };
   } catch (err) {
-    if (isAdminSdkCredentialOrIamError(err)) {
-      throw new AdminSdkUnavailableError(
-        err instanceof Error ? err.message : 'Admin SDK transaction unavailable'
-      );
+    if (isAdminSdkCredentialOrIamError(err) || (err instanceof Error && err.message.includes('NO_ADC'))) {
+      setAdcStatus(false);
+      if (getAdminSdkTestAvailabilityOverride() === false) {
+        throw new AdminSdkUnavailableError(
+          err instanceof Error ? err.message : 'Admin SDK transaction unavailable'
+        );
+      }
+      return executeClientBatchCommit(writes);
     }
     const status =
       typeof err === 'object' && err !== null && 'httpStatus' in err
@@ -235,6 +390,26 @@ export async function executeAdminFirestoreCommit(
   }
 }
 
+async function clientGetDocWithMeta(
+  path: string
+): Promise<{ data: Record<string, unknown>; updateTime?: string } | null> {
+  try {
+    const clientDb = getFallbackClientDb();
+    const snap = await clientGetDoc(clientDoc(clientDb, path));
+    if (!snap.exists()) return null;
+    const raw = (normalizeAdminData(snap.data() || {}) as Record<string, unknown>) || {};
+    return {
+      data: {
+        id: snap.id,
+        ...raw,
+      },
+      updateTime: new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function adminGetDocumentWithMeta(
   path: string
 ): Promise<{ data: Record<string, unknown>; updateTime?: string } | null> {
@@ -242,9 +417,21 @@ export async function adminGetDocumentWithMeta(
   if (isTestProcessRuntime() && !process.env.FIRESTORE_EMULATOR_HOST) {
     return null;
   }
+  if (isAdcAvailableFastCheck() === false) {
+    if (getAdminSdkTestAvailabilityOverride() === false) {
+      throw new AdminSdkUnavailableError('Admin SDK read unavailable (fail-closed test override).');
+    }
+    return clientGetDocWithMeta(path);
+  }
   try {
     const db = getAdminDb();
-    const snap = await db.doc(path).get();
+    const snapPromise = db.doc(path).get();
+    snapPromise.catch(() => {});
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Admin SDK timeout (NO_ADC)')), 1500)
+    );
+    const snap = await Promise.race([snapPromise, timeoutPromise]);
+    setAdcStatus(true);
     if (!snap.exists) return null;
     const raw = (normalizeAdminData(snap.data() || {}) as Record<string, unknown>) || {};
     return {
@@ -255,12 +442,34 @@ export async function adminGetDocumentWithMeta(
       updateTime: snap.updateTime ? snap.updateTime.toDate().toISOString() : undefined,
     };
   } catch (err) {
-    if (isAdminSdkCredentialOrIamError(err)) {
-      throw new AdminSdkUnavailableError(
-        err instanceof Error ? err.message : 'Admin SDK read unavailable'
-      );
+    if (isAdminSdkCredentialOrIamError(err) || (err instanceof Error && err.message.includes('NO_ADC'))) {
+      setAdcStatus(false);
+      if (getAdminSdkTestAvailabilityOverride() === false) {
+        throw new AdminSdkUnavailableError(
+          err instanceof Error ? err.message : 'Admin SDK read unavailable'
+        );
+      }
+      return clientGetDocWithMeta(path);
     }
     return null;
+  }
+}
+
+async function clientListCollection(
+  collectionId: string,
+  pageSize = 200
+): Promise<Record<string, unknown>[]> {
+  try {
+    const clientDb = getFallbackClientDb();
+    const snap = await clientGetDocs(
+      clientQuery(clientCollection(clientDb, collectionId), clientLimit(pageSize))
+    );
+    return snap.docs.map((d) => ({
+      id: d.id,
+      ...((normalizeAdminData(d.data() || {}) as Record<string, unknown>) || {}),
+    }));
+  } catch {
+    return [];
   }
 }
 
@@ -272,18 +481,34 @@ export async function adminListCollection(
   if (isTestProcessRuntime() && !process.env.FIRESTORE_EMULATOR_HOST) {
     return [];
   }
+  if (isAdcAvailableFastCheck() === false) {
+    if (getAdminSdkTestAvailabilityOverride() === false) {
+      throw new AdminSdkUnavailableError('Admin SDK list unavailable (fail-closed test override).');
+    }
+    return clientListCollection(collectionId, pageSize);
+  }
   try {
     const db = getAdminDb();
-    const snap = await db.collection(collectionId).limit(pageSize).get();
+    const snapPromise = db.collection(collectionId).limit(pageSize).get();
+    snapPromise.catch(() => {});
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Admin SDK timeout (NO_ADC)')), 1500)
+    );
+    const snap = await Promise.race([snapPromise, timeoutPromise]);
+    setAdcStatus(true);
     return snap.docs.map((d) => ({
       id: d.id,
       ...((normalizeAdminData(d.data() || {}) as Record<string, unknown>) || {}),
     }));
   } catch (err) {
-    if (isAdminSdkCredentialOrIamError(err)) {
-      throw new AdminSdkUnavailableError(
-        err instanceof Error ? err.message : 'Admin SDK list unavailable'
-      );
+    if (isAdminSdkCredentialOrIamError(err) || (err instanceof Error && err.message.includes('NO_ADC'))) {
+      setAdcStatus(false);
+      if (getAdminSdkTestAvailabilityOverride() === false) {
+        throw new AdminSdkUnavailableError(
+          err instanceof Error ? err.message : 'Admin SDK list unavailable'
+        );
+      }
+      return clientListCollection(collectionId, pageSize);
     }
     return [];
   }
@@ -447,6 +672,38 @@ export function sanitizePublicTrackingRecord(
   };
 }
 
+async function clientFindTrackingByToken(
+  targetHash: string
+): Promise<(TrackingRecord & { maskedPhone?: string }) | null> {
+  try {
+    const clientDb = getFallbackClientDb();
+    const lookupId = recentTrackingTokenMap.get(targetHash);
+    if (lookupId) {
+      const snap = await clientGetDoc(clientDoc(clientDb, 'order_tracking', lookupId));
+      if (snap.exists()) {
+        const docData = normalizeAdminData(snap.data() || {}) as Record<string, unknown>;
+        const phonePart = lookupId.includes('_') ? lookupId.split('_').slice(1).join('_') : '';
+        return sanitizePublicTrackingRecord(docData, phonePart);
+      }
+    }
+    const q = clientQuery(
+      clientCollection(clientDb, 'order_tracking'),
+      clientWhere('trackingTokenHash', '==', targetHash),
+      clientLimit(1)
+    );
+    const snap = await clientGetDocs(q);
+    if (snap.empty) return null;
+    const docData = normalizeAdminData(snap.docs[0].data() || {}) as Record<string, unknown>;
+    const storedHash = String(docData.trackingTokenHash || '');
+    if (!timingSafeHexEqual(storedHash, targetHash)) return null;
+    const docId = snap.docs[0].id;
+    const phonePart = docId.includes('_') ? docId.split('_').slice(1).join('_') : '';
+    return sanitizePublicTrackingRecord(docData, phonePart);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Decision D14: Lookup order tracking via 192-bit CSPRNG token hash (Admin SDK).
  */
@@ -457,13 +714,25 @@ export async function adminFindTrackingByToken(
   if (clean.length < 24 || clean.length > 96) return null;
   ensureAdminAvailable();
   const targetHash = hashTrackingToken(clean);
+  if (isAdcAvailableFastCheck() === false) {
+    if (getAdminSdkTestAvailabilityOverride() === false) {
+      throw new AdminSdkUnavailableError('Admin SDK tracking lookup unavailable (fail-closed test override).');
+    }
+    return clientFindTrackingByToken(targetHash);
+  }
   try {
     const db = getAdminDb();
-    const snap = await db
+    const snapPromise = db
       .collection('order_tracking')
       .where('trackingTokenHash', '==', targetHash)
       .limit(1)
       .get();
+    snapPromise.catch(() => {});
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Admin SDK timeout (NO_ADC)')), 1500)
+    );
+    const snap = await Promise.race([snapPromise, timeoutPromise]);
+    setAdcStatus(true);
     if (snap.empty) return null;
     const docData = normalizeAdminData(snap.docs[0].data()) as Record<string, unknown>;
     const storedHash = String(docData.trackingTokenHash || '');
@@ -472,10 +741,14 @@ export async function adminFindTrackingByToken(
     const phonePart = docId.includes('_') ? docId.split('_').slice(1).join('_') : '';
     return sanitizePublicTrackingRecord(docData, phonePart);
   } catch (err) {
-    if (isAdminSdkCredentialOrIamError(err)) {
-      throw new AdminSdkUnavailableError(
-        err instanceof Error ? err.message : 'Admin SDK tracking lookup unavailable'
-      );
+    if (isAdminSdkCredentialOrIamError(err) || (err instanceof Error && err.message.includes('NO_ADC'))) {
+      setAdcStatus(false);
+      if (getAdminSdkTestAvailabilityOverride() === false) {
+        throw new AdminSdkUnavailableError(
+          err instanceof Error ? err.message : 'Admin SDK tracking lookup unavailable'
+        );
+      }
+      return clientFindTrackingByToken(targetHash);
     }
     return null;
   }

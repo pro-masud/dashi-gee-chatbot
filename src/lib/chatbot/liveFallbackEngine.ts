@@ -107,6 +107,7 @@ export function generateLiveFallbackReply(params: {
   };
 
   const addOrderAction = () => {
+    if (!facts.orderingReady) return;
     pushAction(actions, {
       type: 'open_url',
       labelEn: 'Order Online',
@@ -190,6 +191,20 @@ export function generateLiveFallbackReply(params: {
       },
       settings
     );
+
+    if (!facts.orderingReady || rec.priceBdt <= 0) {
+      addWhatsAppAction();
+      return {
+        replyText: isBn
+          ? `পাবনার খাঁটি দেশী গাওয়া ঘিয়ের বর্তমান ব্যাচের মূল্য ও ডেলিভারি চার্জ নির্ধারণের কাজ চলছে। চূড়ান্ত হওয়ার সাথে সাথেই অর্ডার গ্রহণ শুরু হবে। যেকোনো তথ্যের জন্য সরাসরি আমাদের সাথে যোগাযোগ করতে পারেন।`
+          : `Prices and availability for our authentic Pabna Deshi Ghee are currently being finalized. Please contact us via WhatsApp for any queries.`,
+        intent: 'recommendation',
+        actions,
+        suggestedReplies: buildContextualSuggestedReplies('recommendation', replyLang, params.activeDraft),
+        factsVersion: facts.factsVersion,
+      };
+    }
+
     const cards = buildProductComparisonCards(settings, rec.recommendedWeight, {
       en: rec.reasonEn,
       bn: rec.reasonBn,
@@ -322,6 +337,24 @@ export function generateLiveFallbackReply(params: {
   ) {
     addOrderAction();
     addWhatsAppAction();
+
+    const allPricesZero =
+      facts.pricesBdt['250g'] <= 0 &&
+      facts.pricesBdt['500g'] <= 0 &&
+      facts.pricesBdt['1kg'] <= 0;
+
+    if (!facts.orderingReady || allPricesZero) {
+      return {
+        replyText: isBn
+          ? `পাবনার ঐতিহ্যবাহী কাঠের বিলোনার খাঁটি গাওয়া ঘিয়ের বর্তমান ব্যাচের মূল্য ও ডেলিভারি চার্জ নির্ধারণের কাজ চলছে। চূড়ান্ত হওয়ার সাথে সাথেই ওয়েবসাইটে ও চ্যাটে প্রকাশ করা হবে। কোনো প্রশ্ন থাকলে সরাসরি আমাদের সাথে যোগাযোগ করতে পারেন।`
+          : `Prices and delivery charges for our authentic Pabna Deshi Ghee are currently being finalized by the owner. They will be updated shortly.`,
+        intent: 'pricing',
+        actions,
+        suggestedReplies: buildContextualSuggestedReplies('pricing', replyLang, params.activeDraft),
+        factsVersion: facts.factsVersion,
+      };
+    }
+
     const cards = buildProductComparisonCards(settings, detectedWeight || '500g');
 
     if (detectedWeight === '250g') {
@@ -536,6 +569,19 @@ export function generateLiveFallbackReply(params: {
   if (/(order|অর্ডার|কিনব|নিব|কিনি|buy|purchase|নিবো|লাগবে|নেব|নিতে চাই)/i.test(clean)) {
     addOrderAction();
     addWhatsAppAction();
+
+    if (!facts.orderingReady) {
+      return {
+        replyText: isBn
+          ? `দুঃখিত, স্টোরের মূল্য ও ডেলিভারি চার্জ নির্ধারণের কাজ চলমান থাকায় অনলাইন অর্ডার সাময়িকভাবে বন্ধ রয়েছে। চূড়ান্ত হওয়ার সাথে সাথেই অর্ডার গ্রহণ শুরু হবে। যেকোনো তথ্যের জন্য সরাসরি ফোনে বা WhatsApp-এ যোগাযোগ করতে পারেন।`
+          : `Online ordering is temporarily unavailable while prices and delivery charges are being finalized by the owner. Please contact us via WhatsApp or phone.`,
+        intent: 'order',
+        actions,
+        suggestedReplies: buildContextualSuggestedReplies('order', replyLang, params.activeDraft),
+        factsVersion: facts.factsVersion,
+      };
+    }
+
     return {
       replyText: isBn
         ? `অর্ডার করার পদ্ধতি খুবই সহজ:\n১. এখানে আপনার পছন্দের সাইজ (২৫০ গ্রাম / ৫০০ গ্রাম / ১ কেজি) দিয়ে শুরু করুন — আমি ধাপে ধাপে অর্ডার সারাংশ তৈরি করে দেব।\n২. অথবা নিচের 'অনলাইনে অর্ডার করুন' বা WhatsApp বাটন ব্যবহার করুন।`

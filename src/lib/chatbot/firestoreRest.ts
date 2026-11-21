@@ -374,8 +374,25 @@ export async function fetchServerStoreSettingsWithMeta(): Promise<{
   try {
     const data = await fetchFsGet('store_settings/main');
     if (data) {
+      const loaded = { ...DEFAULT_STORE_SETTINGS, ...(data as Partial<StoreSettingsDoc>) };
+      delete (loaded as Record<string, unknown>).id;
+      delete (loaded as Record<string, unknown>).updatedAt;
+      if (
+        !loaded.ownerConfirmedFields &&
+        (loaded.price250g > 0 || loaded.price500g > 0 || loaded.price1kg > 0)
+      ) {
+        loaded.ownerConfirmedFields = {
+          price250g: loaded.price250g > 0,
+          price500g: loaded.price500g > 0,
+          price1kg: loaded.price1kg > 0,
+          insideDhakaFee: loaded.insideDhakaFee >= 0,
+          dhakaSuburbanFee: (loaded.dhakaSuburbanFee ?? 0) >= 0,
+          outsideDhakaFee: (loaded.outsideDhakaFee ?? 0) >= 0,
+          remoteDistrictFee: (loaded.remoteDistrictFee ?? 0) >= 0,
+        };
+      }
       return {
-        settings: { ...DEFAULT_STORE_SETTINGS, ...(data as Partial<StoreSettingsDoc>) },
+        settings: loaded,
         confirmedFromDb: true,
         source: 'firestore',
       };

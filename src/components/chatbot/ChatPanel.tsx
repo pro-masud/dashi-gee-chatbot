@@ -142,7 +142,12 @@ export function ChatPanel({
   const [resumedDraft, setResumedDraft] = useState<OrderDraftDoc | null>(null);
   const [confirmingOrderMsgId, setConfirmingOrderMsgId] = useState<string | null>(null);
   const [confirmingManageMsgId, setConfirmingManageMsgId] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState('dg_init');
+  const [sessionId, setSessionId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return getOrCreateSessionId();
+    }
+    return 'dg_init';
+  });
   const [aiPaused, setAiPaused] = useState(false);
   const [activeTicketId, setActiveTicketId] = useState('');
   const [assignedAgentName, setAssignedAgentName] = useState('');
@@ -309,8 +314,13 @@ export function ChatPanel({
         credentials: 'same-origin',
       })
         .then((res) => {
-          if (res.status === 403 || res.status === 429) {
-            idleStreak = Math.min(MAX_IDLE_POLLS, idleStreak + 3);
+          if (res.status === 403) {
+            // Stop polling immediately on session cookie mismatch to prevent red console spam
+            idleStreak = MAX_IDLE_POLLS;
+            return null;
+          }
+          if (res.status === 429) {
+            idleStreak = Math.min(MAX_IDLE_POLLS, idleStreak + 4);
             return null;
           }
           return res.ok ? res.json() : null;
@@ -368,8 +378,12 @@ export function ChatPanel({
   }, [messages]);
 
   useEffect(() => {
-    if (open && !minimized) {
-      scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (open && !minimized && scrollEndRef.current) {
+      try {
+        scrollEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      } catch {
+        scrollEndRef.current.scrollIntoView();
+      }
     }
   }, [messages, awaitingReply, confirmingOrderMsgId, open, minimized]);
 
@@ -586,17 +600,6 @@ export function ChatPanel({
     return null;
   }, [messages]);
 
-  useEffect(() => {
-    if (!open || minimized) return;
-    const onGlobalKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onGlobalKey);
-    return () => window.removeEventListener('keydown', onGlobalKey);
-  }, [open, minimized, onClose]);
-
   if (!open || minimized) {
     return null;
   }
@@ -659,6 +662,10 @@ export function ChatPanel({
     setEvidenceError('');
     setResumedDraft(null);
     let activeSessionId = sessionId;
+    if (!activeSessionId || activeSessionId === 'dg_init') {
+      activeSessionId = getOrCreateSessionId();
+      setSessionId(activeSessionId);
+    }
     const needsRollover =
       !replaceFromRetry &&
       messages.length >= CHATBOT_BUILD_CONFIG.SESSION_ROLLOVER_THRESHOLD;
@@ -710,6 +717,7 @@ export function ChatPanel({
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
           'x-requested-with': 'DeshiGeeStorefront',
@@ -1400,9 +1408,9 @@ export function ChatPanel({
               {bn ? 'দ্রুত জিজ্ঞাসা করুন:' : 'Quick questions:'}
             </p>
             <div className="flex flex-wrap gap-1.5">
-              {quickQuestions.map((q) => (
+              {quickQuestions.map((q, idx) => (
                 <button
-                  key={q}
+                  key={`${q}_${idx}`}
                   type="button"
                   onClick={() => sendMessage(q)}
                   className="min-h-[44px] rounded-xl border border-[rgba(180,123,43,0.35)] bg-[#FFFDF9] px-3.5 py-2 text-left text-xs font-medium text-[#1E1710] transition-colors hover:border-[#B47B2B] hover:bg-[#F2ECE1]"

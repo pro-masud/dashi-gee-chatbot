@@ -1,5 +1,12 @@
 import { Type, type FunctionDeclaration } from '@google/genai';
-import type { BatchRecord, PaymentMethod, StoreSettingsDoc, WeightKey } from '../storeTypes';
+import {
+  getConfirmedPriceForWeight,
+  isStorefrontOrderingReady,
+  type BatchRecord,
+  type PaymentMethod,
+  type StoreSettingsDoc,
+  type WeightKey,
+} from '../storeTypes';
 import { CHATBOT_BUILD_CONFIG } from '../chatbot/build-config';
 import {
   convertBanglaDigitsToEnglish,
@@ -589,19 +596,30 @@ export async function executeChatbotTool(
 
     case 'get_current_price': {
       ctx.detectedIntent = 'pricing';
-      ctx.verifiedMonetaryAmounts.add(settings.price250g);
-      ctx.verifiedMonetaryAmounts.add(settings.price500g);
-      ctx.verifiedMonetaryAmounts.add(settings.price1kg);
-      ctx.verifiedMonetaryAmounts.add(settings.freeDeliveryThreshold);
+      const orderingReady = isStorefrontOrderingReady(settings);
+      const p250 = getConfirmedPriceForWeight(settings, '250g');
+      const p500 = getConfirmedPriceForWeight(settings, '500g');
+      const p1k = getConfirmedPriceForWeight(settings, '1kg');
+
+      if (!orderingReady || (!p250 && !p500 && !p1k)) {
+        return {
+          orderingReady: false,
+          currency: 'BDT (৳)',
+          message:
+            ctx.replyLang === 'bn'
+              ? 'পাবনার খাঁটি দেশী গাওয়া ঘিয়ের বর্তমান ব্যাচের মূল্য ও ডেলিভারি চার্জ নির্ধারণের কাজ চলছে। চূড়ান্ত হওয়ার সাথে সাথেই জানানো হবে।'
+              : 'Prices and delivery fees for our pure Deshi Ghee are currently being finalized by the owner.',
+        };
+      }
+
+      if (p250) ctx.verifiedMonetaryAmounts.add(p250);
+      if (p500) ctx.verifiedMonetaryAmounts.add(p500);
+      if (p1k) ctx.verifiedMonetaryAmounts.add(p1k);
+      if (settings.freeDeliveryThreshold > 0) ctx.verifiedMonetaryAmounts.add(settings.freeDeliveryThreshold);
 
       const requestedWeight = normalizeWeight(args.weight);
       if (requestedWeight) {
-        const price =
-          requestedWeight === '250g'
-            ? settings.price250g
-            : requestedWeight === '500g'
-              ? settings.price500g
-              : settings.price1kg;
+        const price = requestedWeight === '250g' ? p250 : requestedWeight === '500g' ? p500 : p1k;
         const stock =
           requestedWeight === '250g'
             ? settings.stock250g
@@ -611,12 +629,12 @@ export async function executeChatbotTool(
         return {
           currency: 'BDT (৳)',
           weight: requestedWeight,
-          priceBdt: price,
-          inStock: stock > 0,
+          priceBdt: price ?? 0,
+          inStock: Boolean(price && stock > 0),
           allPrices: {
-            '250g': settings.price250g,
-            '500g': settings.price500g,
-            '1kg': settings.price1kg,
+            '250g': p250 ?? 0,
+            '500g': p500 ?? 0,
+            '1kg': p1k ?? 0,
           },
           freeDeliveryThresholdBdt: settings.freeDeliveryThreshold,
         };
@@ -625,9 +643,9 @@ export async function executeChatbotTool(
       return {
         currency: 'BDT (৳)',
         prices: {
-          '250g': { priceBdt: settings.price250g, inStock: settings.stock250g > 0 },
-          '500g': { priceBdt: settings.price500g, inStock: settings.stock500g > 0 },
-          '1kg': { priceBdt: settings.price1kg, inStock: settings.stock1kg > 0 },
+          '250g': { priceBdt: p250 ?? 0, inStock: Boolean(p250 && settings.stock250g > 0) },
+          '500g': { priceBdt: p500 ?? 0, inStock: Boolean(p500 && settings.stock500g > 0) },
+          '1kg': { priceBdt: p1k ?? 0, inStock: Boolean(p1k && settings.stock1kg > 0) },
         },
         freeDeliveryThresholdBdt: settings.freeDeliveryThreshold,
       };
@@ -807,6 +825,17 @@ export async function executeChatbotTool(
       const couponCode = String(args.coupon_code || '').trim().toUpperCase();
       const coupon = couponCode ? await fetchServerCouponByCode(couponCode) : null;
 
+      if (!isStorefrontOrderingReady(settings)) {
+        return {
+          ok: false,
+          orderingReady: false,
+          message:
+            ctx.replyLang === 'bn'
+              ? 'স্টোরের পণ্যের মূল্য ও ডেলিভারি চার্জ নির্ধারণের কাজ চলমান থাকায় হিসাব সাময়িকভাবে বন্ধ আছে।'
+              : 'Store pricing and delivery charges are currently being finalized by the owner.',
+        };
+      }
+
       const pricing = computeOrderPricingInPoisha({
         settings,
         qty250g: q250,
@@ -816,6 +845,17 @@ export async function executeChatbotTool(
         paymentMethod,
         coupon,
       });
+
+      if (pricing.subtotalBdt <= 0) {
+        return {
+          ok: false,
+          orderingReady: false,
+          message:
+            ctx.replyLang === 'bn'
+              ? 'নির্বাচিত পণ্যের মূল্য নির্ধারিত হয়নি।'
+              : 'Pricing for the selected products is not configured.',
+        };
+      }
 
       ctx.verifiedMonetaryAmounts.add(pricing.subtotalBdt);
       ctx.verifiedMonetaryAmounts.add(pricing.deliveryFeeBdt);
@@ -1417,6 +1457,17 @@ export async function executeChatbotTool(
 
       const couponCode = String(args.coupon_code || '').trim().toUpperCase().slice(0, 32);
       const coupon = couponCode ? await fetchServerCouponByCode(couponCode) : null;
+      if (!isStorefrontOrderingReady(settings)) {
+        return {
+          ready: false,
+          reason: 'ordering_not_available',
+          message:
+            ctx.replyLang === 'bn'
+              ? 'স্টোরের পণ্যের মূল্য ও ডেলিভারি চার্জ নির্ধারণের কাজ চলমান থাকায় অনলাইন অর্ডার সাময়িকভাবে বন্ধ রয়েছে। চূড়ান্ত হওয়ার সাথে সাথেই অর্ডার গ্রহণ শুরু হবে।'
+              : 'Store pricing and delivery charges are currently being finalized by the owner. Ordering is temporarily unavailable.',
+        };
+      }
+
       const pricing = computeOrderPricingInPoisha({
         settings,
         weight: norm.primaryWeight,
@@ -1428,6 +1479,17 @@ export async function executeChatbotTool(
         paymentMethod,
         coupon,
       });
+
+      if (pricing.subtotalBdt <= 0) {
+        return {
+          ready: false,
+          reason: 'pricing_not_configured',
+          message:
+            ctx.replyLang === 'bn'
+              ? 'নির্বাচিত পণ্যের মূল্য নির্ধারিত না থাকায় অর্ডার সারাংশ প্রস্তুত করা যায়নি।'
+              : 'Pricing for the selected items is not configured. Order summary could not be prepared.',
+        };
+      }
 
       if (!pricing.stockSufficient) {
         return {

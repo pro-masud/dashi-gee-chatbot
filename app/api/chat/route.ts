@@ -29,6 +29,7 @@ import {
 import { generateLiveFallbackReply } from '../../../src/lib/chatbot/liveFallbackEngine';
 import { tryCreateSignedTtsToken } from '../../../src/lib/chatbot/orderToken';
 import { checkCompositeChatRateLimit } from '../../../src/lib/chatbot/rateLimit';
+import { buildSessionSetCookieHeader } from '../../../src/lib/chatbot/sessionAuth';
 import { buildStructuredChatTurnContract } from '../../../src/lib/chatbot/responseContract';
 import { validateChatbotResponse } from '../../../src/lib/chatbot/responseValidator';
 import { validateChatRequestPayload } from '../../../src/lib/chatbot/schema';
@@ -176,14 +177,18 @@ async function generateWithTimeout<T>(promise: Promise<T> | T, timeoutMs: number
 function jsonWithCookie(
   body: Record<string, unknown>,
   status: number,
-  setCookieHeader?: string
+  setCookieHeaders?: string | (string | undefined)[]
 ): Response {
-  const headers: Record<string, string> = {
+  const headers = new Headers({
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
-  };
-  if (setCookieHeader) {
-    headers['Set-Cookie'] = setCookieHeader;
+  });
+  if (Array.isArray(setCookieHeaders)) {
+    for (const h of setCookieHeaders) {
+      if (h) headers.append('Set-Cookie', h);
+    }
+  } else if (setCookieHeaders) {
+    headers.append('Set-Cookie', setCookieHeaders);
   }
   return new Response(JSON.stringify(body), { status, headers });
 }
@@ -245,7 +250,10 @@ function encodeMetaEvent(payload: NdjsonReplyPayload): string {
   })}\n`;
 }
 
-function ndjsonReply(payload: NdjsonReplyPayload, setCookieHeader?: string): Response {
+function ndjsonReply(
+  payload: NdjsonReplyPayload,
+  setCookieHeaders?: string | (string | undefined)[]
+): Response {
   const encoder = new TextEncoder();
   const words = payload.text.split(/(\s+)/);
   const stream = new ReadableStream({
@@ -266,12 +274,16 @@ function ndjsonReply(payload: NdjsonReplyPayload, setCookieHeader?: string): Res
     },
   });
 
-  const headers: Record<string, string> = {
+  const headers = new Headers({
     'Content-Type': 'application/x-ndjson; charset=utf-8',
     'Cache-Control': 'no-store',
-  };
-  if (setCookieHeader) {
-    headers['Set-Cookie'] = setCookieHeader;
+  });
+  if (Array.isArray(setCookieHeaders)) {
+    for (const h of setCookieHeaders) {
+      if (h) headers.append('Set-Cookie', h);
+    }
+  } else if (setCookieHeaders) {
+    headers.append('Set-Cookie', setCookieHeaders);
   }
 
   return new Response(stream, { status: 200, headers });
@@ -317,6 +329,7 @@ export async function POST(request: Request) {
   const channel = reqData.channel;
   const sessionId =
     stripUnsafeHtml(reqData.sessionId || 'sess_anon', 64) || 'sess_anon';
+  const sessionCookieHeader = buildSessionSetCookieHeader(sessionId);
 
   if (reqData.messages.length > CHATBOT_BUILD_CONFIG.MAX_CLIENT_MESSAGES_WINDOW) {
     const limitMsg =
@@ -377,14 +390,17 @@ export async function POST(request: Request) {
   if (mode === 'published' && (!config.enabled || config.maintenanceMode)) {
     const msg = uiLang === 'bn' ? config.maintenanceMessageBn : config.maintenanceMessageEn;
     const maintenanceCode = !config.enabled ? 'chatbot_disabled' : 'maintenance_mode';
-    return ndjsonReply({
-      text: msg,
-      actions: buildContactActions(settings, uiLang),
-      intent: 'maintenance',
-      path: 'fallback',
-      model: 'maintenance-guard',
-      errorCode: maintenanceCode,
-    });
+    return ndjsonReply(
+      {
+        text: msg,
+        actions: buildContactActions(settings, uiLang),
+        intent: 'maintenance',
+        path: 'fallback',
+        model: 'maintenance-guard',
+        errorCode: maintenanceCode,
+      },
+      sessionCookieHeader
+    );
   }
 
   // 2. CGNAT-safe composite rate limits & daily cost ledger
@@ -416,7 +432,7 @@ export async function POST(request: Request) {
         actions: buildContactActions(settings, uiLang),
       },
       429,
-      rateCheck.setCookieHeader
+      [rateCheck.setCookieHeader, sessionCookieHeader]
     );
   }
 
@@ -486,7 +502,7 @@ export async function POST(request: Request) {
         path: 'fallback',
         model: 'human-agent-pause-guard',
       },
-      rateCheck.setCookieHeader
+      [rateCheck.setCookieHeader, sessionCookieHeader]
     );
   }
 
@@ -555,7 +571,7 @@ export async function POST(request: Request) {
         errorCode: capErrorCode,
         factsVersion: facts.factsVersion,
       },
-      rateCheck.setCookieHeader
+      [rateCheck.setCookieHeader, sessionCookieHeader]
     );
   }
 
@@ -597,7 +613,7 @@ export async function POST(request: Request) {
         model: 'security-guard',
         errorCode: 'sensitive_secret_blocked',
       },
-      rateCheck.setCookieHeader
+      [rateCheck.setCookieHeader, sessionCookieHeader]
     );
   }
 
@@ -638,7 +654,7 @@ export async function POST(request: Request) {
         model: 'security-guard',
         errorCode: 'prompt_injection_blocked',
       },
-      rateCheck.setCookieHeader
+      [rateCheck.setCookieHeader, sessionCookieHeader]
     );
   }
 
@@ -702,7 +718,7 @@ export async function POST(request: Request) {
         model: 'confirmation-button-guard',
         errorCode: 'typed_confirmation_requires_button',
       },
-      rateCheck.setCookieHeader
+      [rateCheck.setCookieHeader, sessionCookieHeader]
     );
   }
 
@@ -773,7 +789,7 @@ export async function POST(request: Request) {
         model: 'domain-guard',
         errorCode: 'domain_guard_blocked',
       },
-      rateCheck.setCookieHeader
+      [rateCheck.setCookieHeader, sessionCookieHeader]
     );
   }
 
@@ -1035,7 +1051,7 @@ export async function POST(request: Request) {
         errorCode: safeFallback.errorCode,
         factsVersion: facts.factsVersion,
       },
-      rateCheck.setCookieHeader
+      [rateCheck.setCookieHeader, sessionCookieHeader]
     );
   }
 
@@ -1683,13 +1699,14 @@ export async function POST(request: Request) {
       },
     });
 
-    const headers: Record<string, string> = {
+    const headers = new Headers({
       'Content-Type': 'application/x-ndjson; charset=utf-8',
       'Cache-Control': 'no-store',
-    };
+    });
     if (rateCheck.setCookieHeader) {
-      headers['Set-Cookie'] = rateCheck.setCookieHeader;
+      headers.append('Set-Cookie', rateCheck.setCookieHeader);
     }
+    headers.append('Set-Cookie', sessionCookieHeader);
     return new Response(stream, { status: 200, headers });
   }
 
@@ -1936,6 +1953,6 @@ export async function POST(request: Request) {
       errorCode,
       factsVersion: facts.factsVersion,
     },
-    rateCheck.setCookieHeader
+    [rateCheck.setCookieHeader, sessionCookieHeader]
   );
 }

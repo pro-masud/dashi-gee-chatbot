@@ -232,14 +232,66 @@ export function AdminDashboardView({
     e.preventDefault();
     setSavingSettings(true);
     setSettingsSavedMsg('');
+
+    const p250 = Number(draftSettings.price250g || 0);
+    const p500 = Number(draftSettings.price500g || 0);
+    const p1k = Number(draftSettings.price1kg || 0);
+
+    if (p250 <= 0 || p500 <= 0 || p1k <= 0) {
+      setSettingsSavedMsg(
+        '২৫০ গ্রাম, ৫০০ গ্রাম ও ১ কেজির মূল্য অবশ্যই ০-এর বেশি হতে হবে। (Prices must be greater than 0).'
+      );
+      setSavingSettings(false);
+      return;
+    }
+
     try {
-      await saveStoreSettings(draftSettings);
-      onSettingsUpdated(draftSettings);
+      const confirmedMap: Record<string, boolean> = {
+        ...(draftSettings.ownerConfirmedFields || {}),
+        price250g: p250 > 0,
+        price500g: p500 > 0,
+        price1kg: p1k > 0,
+        stock250g: draftSettings.stock250g >= 0,
+        stock500g: draftSettings.stock500g >= 0,
+        stock1kg: draftSettings.stock1kg >= 0,
+        insideDhakaFee: draftSettings.insideDhakaFee >= 0,
+        outsideDhakaFee: draftSettings.outsideDhakaFee >= 0,
+        dhakaSuburbanFee: (draftSettings.dhakaSuburbanFee ?? 0) >= 0,
+        remoteDistrictFee: (draftSettings.remoteDistrictFee ?? 0) >= 0,
+        freeDeliveryThreshold: draftSettings.freeDeliveryThreshold > 0,
+      };
+      const rawCutoff = draftSettings.dispatchCutoffHourBst;
+      const sanitizedCutoff =
+        typeof rawCutoff === 'number' && Number.isFinite(rawCutoff) && rawCutoff >= 1 && rawCutoff <= 23
+          ? Math.round(rawCutoff)
+          : undefined;
+
+      const settingsToSave: StoreSettingsDoc = {
+        ...draftSettings,
+        price250g: p250,
+        price500g: p500,
+        price1kg: p1k,
+        ownerConfirmedFields: confirmedMap,
+      };
+      if (sanitizedCutoff !== undefined) {
+        settingsToSave.dispatchCutoffHourBst = sanitizedCutoff;
+      } else {
+        delete settingsToSave.dispatchCutoffHourBst;
+      }
+      await saveStoreSettings(settingsToSave);
+      onSettingsUpdated(settingsToSave);
       setSettingsSavedMsg('Storefront pricing, stock, and delivery settings saved.');
     } catch (err) {
-      setSettingsSavedMsg(
-        err instanceof Error ? err.message : 'Failed to save store settings.'
-      );
+      let displayMsg = 'Failed to save store settings.';
+      if (err instanceof Error) {
+        try {
+          const parsed = JSON.parse(err.message) as { error?: string };
+          displayMsg = parsed.error || err.message;
+        } catch {
+          displayMsg = err.message;
+        }
+      }
+      setSettingsSavedMsg(displayMsg);
     } finally {
       setSavingSettings(false);
     }

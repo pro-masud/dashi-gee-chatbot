@@ -36,6 +36,7 @@ import type {
 } from '../../lib/chatbot/types';
 
 function renderInlineBold(line: string) {
+  if (!line) return null;
   const parts = line.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((part, idx) => {
     if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
@@ -50,7 +51,8 @@ function renderInlineBold(line: string) {
 }
 
 function FormattedMessageText({ text, isUser }: { text: string; isUser: boolean }) {
-  const lines = text.split('\n');
+  const safeText = String(text || '');
+  const lines = safeText.split('\n');
   return (
     <div className="space-y-1.5 break-words text-[13.5px] leading-relaxed">
       {lines.map((line, i) => {
@@ -254,9 +256,9 @@ export function ChatMessageBubble({
         {/* Product Comparison & Recommendation Cards */}
         {!isUser && msg.productCards && msg.productCards.length > 0 && (
           <div className="mt-3 space-y-2">
-            {msg.productCards.map((card) => (
+            {msg.productCards.map((card, idx) => (
               <div
-                key={card.weight}
+                key={`${card.weight || 'card'}_${idx}`}
                 className={`rounded-xl border p-2.5 text-xs transition-colors ${
                   card.recommended
                     ? 'border-[rgba(180,123,43,0.55)] bg-[#F2ECE1]/70'
@@ -459,8 +461,8 @@ export function ChatMessageBubble({
                 </span>
               </div>
               {summary.variantLines && summary.variantLines.length > 1 ? (
-                summary.variantLines.map((line) => (
-                  <div key={line.weight} className="flex justify-between gap-2 pl-2 text-[10.5px]">
+                summary.variantLines.map((line, idx) => (
+                  <div key={`${line.weight || 'variant'}_${idx}`} className="flex justify-between gap-2 pl-2 text-[10.5px]">
                     <span>
                       {line.weight} × {line.qty} ({formatBdt(line.unitPriceBdt)})
                     </span>
@@ -884,9 +886,9 @@ export function ChatMessageBubble({
             </button>
             {showSources && (
               <ul className="mt-1 space-y-0.5 pl-1 font-mono text-[10px]">
-                {msg.sources.map((s) => (
-                  <li key={s.id}>
-                    {s.title} ({s.category} · {s.score.toFixed(2)})
+                {msg.sources.map((s, idx) => (
+                  <li key={s.id || `source_${idx}`}>
+                    {s.title} ({s.category} · {typeof s.score === 'number' && !Number.isNaN(s.score) ? s.score.toFixed(2) : '0.00'})
                   </li>
                 ))}
               </ul>
@@ -898,13 +900,13 @@ export function ChatMessageBubble({
         {!isUser && showDiagnostics && msg.diagnostics && (
           <div className="mt-2.5 border-t border-[rgba(30,23,16,0.12)] pt-2 font-mono text-[10px] leading-relaxed text-[#635647]">
             model={msg.diagnostics.model} · path={msg.diagnostics.path} · intent=
-            {msg.diagnostics.intent} ({msg.diagnostics.confidence.toFixed(2)}) · tools=
-            {msg.diagnostics.toolsUsed.join(',') || 'none'} · ragTop=
-            {msg.diagnostics.sources[0]?.score.toFixed(2) || '0.00'} · guard=
+            {msg.diagnostics.intent} ({typeof msg.diagnostics.confidence === 'number' ? msg.diagnostics.confidence.toFixed(2) : '0.00'}) · tools=
+            {msg.diagnostics.toolsUsed?.join(',') || 'none'} · ragTop=
+            {typeof msg.diagnostics.sources?.[0]?.score === 'number' ? msg.diagnostics.sources[0].score.toFixed(2) : '0.00'} · guard=
             {msg.diagnostics.guardStatus} · rag={msg.diagnostics.ragMs ?? 0}ms · model=
             {msg.diagnostics.modelMs ?? 0}ms · tool={msg.diagnostics.toolMs ?? 0}ms ·{' '}
             {msg.diagnostics.promptTokens ?? 0}+{msg.diagnostics.outputTokens ?? 0} tok ($
-            {(msg.diagnostics.estimatedCostUsd ?? 0).toFixed(5)}) · stream=
+            {typeof msg.diagnostics.estimatedCostUsd === 'number' ? msg.diagnostics.estimatedCostUsd.toFixed(5) : '0.00000'}) · stream=
             {msg.diagnostics.streamedRealTokens ? 'live' : 'buffered'}
           </div>
         )}
@@ -939,9 +941,9 @@ export function ChatMessageBubble({
         msg.suggestedReplies &&
         msg.suggestedReplies.length > 0 && (
           <div className="mt-2 flex max-w-[92%] flex-wrap gap-1.5">
-            {msg.suggestedReplies.map((replyText) => (
+            {msg.suggestedReplies.map((replyText, idx) => (
               <button
-                key={replyText}
+                key={`${replyText}_${idx}`}
                 type="button"
                 onClick={() => onSuggestedReply(replyText)}
                 className="min-h-[44px] rounded-xl border border-[rgba(180,123,43,0.35)] bg-[#FFFDF9] px-3.5 py-2 text-left text-xs font-medium text-[#1E1710] transition-colors hover:border-[#B47B2B] hover:bg-[#F2ECE1]"

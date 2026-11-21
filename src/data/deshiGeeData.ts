@@ -420,3 +420,9 @@ export function clientAssessAddressCompleteness(
 export function formatBdt(amount: number): string {
   return `৳ ${Math.round(amount).toLocaleString('en-US')}`;
 }
+
+export function toBengaliDigits(num: number | string): string {
+  const bnDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+  return String(num).replace(/\d/g, (d) => bnDigits[Number(d)] ?? d);
+}
+

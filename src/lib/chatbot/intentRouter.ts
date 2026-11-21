@@ -1,4 +1,4 @@
-import type { StoreSettingsDoc, WeightKey } from '../storeTypes';
+import { isStorefrontOrderingReady, type StoreSettingsDoc, type WeightKey } from '../storeTypes';
 import { convertBanglaDigitsToEnglish, normalizeWeight } from './domain-guard';
 import type { OrderDraftDoc, ProductCardItem, TurnIntent } from './types';
 
@@ -464,6 +464,16 @@ export function buildProductComparisonCards(
   recommendedWeight?: WeightKey,
   customReason?: { en?: string; bn?: string }
 ): ProductCardItem[] {
+  if (!isStorefrontOrderingReady(settings)) {
+    return [];
+  }
+  const p250 = Math.round(settings.price250g || 0);
+  const p500 = Math.round(settings.price500g || 0);
+  const p1k = Math.round(settings.price1kg || 0);
+  if (p250 <= 0 && p500 <= 0 && p1k <= 0) {
+    return [];
+  }
+
   const variants: { weight: WeightKey; labelEn: string; labelBn: string; price: number; stock: number }[] = [
     {
       weight: '250g',

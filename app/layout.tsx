@@ -40,6 +40,7 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const { settings, confirmedFromDb } = await fetchServerStoreSettingsWithMeta();
   const structuredData = buildStorefrontStructuredData({ settings, confirmedFromDb });
+  const serializedSettings = JSON.parse(JSON.stringify(settings)) as typeof settings;
 
   return (
     <html lang="en" data-theme="light" suppressHydrationWarning>
@@ -61,7 +62,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       </head>
       <body suppressHydrationWarning>
         <ErrorBoundary>
-          <StorefrontProvider initialSettings={settings}>{children}</StorefrontProvider>
+          <StorefrontProvider initialSettings={serializedSettings}>{children}</StorefrontProvider>
         </ErrorBoundary>
       </body>
     </html>

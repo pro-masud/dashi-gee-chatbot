@@ -146,21 +146,143 @@ export async function fetchStoreSettings(): Promise<StoreSettingsDoc> {
   try {
     const snap = await getDoc(doc(db, 'store_settings', 'main'));
     if (snap.exists()) {
-      return { ...DEFAULT_STORE_SETTINGS, ...(snap.data() as Partial<StoreSettingsDoc>) };
+      const data = { ...DEFAULT_STORE_SETTINGS, ...(snap.data() as Partial<StoreSettingsDoc>) };
+      try {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('deshi_gee_cached_store_settings', JSON.stringify(data));
+        }
+      } catch {}
+      return data;
     }
-    return DEFAULT_STORE_SETTINGS;
   } catch (error) {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('deshi_gee_cached_store_settings');
+        if (cached) {
+          return { ...DEFAULT_STORE_SETTINGS, ...(JSON.parse(cached) as Partial<StoreSettingsDoc>) };
+        }
+      } catch {}
+    }
     handleFirestoreError(error, OperationType.GET, 'store_settings/main');
   }
+  if (typeof window !== 'undefined') {
+    try {
+      const cached = localStorage.getItem('deshi_gee_cached_store_settings');
+      if (cached) {
+        return { ...DEFAULT_STORE_SETTINGS, ...(JSON.parse(cached) as Partial<StoreSettingsDoc>) };
+      }
+    } catch {}
+  }
+  return DEFAULT_STORE_SETTINGS;
 }
+
+/**
+ * Recursively strips undefined fields from plain JavaScript objects before Firestore writes.
+ * Preserves custom class instances and Firestore Sentinels (e.g. serverTimestamp()).
+ */
+export function stripUndefinedDeep<T>(val: T): T {
+  if (val === undefined) return undefined as unknown as T;
+  if (val === null || typeof val !== 'object') return val;
+  if (val instanceof Date) return val;
+  if (Array.isArray(val)) {
+    return val.filter((item) => item !== undefined).map(stripUndefinedDeep) as unknown as T;
+  }
+  const proto = Object.getPrototypeOf(val);
+  if (proto !== Object.prototype && proto !== null) {
+    return val;
+  }
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+    if (v !== undefined) {
+      result[k] = stripUndefinedDeep(v);
+    }
+  }
+  return result as T;
+}
+
+const FIRESTORE_STORE_SETTINGS_ALLOWED_KEYS = new Set([
+  'productNameEn',
+  'productNameBn',
+  'taglineEn',
+  'taglineBn',
+  'originLocation',
+  'price250g',
+  'price500g',
+  'price1kg',
+  'stock250g',
+  'stock500g',
+  'stock1kg',
+  'insideDhakaFee',
+  'dhakaSuburbanFee',
+  'outsideDhakaFee',
+  'remoteDistrictFee',
+  'freeDeliveryThreshold',
+  'estimatedDhakaDays',
+  'estimatedSuburbanDays',
+  'estimatedOutsideDays',
+  'estimatedRemoteDays',
+  'dispatchCutoffHourBst',
+  'cutoffNoticeEn',
+  'cutoffNoticeBn',
+  'codConfirmEnabled',
+  'codHighValueThresholdBdt',
+  'lastOrderNumber',
+  'bkashNumber',
+  'nagadNumber',
+  'advanceDiscountPct',
+  'whatsappNumber',
+  'supportPhone',
+  'supportEmail',
+  'businessAddress',
+  'facebookUrl',
+  'instagramUrl',
+  'activeBatchCode',
+]);
 
 export async function saveStoreSettings(settings: StoreSettingsDoc): Promise<void> {
   const path = 'store_settings/main';
+  const cleanSettings = stripUndefinedDeep(settings);
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('deshi_gee_cached_store_settings', JSON.stringify(cleanSettings));
+    } catch {}
+  }
+
+  // Filter payload strictly to fields allowed by firestore.rules (hasOnly rule)
+  const firestorePayload: Record<string, unknown> = {};
+  for (const key of FIRESTORE_STORE_SETTINGS_ALLOWED_KEYS) {
+    const val = (cleanSettings as unknown as Record<string, unknown>)[key];
+    if (val !== undefined) {
+      firestorePayload[key] = val;
+    }
+  }
+
+  // Ensure required default string fields to satisfy firestore.rules hasAll
+  if (typeof firestorePayload.productNameEn !== 'string' || !firestorePayload.productNameEn) {
+    firestorePayload.productNameEn = DEFAULT_STORE_SETTINGS.productNameEn;
+  }
+  if (typeof firestorePayload.productNameBn !== 'string' || !firestorePayload.productNameBn) {
+    firestorePayload.productNameBn = DEFAULT_STORE_SETTINGS.productNameBn;
+  }
+  if (typeof firestorePayload.taglineEn !== 'string') firestorePayload.taglineEn = DEFAULT_STORE_SETTINGS.taglineEn || '';
+  if (typeof firestorePayload.taglineBn !== 'string') firestorePayload.taglineBn = DEFAULT_STORE_SETTINGS.taglineBn || '';
+  if (typeof firestorePayload.originLocation !== 'string') firestorePayload.originLocation = DEFAULT_STORE_SETTINGS.originLocation || '';
+  if (typeof firestorePayload.estimatedDhakaDays !== 'string') firestorePayload.estimatedDhakaDays = '';
+  if (typeof firestorePayload.estimatedOutsideDays !== 'string') firestorePayload.estimatedOutsideDays = '';
+  if (typeof firestorePayload.bkashNumber !== 'string') firestorePayload.bkashNumber = '';
+  if (typeof firestorePayload.nagadNumber !== 'string') firestorePayload.nagadNumber = '';
+  if (typeof firestorePayload.whatsappNumber !== 'string') firestorePayload.whatsappNumber = '';
+  if (typeof firestorePayload.supportPhone !== 'string') firestorePayload.supportPhone = '';
+  if (typeof firestorePayload.supportEmail !== 'string') firestorePayload.supportEmail = '';
+  if (typeof firestorePayload.businessAddress !== 'string') firestorePayload.businessAddress = '';
+  if (typeof firestorePayload.facebookUrl !== 'string') firestorePayload.facebookUrl = '';
+  if (typeof firestorePayload.instagramUrl !== 'string') firestorePayload.instagramUrl = '';
+  if (typeof firestorePayload.activeBatchCode !== 'string') firestorePayload.activeBatchCode = '';
+
+  firestorePayload.updatedAt = serverTimestamp();
+
   try {
-    await setDoc(doc(db, 'store_settings', 'main'), {
-      ...settings,
-      updatedAt: serverTimestamp(),
-    });
+    await setDoc(doc(db, 'store_settings', 'main'), firestorePayload);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -232,9 +354,10 @@ export async function fetchAllBatches(): Promise<BatchRecord[]> {
 
 export async function saveBatchRecord(batch: BatchRecord): Promise<void> {
   const id = batch.batchCode.trim().toUpperCase();
+  const cleanBatch = stripUndefinedDeep(batch);
   try {
     await setDoc(doc(db, 'batches', id), {
-      ...batch,
+      ...cleanBatch,
       batchCode: id,
       updatedAt: serverTimestamp(),
     });
@@ -409,9 +532,10 @@ export async function fetchAdminCoupons(): Promise<CouponRecord[]> {
 
 export async function saveAdminCoupon(coupon: CouponRecord): Promise<void> {
   const code = coupon.code.trim().toUpperCase();
+  const cleanCoupon = stripUndefinedDeep(coupon);
   try {
     await setDoc(doc(db, 'coupons', code), {
-      ...coupon,
+      ...cleanCoupon,
       code,
       updatedAt: serverTimestamp(),
     });

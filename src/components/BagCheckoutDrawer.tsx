@@ -39,6 +39,7 @@ import {
   clientAssessAddressCompleteness,
   clientResolveZoneFromDistrictAndArea,
   formatBdt,
+  toBengaliDigits,
 } from '../data/deshiGeeData';
 import { trackStoreEvent } from '../lib/analytics';
 import { ResilientImage } from './ResilientImage';
@@ -950,8 +951,8 @@ export function BagCheckoutDrawer({
                             >
                               <Minus className="h-3.5 w-3.5" />
                             </button>
-                            <span className="w-8 text-center font-mono text-xs font-bold tabular-nums">
-                              {item.qty}
+                            <span className="w-8 text-center font-mono text-sm font-bold tabular-nums text-[#1E1710]">
+                              {bn ? toBengaliDigits(item.qty) : item.qty}
                             </span>
                             <button
                               type="button"

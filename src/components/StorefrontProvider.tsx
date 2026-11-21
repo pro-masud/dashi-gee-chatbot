@@ -38,7 +38,7 @@ import {
   isStoreFieldConfirmed,
   testFirestoreConnection,
 } from '../lib/firebase';
-import { Lang, formatBdt } from '../data/deshiGeeData';
+import { Lang, formatBdt, toBengaliDigits } from '../data/deshiGeeData';
 import { trackStoreEvent } from '../lib/analytics';
 import {
   DEFAULT_CHATBOT_CONFIG,
@@ -645,8 +645,8 @@ export function StorefrontProvider({
                 >
                   <ShoppingBag className="h-4 w-4 text-[#E5B25D] transition-transform group-hover:scale-110" />
                   <span className="font-medium">{bn ? 'ব্যাগ' : 'Bag'}</span>
-                  <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-[#B47B2B] px-1.5 font-mono text-[11px] font-bold text-[#FFFDF9] tabular-nums">
-                    {totalBagCount}
+                  <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-[#B47B2B] px-1.5 font-mono text-[11px] font-bold text-[#FFFDF9] tabular-nums shadow-xs">
+                    {bn ? toBengaliDigits(totalBagCount) : totalBagCount}
                   </span>
                 </button>
 

@@ -58,6 +58,7 @@ import {
   WAYS_TO_ENJOY,
   WEIGHT_VARIANTS,
   formatBdt,
+  toBengaliDigits,
 } from '../data/deshiGeeData';
 import { trackStoreEvent } from '../lib/analytics';
 import { ResilientImage } from './ResilientImage';
@@ -892,7 +893,7 @@ export function HomeStorefrontView() {
                             : 'border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] text-[#635647] hover:border-[rgba(30,23,16,0.28)] hover:text-[#1E1710]'
                         }`}
                       >
-                        <span className="font-mono text-xs font-bold text-[#1E1710] sm:text-sm">
+                        <span className="text-xs font-bold text-[#1E1710] tracking-tight sm:text-sm">
                           {bn ? v.labelBn : v.labelEn}
                         </span>
                         {orderingReady && price > 0 && (
@@ -945,8 +946,8 @@ export function HomeStorefrontView() {
                     >
                       <Minus className="h-4 w-4" />
                     </button>
-                    <span className="w-10 text-center font-mono text-sm font-bold tabular-nums">
-                      {purchaseQty}
+                    <span className="w-10 text-center font-mono text-base font-bold tabular-nums text-[#1E1710]">
+                      {bn ? toBengaliDigits(purchaseQty) : purchaseQty}
                     </span>
                     <button
                       type="button"
@@ -1203,7 +1204,7 @@ export function HomeStorefrontView() {
                         : 'text-[#E8DFC5]/75 hover:text-[#FAF7F2]'
                     }`}
                   >
-                    {stage.index}
+                    {bn ? toBengaliDigits(stage.index) : stage.index}
                   </button>
                 ))}
               </div>
@@ -1928,8 +1929,8 @@ export function HomeStorefrontView() {
                   <span className="font-mono text-sm font-bold tabular-nums text-[#1E1710]">
                     {formatBdt(activePrice)}
                   </span>
-                  <span className="font-mono text-[11px] font-semibold text-[#8A5A17]">
-                    ({selectedWeight})
+                  <span className="text-[11px] font-bold text-[#8A5A17]">
+                    ({bn ? selectedVariantMeta.labelBn : selectedWeight})
                   </span>
                 </div>
               ) : (
