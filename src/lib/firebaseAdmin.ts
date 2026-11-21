@@ -116,7 +116,7 @@ const adminAuthGlobal = globalThis as unknown as {
 
 export function setStrictAdminAuthOverrideForTests(fn: AdminAuthTestHook | null): void {
   assertNoTestModeInProduction();
-  if (isTestProcessRuntime()) {
+  if (process.env.NODE_ENV !== 'production' && isTestProcessRuntime()) {
     adminAuthGlobal.__deshiGeeStrictAdminAuthOverride = fn;
   }
 }
@@ -142,7 +142,12 @@ export function getAdminSdkTestAvailabilityOverride(): boolean | null {
 export async function verifyAdminIdTokenStrict(
   authHeader: string | null
 ): Promise<StrictAdminAuthResult> {
-  if (isTestProcessRuntime() && adminAuthGlobal.__deshiGeeStrictAdminAuthOverride) {
+  assertNoTestModeInProduction();
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    isTestProcessRuntime() &&
+    adminAuthGlobal.__deshiGeeStrictAdminAuthOverride
+  ) {
     const res = await adminAuthGlobal.__deshiGeeStrictAdminAuthOverride(authHeader);
     const verified = res.emailVerified ?? res.ok;
     if (!res.ok || !verified) {
@@ -301,7 +306,7 @@ export async function checkAdminSdkReadiness(): Promise<AdminSdkReadinessReport>
           ? 'adc_credentials_missing'
           : 'admin_sdk_unavailable',
       detail: isPerm
-        ? 'Runtime service account lacks roles/datastore.user on project qualified-transit-lpd8p.'
+        ? `Runtime service account lacks roles/datastore.user on project ${ADMIN_PROJECT_ID}.`
         : isCred
           ? 'Application Default Credentials (ADC) not detected in this runtime.'
           : 'Firebase Admin SDK Firestore probe failed.',

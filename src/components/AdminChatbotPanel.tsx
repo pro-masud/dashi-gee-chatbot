@@ -33,6 +33,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import { auth, type StoreSettingsDoc } from '../lib/firebase';
+import { HelpInfoButton } from './admin/AdminHelpModal';
 import {
   DEFAULT_CHATBOT_CONFIG,
   PROTECTED_CORE_RULES_SUMMARY,
@@ -1298,6 +1299,7 @@ export function AdminChatbotPanel({
             <h2 className="font-display text-lg font-semibold text-[#1E1710]">
               Deshi Gee AI Chatbot Studio
             </h2>
+            <HelpInfoButton section="chatbot_studio" />
             <span className="rounded-md bg-[#F2ECE1] px-2 py-0.5 font-mono text-[11px] font-medium text-[#8A5A17]">
               v{draftConfig.version} · {draftConfig.lastSyncStatus}
             </span>
@@ -1559,6 +1561,7 @@ export function AdminChatbotPanel({
                 <h3 className="flex items-center gap-2 font-display text-base font-semibold text-[#1E1710]">
                   <BarChart3 className="h-4 w-4 text-[#B47B2B]" />
                   <span>Chat-to-Order Funnel &amp; Revenue Attribution</span>
+                  <HelpInfoButton section="chatbot_funnel" />
                 </h3>
                 <span className="font-mono text-xs font-semibold text-[#8A5A17]">
                   Conversion: {attributionData.analytics.funnel.chatToOrderPct}% · AOV:{' '}
@@ -3307,6 +3310,7 @@ export function AdminChatbotPanel({
               <h3 className="flex items-center gap-2 font-display text-base font-semibold">
                 <AlertTriangle className="h-4 w-4 text-[#B47B2B]" />
                 <span>Unanswered Questions ({unansweredQueue.length})</span>
+                <HelpInfoButton section="chatbot_unanswered" />
               </h3>
               {unansweredQueue.map((logItem) => (
                 <div

@@ -343,7 +343,9 @@ async function runFsStructuredQuery(
 export async function verifyServerAdminToken(
   authHeader: string | null
 ): Promise<{ ok: boolean; email: string; uid: string; emailVerified?: boolean; reason?: string }> {
+  assertNoTestModeInProduction();
   if (
+    process.env.NODE_ENV !== 'production' &&
     (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') &&
     globalFirestoreTestHooks.__deshiGeeAdminVerifyOverride
   ) {
@@ -2113,7 +2115,10 @@ export function setAdminAuthOverrideForTests(
   fn: ((authHeader: string | null) => Promise<{ ok: boolean; email: string; uid: string }>) | null
 ): void {
   assertNoTestModeInProduction();
-  if (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1') {
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    (process.env.NODE_ENV === 'test' || process.env.DESHI_GEE_TEST_MODE === '1')
+  ) {
     globalFirestoreTestHooks.__deshiGeeAdminVerifyOverride = fn;
   }
 }

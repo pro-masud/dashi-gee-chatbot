@@ -180,19 +180,25 @@ export async function publishBusinessEvent(
     };
   }
 
+  const templateOverride = rules.templates?.[event.type];
+  const recipientScope = templateOverride?.recipientScope || 'both';
+  const allowAdminChannels = recipientScope === 'admin' || recipientScope === 'both';
+  const allowCustomerChannels = recipientScope === 'customer' || recipientScope === 'both';
+
   const targetChannels: NotificationChannel[] = [];
-  if (rule.telegram && settings.telegram.enabled) {
+  if (allowAdminChannels && rule.telegram && settings.telegram.enabled) {
     targetChannels.push('telegram');
   }
   const discordChannelKey = mapEventToDiscordChannel(event.type);
   if (
+    allowAdminChannels &&
     rule.discord &&
     settings.discord.enabled &&
     settings.discord.enabledChannels[discordChannelKey] !== false
   ) {
     targetChannels.push('discord');
   }
-  if (rule.whatsapp && shouldEnqueueWhatsAppForEvent(event, settings)) {
+  if (allowCustomerChannels && rule.whatsapp && shouldEnqueueWhatsAppForEvent(event, settings)) {
     targetChannels.push('whatsapp');
   }
 
@@ -321,10 +327,13 @@ export async function processNotificationQueue(options?: {
     let externalMessageId: string | undefined;
     let errorMessage: string | undefined;
 
+    const templateOverride = rules.templates?.[job.eventType];
+
     try {
       if (job.channel === 'telegram') {
         const res = await sendTelegramEventNotification(job.payload, {
           chatIdsOverride: settings.telegram.chatIdsOverride,
+          templateOverride,
           fetchImpl: options?.fetchImpl,
         });
         ok = res.ok;
@@ -334,6 +343,7 @@ export async function processNotificationQueue(options?: {
       } else if (job.channel === 'discord') {
         const res = await sendDiscordEventNotification(job.payload, {
           channelKeyOverride: job.discordChannelKey,
+          templateOverride,
           fetchImpl: options?.fetchImpl,
         });
         ok = res.ok;
@@ -344,7 +354,7 @@ export async function processNotificationQueue(options?: {
         const res = await sendWhatsAppBusinessEventNotification(
           job.payload,
           settings.whatsapp,
-          { fetchImpl: options?.fetchImpl }
+          { templateOverride, fetchImpl: options?.fetchImpl, now: new Date(nowMs) }
         );
         ok = res.ok;
         retryable = Boolean(res.retryable);

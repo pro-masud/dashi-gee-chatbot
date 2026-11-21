@@ -1,9 +1,11 @@
 import {
   buildAdminDashboardUrl,
   maskPhoneForAdminAlert,
+  renderNotificationTemplate,
   sanitizeNotificationError,
   type BusinessEventPayload,
   type BusinessEventType,
+  type NotificationTemplateOverride,
 } from '../notifications/types';
 
 export interface TelegramConfigStatus {
@@ -75,12 +77,23 @@ const EVENT_LABELS: Record<BusinessEventType, string> = {
   SYSTEM_ERROR: 'System Alert',
 };
 
-export function formatTelegramEventHtml(event: BusinessEventPayload): string {
-  const title = event.title || EVENT_LABELS[event.type] || event.type;
+export function formatTelegramEventHtml(
+  event: BusinessEventPayload,
+  templateOverride?: NotificationTemplateOverride
+): string {
+  const customTitle = templateOverride?.titleTemplate
+    ? renderNotificationTemplate(templateOverride.titleTemplate, event, { maskPhone: true })
+    : '';
+  const customBody = templateOverride?.bodyTemplate
+    ? renderNotificationTemplate(templateOverride.bodyTemplate, event, { maskPhone: true })
+    : '';
+
+  const title = customTitle || event.title || EVENT_LABELS[event.type] || event.type;
   const lines: string[] = [`<b>${escapeHtml(title)}</b>`];
 
-  if (event.summary) {
-    lines.push(escapeHtml(event.summary.slice(0, 500)));
+  const summaryText = customBody || event.summary || '';
+  if (summaryText) {
+    lines.push(escapeHtml(summaryText.slice(0, 1200)));
   }
 
   if (event.orderNumber) {
@@ -139,7 +152,11 @@ export function formatTelegramEventHtml(event: BusinessEventPayload): string {
  */
 export async function sendTelegramEventNotification(
   event: BusinessEventPayload,
-  options?: { chatIdsOverride?: string; fetchImpl?: typeof fetch }
+  options?: {
+    chatIdsOverride?: string;
+    templateOverride?: NotificationTemplateOverride;
+    fetchImpl?: typeof fetch;
+  }
 ): Promise<TelegramSendResult> {
   const token = getTelegramBotToken();
   const chatIds = resolveTelegramChatIds(options?.chatIdsOverride);
@@ -154,7 +171,7 @@ export async function sendTelegramEventNotification(
     };
   }
 
-  const html = formatTelegramEventHtml(event);
+  const html = formatTelegramEventHtml(event, options?.templateOverride);
   const doFetch = options?.fetchImpl || fetch;
   const messageIds: string[] = [];
   const errors: string[] = [];

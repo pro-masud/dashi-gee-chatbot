@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server';
 import { verifyServerAdminToken } from '../../../../src/lib/chatbot/firestoreRest';
 import { AdminSdkUnavailableError } from '../../../../src/lib/firebaseAdmin';
+import {
+  isGeminiApiKeyConfigured,
+  isOrderTokenSecretConfigured,
+} from '../../../../src/lib/gemini/client';
+import { getCourierApiReadiness } from '../../../../src/lib/integrations/courierApi';
 import { getDiscordReadiness } from '../../../../src/lib/integrations/discordWebhook';
+import { getMessagingGatewayReadiness } from '../../../../src/lib/integrations/messagingGateway';
+import { getPaymentGatewayReadiness } from '../../../../src/lib/integrations/paymentGateway';
 import { getTelegramReadiness } from '../../../../src/lib/integrations/telegramBot';
 import { getWhatsAppCloudReadiness } from '../../../../src/lib/integrations/whatsappCloud';
 import {
@@ -15,22 +22,83 @@ import {
   DEFAULT_INTEGRATION_SETTINGS,
   DEFAULT_NOTIFICATION_RULES,
   DISCORD_CHANNEL_KEYS,
+  isCustomerCapableEvent,
   mergeIntegrationSettings,
   mergeNotificationRules,
+  type BusinessEventType,
   type DiscordChannelKey,
   type IntegrationSettingsDoc,
+  type NotificationRecipientScope,
   type NotificationRulesDoc,
+  type NotificationTemplateOverride,
 } from '../../../../src/lib/notifications/types';
 
 export const dynamic = 'force-dynamic';
 
 function getAiReadiness() {
-  const hasGeminiKey = String(process.env.GEMINI_API_KEY || '').trim().length >= 16;
+  const hasGeminiKey = isGeminiApiKeyConfigured();
   return {
     configured: hasGeminiKey,
     provider: 'Google Gemini',
     model: process.env.GEMINI_CHAT_MODEL || 'gemini-2.5-flash',
     hasApiKey: hasGeminiKey,
+  };
+}
+
+function getFullIntegrationReadiness(chatIdsOverride?: string) {
+  const siteBaseUrl = String(process.env.NEXT_PUBLIC_SITE_URL || '')
+    .trim()
+    .replace(/\/+$/, '');
+  const metaHasAppSecret = String(process.env.META_APP_SECRET || '').trim().length >= 8;
+  const metaHasVerifyToken = String(process.env.META_VERIFY_TOKEN || '').trim().length >= 4;
+  const metaHasPageToken = String(process.env.META_PAGE_ACCESS_TOKEN || '').trim().length >= 10;
+
+  const ownerEmail = String(process.env.OWNER_NOTIFICATION_EMAIL || '').trim();
+  const maskedOwnerEmail = ownerEmail.includes('@')
+    ? `${ownerEmail.slice(0, 2)}***@${ownerEmail.split('@')[1]}`
+    : '';
+
+  return {
+    telegram: getTelegramReadiness(chatIdsOverride),
+    discord: getDiscordReadiness(),
+    whatsapp: getWhatsAppCloudReadiness(),
+    aiSupport: getAiReadiness(),
+    meta: {
+      configured: metaHasAppSecret && metaHasVerifyToken,
+      hasAppSecret: metaHasAppSecret,
+      hasVerifyToken: metaHasVerifyToken,
+      hasPageAccessToken: metaHasPageToken,
+      webhookPath: '/api/channels/webhook',
+    },
+    payments: {
+      ...getPaymentGatewayReadiness(),
+      callbackPath: '/api/payments/callback',
+    },
+    couriers: {
+      ...getCourierApiReadiness(),
+      pathaoLiveMode: String(process.env.PATHAO_IS_LIVE || '').toLowerCase() === 'true',
+      redxLiveMode: String(process.env.REDX_IS_LIVE || '').toLowerCase() === 'true',
+      hasPathaoLocationMap: String(process.env.PATHAO_CITY_ZONE_MAP_JSON || '').trim().length > 2,
+      hasRedxAreaMap: String(process.env.REDX_AREA_ID_MAP_JSON || '').trim().length > 2,
+      webhookPath: '/api/couriers/webhook',
+    },
+    messaging: {
+      ...getMessagingGatewayReadiness(),
+      hasOwnerEmail: ownerEmail.includes('@'),
+      maskedOwnerEmail,
+      ownerWebhook: Boolean((process.env.OWNER_WEBHOOK_URL || '').trim()),
+      whatsappWebhook: Boolean((process.env.WHATSAPP_WEBHOOK_URL || '').trim()),
+      emailWebhook: Boolean((process.env.EMAIL_WEBHOOK_URL || '').trim()),
+      googleSheetsWebhook: Boolean((process.env.GOOGLE_SHEETS_WEBHOOK_URL || '').trim()),
+    },
+    security: {
+      orderTokenSecretStrong: isOrderTokenSecretConfigured(),
+      cronSecretConfigured: String(process.env.CRON_SECRET || '').trim().length >= 16,
+      workerSecretConfigured:
+        String(process.env.NOTIFICATION_WORKER_SECRET || '').trim().length >= 16,
+      siteUrlConfigured: Boolean(siteBaseUrl) && !siteBaseUrl.includes('localhost'),
+      siteBaseUrl: siteBaseUrl || '',
+    },
   };
 }
 
@@ -90,12 +158,7 @@ export async function GET(request: Request) {
       ok: true,
       storageReady,
       storageNotice,
-      readiness: {
-        telegram: getTelegramReadiness(settings.telegram.chatIdsOverride),
-        discord: getDiscordReadiness(),
-        whatsapp: getWhatsAppCloudReadiness(),
-        aiSupport: getAiReadiness(),
-      },
+      readiness: getFullIntegrationReadiness(settings.telegram.chatIdsOverride),
       settings,
       rules,
     },
@@ -131,7 +194,11 @@ export async function POST(request: Request) {
   // Strictly sanitize incoming settings (reject secrets / invalid chat IDs / oversized strings)
   let settingsPatch: Partial<IntegrationSettingsDoc> | undefined;
   if (body.settings !== undefined) {
-    if (typeof body.settings !== 'object' || body.settings === null || Array.isArray(body.settings)) {
+    if (
+      typeof body.settings !== 'object' ||
+      body.settings === null ||
+      Array.isArray(body.settings)
+    ) {
       return NextResponse.json(
         { ok: false, code: 'invalid_settings', error: '"settings" must be an object.' },
         { status: 400, headers: { 'Cache-Control': 'no-store' } }
@@ -143,7 +210,9 @@ export async function POST(request: Request) {
     if (rawSettings.telegram && typeof rawSettings.telegram === 'object') {
       const tg = rawSettings.telegram as Record<string, unknown>;
       const chatIdsOverride =
-        typeof tg.chatIdsOverride === 'string' ? tg.chatIdsOverride.trim().slice(0, 180) : undefined;
+        typeof tg.chatIdsOverride === 'string'
+          ? tg.chatIdsOverride.trim().slice(0, 180)
+          : undefined;
       if (
         chatIdsOverride &&
         chatIdsOverride
@@ -267,6 +336,72 @@ export async function POST(request: Request) {
       }
       rulesPatch.events = evOut;
     }
+
+    if (rawRules.templates !== undefined) {
+      if (
+        typeof rawRules.templates !== 'object' ||
+        rawRules.templates === null ||
+        Array.isArray(rawRules.templates)
+      ) {
+        return NextResponse.json(
+          { ok: false, code: 'invalid_templates', error: '"rules.templates" must be an object.' },
+          { status: 400, headers: { 'Cache-Control': 'no-store' } }
+        );
+      }
+      const tplInput = rawRules.templates as Record<string, unknown>;
+      const tplOut: Partial<Record<BusinessEventType, NotificationTemplateOverride>> = {};
+      for (const evt of BUSINESS_EVENT_TYPES) {
+        const entry = tplInput[evt];
+        if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+          const t = entry as Record<string, unknown>;
+          const scopeRaw = String(t.recipientScope || '').trim();
+          const parsedScope: NotificationRecipientScope | undefined =
+            scopeRaw === 'admin' || scopeRaw === 'customer' || scopeRaw === 'both'
+              ? scopeRaw
+              : undefined;
+          const recipientScope: NotificationRecipientScope | undefined = parsedScope
+            ? isCustomerCapableEvent(evt)
+              ? parsedScope
+              : 'admin'
+            : undefined;
+          const cleanEntry: NotificationTemplateOverride = {
+            ...(typeof t.titleTemplate === 'string' && t.titleTemplate.trim()
+              ? { titleTemplate: t.titleTemplate.trim().slice(0, 180) }
+              : {}),
+            ...(typeof t.bodyTemplate === 'string' && t.bodyTemplate.trim()
+              ? { bodyTemplate: t.bodyTemplate.trim().slice(0, 1200) }
+              : {}),
+            ...(typeof t.emailSubjectTemplate === 'string' && t.emailSubjectTemplate.trim()
+              ? { emailSubjectTemplate: t.emailSubjectTemplate.trim().slice(0, 160) }
+              : {}),
+            ...(typeof t.whatsappMessageTemplate === 'string' && t.whatsappMessageTemplate.trim()
+              ? { whatsappMessageTemplate: t.whatsappMessageTemplate.trim().slice(0, 1000) }
+              : {}),
+            ...(recipientScope ? { recipientScope } : {}),
+          };
+          if (Object.keys(cleanEntry).length > 0) {
+            tplOut[evt] = cleanEntry;
+          }
+        }
+      }
+      rulesPatch.templates = tplOut;
+    }
+
+    if (rawRules.ownerNotificationEmailOverride !== undefined) {
+      const email = String(rawRules.ownerNotificationEmailOverride || '').trim();
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return NextResponse.json(
+          {
+            ok: false,
+            code: 'invalid_owner_email',
+            error: 'Owner notification email override must be a valid email address or left blank.',
+          },
+          { status: 400, headers: { 'Cache-Control': 'no-store' } }
+        );
+      }
+      rulesPatch.ownerNotificationEmailOverride = email.slice(0, 120);
+    }
+
     if (rawRules.maxRetries !== undefined) {
       rulesPatch.maxRetries = Number(rawRules.maxRetries);
     }
@@ -291,12 +426,7 @@ export async function POST(request: Request) {
         ok: true,
         settings: savedSettings,
         rules: savedRules,
-        readiness: {
-          telegram: getTelegramReadiness(savedSettings.telegram.chatIdsOverride),
-          discord: getDiscordReadiness(),
-          whatsapp: getWhatsAppCloudReadiness(),
-          aiSupport: getAiReadiness(),
-        },
+        readiness: getFullIntegrationReadiness(savedSettings.telegram.chatIdsOverride),
       },
       { headers: { 'Cache-Control': 'no-store' } }
     );
@@ -306,7 +436,8 @@ export async function POST(request: Request) {
         {
           ok: false,
           code: 'admin_sdk_unavailable',
-          error: 'Firestore Admin SDK (ADC/IAM) is unavailable; cannot persist integration settings.',
+          error:
+            'Firestore Admin SDK (ADC/IAM) is unavailable; cannot persist integration settings.',
         },
         { status: 503, headers: { 'Cache-Control': 'no-store' } }
       );

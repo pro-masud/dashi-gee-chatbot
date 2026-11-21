@@ -5,9 +5,14 @@ import {
   AlertTriangle,
   Bell,
   Bot,
+  Check,
   CheckCircle2,
+  Copy,
+  CreditCard,
   Hash,
+  KeyRound,
   Loader2,
+  Mail,
   MessageSquare,
   Play,
   RefreshCw,
@@ -16,6 +21,8 @@ import {
   Send,
   ShieldAlert,
   SlidersHorizontal,
+  Truck,
+  Wrench,
   XCircle,
 } from 'lucide-react';
 import {
@@ -30,6 +37,9 @@ import {
   type NotificationLogDoc,
   type NotificationRulesDoc,
 } from '../lib/notifications/types';
+import { HelpInfoButton } from './admin/AdminHelpModal';
+import { BackendDiagnosticsSuite } from './admin/BackendDiagnosticsSuite';
+import { NotificationTemplatesEditor } from './admin/NotificationTemplatesEditor';
 
 interface TelegramReadiness {
   configured: boolean;
@@ -67,11 +77,66 @@ interface AiReadiness {
   hasApiKey: boolean;
 }
 
+interface MetaReadiness {
+  configured: boolean;
+  hasAppSecret: boolean;
+  hasVerifyToken: boolean;
+  hasPageAccessToken: boolean;
+  webhookPath: string;
+}
+
+interface PaymentReadiness {
+  sslcommerz: { configured: boolean; liveMode: boolean };
+  bkash: { configured: boolean; liveMode: boolean };
+  anyConfigured: boolean;
+  callbackPath: string;
+}
+
+interface CourierReadiness {
+  steadfast: boolean;
+  pathao: boolean;
+  redx: boolean;
+  webhookSecret: boolean;
+  anyLiveCourier: boolean;
+  pathaoLiveMode: boolean;
+  redxLiveMode: boolean;
+  hasPathaoLocationMap: boolean;
+  hasRedxAreaMap: boolean;
+  webhookPath: string;
+}
+
+interface MessagingReadiness {
+  bulksmsbd: boolean;
+  twilioSms: boolean;
+  resendEmail: boolean;
+  anyDirectSms: boolean;
+  anyDirectEmail: boolean;
+  hasOwnerEmail: boolean;
+  maskedOwnerEmail: string;
+  ownerWebhook: boolean;
+  whatsappWebhook: boolean;
+  emailWebhook: boolean;
+  googleSheetsWebhook: boolean;
+}
+
+interface SecurityReadiness {
+  orderTokenSecretStrong: boolean;
+  cronSecretConfigured: boolean;
+  workerSecretConfigured: boolean;
+  siteUrlConfigured: boolean;
+  siteBaseUrl: string;
+}
+
 interface ReadinessPayload {
   telegram: TelegramReadiness;
   discord: DiscordReadiness;
   whatsapp: WhatsAppReadiness;
   aiSupport: AiReadiness;
+  meta?: MetaReadiness;
+  payments?: PaymentReadiness;
+  couriers?: CourierReadiness;
+  messaging?: MessagingReadiness;
+  security?: SecurityReadiness;
 }
 
 interface QueueStats {
@@ -85,7 +150,14 @@ interface QueueStats {
   totalLogs: number;
 }
 
-type SubTab = 'overview' | 'telegram' | 'discord' | 'whatsapp' | 'rules' | 'history';
+type SubTab =
+  | 'overview'
+  | 'telegram'
+  | 'discord'
+  | 'whatsapp'
+  | 'rules'
+  | 'diagnostics'
+  | 'history';
 
 const EVENT_LABELS: Record<BusinessEventType, string> = {
   ORDER_CREATED: 'New Order Created',
@@ -130,6 +202,7 @@ export function AdminEcosystemPanel({
   const [testingKey, setTestingKey] = useState<string | null>(null);
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [queueBusy, setQueueBusy] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const [storageReady, setStorageReady] = useState(true);
   const [storageNotice, setStorageNotice] = useState('');
@@ -161,9 +234,60 @@ export function AdminEcosystemPanel({
   const [banner, setBanner] = useState<{ kind: 'success' | 'error' | 'info'; text: string } | null>(
     null
   );
+  const [pendingReset, setPendingReset] = useState<
+    null | 'telegram' | 'discord' | 'whatsapp' | 'rules'
+  >(null);
+
+  const confirmResetSection = (section: 'telegram' | 'discord' | 'whatsapp' | 'rules') => {
+    if (section === 'telegram') {
+      setSettings((prev) => ({
+        ...prev,
+        telegram: { ...DEFAULT_INTEGRATION_SETTINGS.telegram },
+      }));
+      showBanner('info', 'Telegram routing toggles reset to default (store prices, stock & contacts untouched). Click Save to persist.');
+    } else if (section === 'discord') {
+      setSettings((prev) => ({
+        ...prev,
+        discord: {
+          ...DEFAULT_INTEGRATION_SETTINGS.discord,
+          enabledChannels: { ...DEFAULT_INTEGRATION_SETTINGS.discord.enabledChannels },
+        },
+      }));
+      showBanner('info', 'Discord channel toggles reset to default (store prices, stock & contacts untouched). Click Save to persist.');
+    } else if (section === 'whatsapp') {
+      setSettings((prev) => ({
+        ...prev,
+        whatsapp: { ...DEFAULT_INTEGRATION_SETTINGS.whatsapp },
+      }));
+      showBanner('info', 'WhatsApp notification settings reset to default (store prices, stock & contacts untouched). Click Save to persist.');
+    } else if (section === 'rules') {
+      setRules((prev) => ({
+        ...DEFAULT_NOTIFICATION_RULES,
+        templates: prev.templates,
+      }));
+      showBanner('info', 'Notification routing matrix reset to default (custom templates, store prices, stock & contacts untouched). Click Save to persist.');
+    }
+    setPendingReset(null);
+  };
 
   const showBanner = (kind: 'success' | 'error' | 'info', text: string) => {
     setBanner({ kind, text });
+  };
+
+  const copyText = (key: string, text: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      void navigator.clipboard.writeText(text).then(() => {
+        setCopiedKey(key);
+        setTimeout(() => setCopiedKey((prev) => (prev === key ? null : prev)), 2000);
+      });
+    }
+  };
+
+  const buildWebhookUrl = (path: string) => {
+    const base =
+      readiness?.security?.siteBaseUrl ||
+      (typeof window !== 'undefined' ? window.location.origin : '');
+    return base ? `${base.replace(/\/+$/, '')}${path}` : path;
   };
 
   const loadIntegrations = useCallback(async () => {
@@ -248,7 +372,7 @@ export function AdminEcosystemPanel({
       if (data.settings) setSettings(data.settings);
       if (data.rules) setRules(data.rules);
       if (data.readiness) setReadiness(data.readiness);
-      showBanner('success', 'Integration settings and notification rules saved.');
+      showBanner('success', 'Integration settings, rules, and custom templates saved.');
     } finally {
       setSaving(false);
     }
@@ -281,7 +405,7 @@ export function AdminEcosystemPanel({
           provider === 'telegram'
             ? `Telegram @${data.botUsername || 'bot'} verified (${data.sentToChats ?? 1} chat).`
             : provider === 'discord'
-              ? `Discord test embed delivered to ${extra?.channelKey || 'system-alerts'}.`
+              ? `Discord test embed delivered to #${extra?.channelKey || 'system-alerts'}.`
               : provider === 'whatsapp'
                 ? `WhatsApp Cloud verified (${data.verifiedName || data.displayPhoneNumber || 'Meta Graph'}).`
                 : `Gemini API verified (${data.model || 'active'}).`;
@@ -362,12 +486,49 @@ export function AdminEcosystemPanel({
     }
   };
 
+  const getChannelStatusBadge = (
+    configured: boolean | undefined,
+    meta?: { lastConnectedAtIso?: string; lastError?: string }
+  ) => {
+    if (!configured) {
+      return (
+        <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#635647]">
+          <XCircle className="h-3.5 w-3.5" />
+          Not Configured
+        </span>
+      );
+    }
+    if (meta?.lastError) {
+      return (
+        <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-700">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          Configuration Error
+        </span>
+      );
+    }
+    if (meta?.lastConnectedAtIso) {
+      return (
+        <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-800">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Connected
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#8A5A17]">
+        <CheckCircle2 className="h-3.5 w-3.5" />
+        Test Required
+      </span>
+    );
+  };
+
   const subTabs: Array<{ id: SubTab; label: string }> = [
-    { id: 'overview', label: 'Overview' },
+    { id: 'overview', label: 'Overview & Credentials' },
     { id: 'telegram', label: 'Telegram' },
     { id: 'discord', label: 'Discord' },
     { id: 'whatsapp', label: 'WhatsApp' },
-    { id: 'rules', label: 'Notification Rules' },
+    { id: 'rules', label: 'Rules & Templates' },
+    { id: 'diagnostics', label: 'Diagnostics & Tests' },
     { id: 'history', label: `History & DLQ (${stats.deadLetter})` },
   ];
 
@@ -389,30 +550,42 @@ export function AdminEcosystemPanel({
       <div className="flex flex-col gap-3 border-b border-[rgba(30,23,16,0.12)] pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8A5A17]">
-            AI Support & Notification Ecosystem
+            AI Support, Credentials &amp; Notification Ecosystem
           </p>
-          <h2 className="font-display mt-1 text-2xl font-semibold tracking-tight text-[#1E1710]">
-            Integrations, Rules & Alert Queue
-          </h2>
+          <div className="mt-1 flex items-center gap-2">
+            <h2 className="font-display text-2xl font-semibold tracking-tight text-[#1E1710]">
+              Integrations, Templates &amp; Diagnostics
+            </h2>
+            <HelpInfoButton section="integrations_overview" />
+          </div>
           <p className="mt-1 text-xs text-[#635647]">
-            Server-side credentials only · Durable Firestore job queue · Per-channel failure isolation
+            Server-side secrets only · Custom per-event templates · Durable Firestore job queue ·
+            Live verification checks
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
+            onClick={() => setSubTab('diagnostics')}
+            className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3.5 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+          >
+            <Wrench className="h-3.5 w-3.5 text-[#8A5A17]" />
+            <span>Diagnostics</span>
+          </button>
+          <button
+            type="button"
             onClick={onOpenChatbot}
-            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3.5 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+            className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3.5 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
           >
             <Bot className="h-3.5 w-3.5 text-[#8A5A17]" />
-            <span>AI Chatbot & Inbox</span>
+            <span>AI Chatbot &amp; Inbox</span>
           </button>
           <button
             type="button"
             onClick={() => void refreshAll()}
             disabled={loading}
-            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-[#1E1710] px-3.5 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50"
+            className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap rounded-lg bg-[#1E1710] px-3.5 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
@@ -427,7 +600,7 @@ export function AdminEcosystemPanel({
             key={item.id}
             type="button"
             onClick={() => setSubTab(item.id)}
-            className={`min-h-[38px] rounded-lg px-3.5 py-1.5 text-xs font-medium transition-colors ${
+            className={`min-h-[38px] shrink-0 whitespace-nowrap rounded-lg px-3.5 py-1.5 text-xs font-medium transition-colors ${
               subTab === item.id
                 ? 'bg-[#B47B2B] text-[#FFFDF9]'
                 : 'border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] text-[#635647] hover:text-[#1E1710]'
@@ -485,7 +658,7 @@ export function AdminEcosystemPanel({
         </div>
       ) : (
         <>
-          {/* SUB-TAB 1: OVERVIEW */}
+          {/* SUB-TAB 1: OVERVIEW & CREDENTIALS */}
           {subTab === 'overview' && (
             <div className="space-y-6">
               {/* Queue KPI Strip */}
@@ -516,7 +689,7 @@ export function AdminEcosystemPanel({
                 </div>
               </div>
 
-              {/* 4 Integration Status Cards */}
+              {/* Primary 4 AI & Notification Channel Cards */}
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {/* Telegram Card */}
                 <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-5">
@@ -524,28 +697,20 @@ export function AdminEcosystemPanel({
                     <div className="flex items-center gap-2.5">
                       <Send className="h-4 w-4 text-[#8A5A17]" />
                       <div>
-                        <h3 className="text-sm font-semibold text-[#1E1710]">
-                          Telegram Admin Bot
-                        </h3>
+                        <div className="flex items-center gap-1.5">
+                          <h3 className="text-sm font-semibold text-[#1E1710]">
+                            Telegram Admin Bot
+                          </h3>
+                          <HelpInfoButton section="telegram_bot" />
+                        </div>
                         <p className="text-xs text-[#635647]">
                           {readiness?.telegram.configured
                             ? `Configured · ${readiness.telegram.chatIdCount} chat target(s)`
-                            : 'Not configured · Set TELEGRAM_BOT_TOKEN & TELEGRAM_CHAT_ID'}
+                            : 'Set TELEGRAM_BOT_TOKEN & TELEGRAM_CHAT_ID in server env'}
                         </p>
                       </div>
                     </div>
-                    <span
-                      className={`inline-flex items-center gap-1 text-xs font-semibold ${
-                        readiness?.telegram.configured ? 'text-emerald-800' : 'text-[#635647]'
-                      }`}
-                    >
-                      {readiness?.telegram.configured ? (
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                      ) : (
-                        <XCircle className="h-3.5 w-3.5" />
-                      )}
-                      {readiness?.telegram.configured ? 'Ready' : 'Not configured'}
-                    </span>
+                    {getChannelStatusBadge(readiness?.telegram.configured, settings.telegram)}
                   </div>
 
                   <p className="mt-3 text-[11px] text-[#635647]">
@@ -584,28 +749,20 @@ export function AdminEcosystemPanel({
                     <div className="flex items-center gap-2.5">
                       <Hash className="h-4 w-4 text-[#8A5A17]" />
                       <div>
-                        <h3 className="text-sm font-semibold text-[#1E1710]">
-                          Discord Ops Webhooks
-                        </h3>
+                        <div className="flex items-center gap-1.5">
+                          <h3 className="text-sm font-semibold text-[#1E1710]">
+                            Discord Ops Webhooks
+                          </h3>
+                          <HelpInfoButton section="discord_webhooks" />
+                        </div>
                         <p className="text-xs text-[#635647]">
                           {readiness?.discord.configured
                             ? `${readiness.discord.channels.filter((c) => c.configured).length} / 6 channels configured`
-                            : 'Not configured · Set DISCORD_WEBHOOK_URL or per-channel vars'}
+                            : 'Set DISCORD_WEBHOOK_URL or per-channel env vars'}
                         </p>
                       </div>
                     </div>
-                    <span
-                      className={`inline-flex items-center gap-1 text-xs font-semibold ${
-                        readiness?.discord.configured ? 'text-emerald-800' : 'text-[#635647]'
-                      }`}
-                    >
-                      {readiness?.discord.configured ? (
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                      ) : (
-                        <XCircle className="h-3.5 w-3.5" />
-                      )}
-                      {readiness?.discord.configured ? 'Ready' : 'Not configured'}
-                    </span>
+                    {getChannelStatusBadge(readiness?.discord.configured, settings.discord)}
                   </div>
 
                   <p className="mt-3 text-[11px] text-[#635647]">
@@ -646,34 +803,25 @@ export function AdminEcosystemPanel({
                     <div className="flex items-center gap-2.5">
                       <MessageSquare className="h-4 w-4 text-[#8A5A17]" />
                       <div>
-                        <h3 className="text-sm font-semibold text-[#1E1710]">
-                          WhatsApp Business Cloud API
-                        </h3>
+                        <div className="flex items-center gap-1.5">
+                          <h3 className="text-sm font-semibold text-[#1E1710]">
+                            WhatsApp Business Cloud API
+                          </h3>
+                          <HelpInfoButton section="whatsapp_cloud" />
+                        </div>
                         <p className="text-xs text-[#635647]">
                           {readiness?.whatsapp.configured
                             ? 'Configured · Meta Cloud Graph API ready'
-                            : 'Not configured · Set WHATSAPP_ACCESS_TOKEN & PHONE_NUMBER_ID'}
+                            : 'Set WHATSAPP_ACCESS_TOKEN & WHATSAPP_PHONE_NUMBER_ID'}
                         </p>
                       </div>
                     </div>
-                    <span
-                      className={`inline-flex items-center gap-1 text-xs font-semibold ${
-                        readiness?.whatsapp.configured ? 'text-emerald-800' : 'text-[#635647]'
-                      }`}
-                    >
-                      {readiness?.whatsapp.configured ? (
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                      ) : (
-                        <XCircle className="h-3.5 w-3.5" />
-                      )}
-                      {readiness?.whatsapp.configured ? 'Ready' : 'Not configured'}
-                    </span>
+                    {getChannelStatusBadge(readiness?.whatsapp.configured, settings.whatsapp)}
                   </div>
 
                   <p className="mt-3 text-[11px] text-[#635647]">
-                    Webhook verify token:{' '}
-                    {readiness?.whatsapp.hasVerifyToken ? 'Set' : 'Unset'} · App Secret:{' '}
-                    {readiness?.whatsapp.hasAppSecret ? 'Set' : 'Unset'} · Last connected:{' '}
+                    Verify token: {readiness?.whatsapp.hasVerifyToken ? 'Set' : 'Unset'} · App
+                    Secret: {readiness?.whatsapp.hasAppSecret ? 'Set' : 'Unset'} · Last connected:{' '}
                     {formatTimestamp(settings.whatsapp.lastConnectedAtIso)}
                   </p>
                   {settings.whatsapp.lastError && (
@@ -697,7 +845,7 @@ export function AdminEcosystemPanel({
                       onClick={() => setSubTab('whatsapp')}
                       className="min-h-[36px] rounded-lg border border-[rgba(30,23,16,0.16)] px-3 py-1.5 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
                     >
-                      Templates & Opt-In
+                      Templates &amp; Opt-In
                     </button>
                   </div>
                 </div>
@@ -708,9 +856,12 @@ export function AdminEcosystemPanel({
                     <div className="flex items-center gap-2.5">
                       <Bot className="h-4 w-4 text-[#8A5A17]" />
                       <div>
-                        <h3 className="text-sm font-semibold text-[#1E1710]">
-                          AI Customer Support Engine
-                        </h3>
+                        <div className="flex items-center gap-1.5">
+                          <h3 className="text-sm font-semibold text-[#1E1710]">
+                            AI Customer Support Engine
+                          </h3>
+                          <HelpInfoButton section="chatbot_studio" />
+                        </div>
                         <p className="text-xs text-[#635647]">
                           {readiness?.aiSupport.configured
                             ? `${readiness.aiSupport.provider} · ${readiness.aiSupport.model}`
@@ -728,13 +879,13 @@ export function AdminEcosystemPanel({
                       ) : (
                         <AlertTriangle className="h-3.5 w-3.5" />
                       )}
-                      {readiness?.aiSupport.configured ? 'Live LLM' : 'Fallback only'}
+                      {readiness?.aiSupport.configured ? 'Live LLM' : 'Fallback Only'}
                     </span>
                   </div>
 
                   <p className="mt-3 text-[11px] text-[#635647]">
-                    Shared across Website Widget & WhatsApp/Meta Webhooks · Human takeover & F22
-                    review active
+                    Shared across Website Widget &amp; WhatsApp/Meta Webhooks · Human takeover
+                    supported
                   </p>
 
                   <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -752,8 +903,272 @@ export function AdminEcosystemPanel({
                       onClick={onOpenChatbot}
                       className="min-h-[36px] rounded-lg border border-[rgba(30,23,16,0.16)] px-3 py-1.5 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
                     >
-                      Open Chatbot Studio & Inbox
+                      Open Chatbot Studio
                     </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Server-Side Credentials, Webhook URLs & External Gateways Inspector */}
+              <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6 space-y-5">
+                <div className="flex flex-col gap-2 border-b border-[rgba(30,23,16,0.10)] pb-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <KeyRound className="h-4 w-4 text-[#8A5A17]" />
+                      <h3 className="font-display text-lg font-semibold text-[#1E1710]">
+                        All Server Integrations, Credentials &amp; Webhook Endpoints
+                      </h3>
+                    </div>
+                    <p className="mt-0.5 text-xs text-[#635647]">
+                      Private API keys &amp; secrets live exclusively in Cloud Run / Server
+                      Environment Variables and are never exposed to the browser.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSubTab('diagnostics')}
+                    className="inline-flex min-h-[36px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-[#1E1710] px-3.5 py-1.5 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E]"
+                  >
+                    <Wrench className="h-3.5 w-3.5" />
+                    <span>Run All Diagnostics</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  {/* Meta Messenger & Instagram */}
+                  <div className="rounded-xl border border-[rgba(30,23,16,0.10)] bg-[#FAF7F2] p-4 text-xs space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <MessageSquare className="h-4 w-4 text-[#8A5A17]" />
+                        <p className="font-semibold text-[#1E1710]">
+                          Meta Messenger &amp; Instagram DM
+                        </p>
+                        <HelpInfoButton section="meta_channels" />
+                      </div>
+                      <span
+                        className={`font-mono text-[11px] font-semibold ${
+                          readiness?.meta?.configured ? 'text-emerald-800' : 'text-[#635647]'
+                        }`}
+                      >
+                        {readiness?.meta?.configured ? 'Configured' : 'Not Configured'}
+                      </span>
+                    </div>
+                    <p className="text-[#635647]">
+                      App Secret: <strong className="font-mono text-[#1E1710]">{readiness?.meta?.hasAppSecret ? 'Set' : 'Missing'}</strong> ·
+                      Verify Token: <strong className="font-mono text-[#1E1710]">{readiness?.meta?.hasVerifyToken ? 'Set' : 'Missing'}</strong> ·
+                      Page Token: <strong className="font-mono text-[#1E1710]">{readiness?.meta?.hasPageAccessToken ? 'Set' : 'Optional'}</strong>
+                    </p>
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-[rgba(30,23,16,0.10)] bg-[#FFFDF9] px-2.5 py-1.5">
+                      <code className="truncate font-mono text-[11px] text-[#1E1710]">
+                        {buildWebhookUrl(readiness?.meta?.webhookPath || '/api/channels/webhook')}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          copyText(
+                            'meta_webhook',
+                            buildWebhookUrl(readiness?.meta?.webhookPath || '/api/channels/webhook')
+                          )
+                        }
+                        className="inline-flex shrink-0 items-center gap-1 rounded border border-[rgba(30,23,16,0.14)] px-2 py-1 text-[10px] font-medium hover:bg-[#F2ECE1]"
+                      >
+                        {copiedKey === 'meta_webhook' ? (
+                          <Check className="h-3 w-3 text-emerald-700" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                        <span>{copiedKey === 'meta_webhook' ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Payment Gateways */}
+                  <div className="rounded-xl border border-[rgba(30,23,16,0.10)] bg-[#FAF7F2] p-4 text-xs space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <CreditCard className="h-4 w-4 text-[#8A5A17]" />
+                        <p className="font-semibold text-[#1E1710]">
+                          Online Payments (SSLCommerz &amp; bKash)
+                        </p>
+                        <HelpInfoButton section="payment_gateways" />
+                      </div>
+                      <span
+                        className={`font-mono text-[11px] font-semibold ${
+                          readiness?.payments?.anyConfigured ? 'text-emerald-800' : 'text-[#635647]'
+                        }`}
+                      >
+                        {readiness?.payments?.anyConfigured ? 'Configured' : 'Not Configured'}
+                      </span>
+                    </div>
+                    <p className="text-[#635647]">
+                      SSLCommerz:{' '}
+                      <strong className="font-mono text-[#1E1710]">
+                        {readiness?.payments?.sslcommerz.configured
+                          ? readiness.payments.sslcommerz.liveMode
+                            ? 'Live'
+                            : 'Sandbox'
+                          : 'Unset'}
+                      </strong>{' '}
+                      · bKash PGW:{' '}
+                      <strong className="font-mono text-[#1E1710]">
+                        {readiness?.payments?.bkash.configured
+                          ? readiness.payments.bkash.liveMode
+                            ? 'Live'
+                            : 'Sandbox'
+                          : 'Unset'}
+                      </strong>
+                    </p>
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-[rgba(30,23,16,0.10)] bg-[#FFFDF9] px-2.5 py-1.5">
+                      <code className="truncate font-mono text-[11px] text-[#1E1710]">
+                        {buildWebhookUrl(
+                          readiness?.payments?.callbackPath || '/api/payments/callback'
+                        )}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          copyText(
+                            'pay_callback',
+                            buildWebhookUrl(
+                              readiness?.payments?.callbackPath || '/api/payments/callback'
+                            )
+                          )
+                        }
+                        className="inline-flex shrink-0 items-center gap-1 rounded border border-[rgba(30,23,16,0.14)] px-2 py-1 text-[10px] font-medium hover:bg-[#F2ECE1]"
+                      >
+                        {copiedKey === 'pay_callback' ? (
+                          <Check className="h-3 w-3 text-emerald-700" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                        <span>{copiedKey === 'pay_callback' ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Courier APIs */}
+                  <div className="rounded-xl border border-[rgba(30,23,16,0.10)] bg-[#FAF7F2] p-4 text-xs space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <Truck className="h-4 w-4 text-[#8A5A17]" />
+                        <p className="font-semibold text-[#1E1710]">
+                          Couriers (Steadfast, Pathao, RedX)
+                        </p>
+                        <HelpInfoButton section="courier_partners" />
+                      </div>
+                      <span
+                        className={`font-mono text-[11px] font-semibold ${
+                          readiness?.couriers?.anyLiveCourier ? 'text-emerald-800' : 'text-[#635647]'
+                        }`}
+                      >
+                        {readiness?.couriers?.anyLiveCourier ? 'Configured' : 'Not Configured'}
+                      </span>
+                    </div>
+                    <p className="text-[#635647]">
+                      Steadfast:{' '}
+                      <strong className="font-mono text-[#1E1710]">
+                        {readiness?.couriers?.steadfast ? 'Set' : 'Unset'}
+                      </strong>{' '}
+                      · Pathao:{' '}
+                      <strong className="font-mono text-[#1E1710]">
+                        {readiness?.couriers?.pathao ? 'Set' : 'Unset'}
+                      </strong>{' '}
+                      · RedX:{' '}
+                      <strong className="font-mono text-[#1E1710]">
+                        {readiness?.couriers?.redx ? 'Set' : 'Unset'}
+                      </strong>{' '}
+                      · Webhook Secret:{' '}
+                      <strong className="font-mono text-[#1E1710]">
+                        {readiness?.couriers?.webhookSecret ? 'Set' : 'Unset'}
+                      </strong>
+                    </p>
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-[rgba(30,23,16,0.10)] bg-[#FFFDF9] px-2.5 py-1.5">
+                      <code className="truncate font-mono text-[11px] text-[#1E1710]">
+                        {buildWebhookUrl(
+                          readiness?.couriers?.webhookPath || '/api/couriers/webhook'
+                        )}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          copyText(
+                            'courier_webhook',
+                            buildWebhookUrl(
+                              readiness?.couriers?.webhookPath || '/api/couriers/webhook'
+                            )
+                          )
+                        }
+                        className="inline-flex shrink-0 items-center gap-1 rounded border border-[rgba(30,23,16,0.14)] px-2 py-1 text-[10px] font-medium hover:bg-[#F2ECE1]"
+                      >
+                        {copiedKey === 'courier_webhook' ? (
+                          <Check className="h-3 w-3 text-emerald-700" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                        <span>{copiedKey === 'courier_webhook' ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Direct SMS, Email & Worker Security */}
+                  <div className="rounded-xl border border-[rgba(30,23,16,0.10)] bg-[#FAF7F2] p-4 text-xs space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <Mail className="h-4 w-4 text-[#8A5A17]" />
+                        <p className="font-semibold text-[#1E1710]">
+                          Direct SMS, Email &amp; Queue Worker
+                        </p>
+                        <HelpInfoButton section="sms_email_gateways" />
+                      </div>
+                      <span
+                        className={`font-mono text-[11px] font-semibold ${
+                          readiness?.messaging?.anyDirectEmail || readiness?.messaging?.anyDirectSms
+                            ? 'text-emerald-800'
+                            : 'text-[#635647]'
+                        }`}
+                      >
+                        {readiness?.messaging?.anyDirectEmail || readiness?.messaging?.anyDirectSms
+                          ? 'Configured'
+                          : 'Not Configured'}
+                      </span>
+                    </div>
+                    <p className="text-[#635647]">
+                      Resend Email:{' '}
+                      <strong className="font-mono text-[#1E1710]">
+                        {readiness?.messaging?.resendEmail ? 'Set' : 'Unset'}
+                      </strong>{' '}
+                      · BulkSMSBD:{' '}
+                      <strong className="font-mono text-[#1E1710]">
+                        {readiness?.messaging?.bulksmsbd ? 'Set' : 'Unset'}
+                      </strong>{' '}
+                      · Twilio:{' '}
+                      <strong className="font-mono text-[#1E1710]">
+                        {readiness?.messaging?.twilioSms ? 'Set' : 'Unset'}
+                      </strong>{' '}
+                      · Worker Secret:{' '}
+                      <strong className="font-mono text-[#1E1710]">
+                        {readiness?.security?.workerSecretConfigured ? 'Set' : 'Unset'}
+                      </strong>
+                    </p>
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-[rgba(30,23,16,0.10)] bg-[#FFFDF9] px-2.5 py-1.5">
+                      <code className="truncate font-mono text-[11px] text-[#1E1710]">
+                        {buildWebhookUrl('/api/notifications/worker')}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          copyText('worker_url', buildWebhookUrl('/api/notifications/worker'))
+                        }
+                        className="inline-flex shrink-0 items-center gap-1 rounded border border-[rgba(30,23,16,0.14)] px-2 py-1 text-[10px] font-medium hover:bg-[#F2ECE1]"
+                      >
+                        {copiedKey === 'worker_url' ? (
+                          <Check className="h-3 w-3 text-emerald-700" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                        <span>{copiedKey === 'worker_url' ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -764,20 +1179,25 @@ export function AdminEcosystemPanel({
           {subTab === 'telegram' && (
             <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6 space-y-5">
               <div>
-                <h3 className="font-display text-lg font-semibold">Telegram Admin Notification Bot</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-display text-lg font-semibold">
+                    Telegram Admin Notification Bot
+                  </h3>
+                  <HelpInfoButton section="telegram_bot" />
+                </div>
                 <p className="mt-1 text-xs text-[#635647]">
-                  Bot token is stored strictly in server secret <code>TELEGRAM_BOT_TOKEN</code>.
-                  Default chat IDs come from <code>TELEGRAM_CHAT_ID</code>.
+                  Bot token stays strictly in server secret <code>TELEGRAM_BOT_TOKEN</code>. Default
+                  chat IDs come from <code>TELEGRAM_CHAT_ID</code>.
                 </p>
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="rounded-xl border border-[rgba(30,23,16,0.10)] bg-[#FAF7F2] p-4 text-xs">
-                  <p className="font-semibold text-[#1E1710]">Server Environment Status</p>
+                  <p className="font-semibold text-[#1E1710]">Server Secret Readiness</p>
                   <p className="mt-1 text-[#635647]">
                     TELEGRAM_BOT_TOKEN:{' '}
                     <span className="font-mono font-semibold text-[#1E1710]">
-                      {readiness?.telegram.hasBotToken ? 'Configured' : 'Not set'}
+                      {readiness?.telegram.hasBotToken ? 'Configured in server env' : 'Not set'}
                     </span>
                   </p>
                   <p className="mt-1 text-[#635647]">
@@ -836,7 +1256,11 @@ export function AdminEcosystemPanel({
                   onClick={() => void handleSave({ settings: { telegram: settings.telegram } })}
                   className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-[#1E1710] px-4 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50"
                 >
-                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  {saving ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Save className="h-3.5 w-3.5" />
+                  )}
                   <span>Save Telegram Settings</span>
                 </button>
                 <button
@@ -852,6 +1276,34 @@ export function AdminEcosystemPanel({
                   )}
                   <span>Send Test Ping</span>
                 </button>
+                {pendingReset === 'telegram' ? (
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-950">
+                    <span>Reset Telegram toggles only? (Prices, stock &amp; contacts untouched.)</span>
+                    <button
+                      type="button"
+                      onClick={() => confirmResetSection('telegram')}
+                      className="rounded-md bg-[#1E1710] px-2.5 py-1 text-[11px] font-medium text-[#FAF7F2]"
+                    >
+                      Confirm Reset
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPendingReset(null)}
+                      className="rounded-md border border-amber-400 bg-white px-2.5 py-1 text-[11px] font-medium text-amber-950"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setPendingReset('telegram')}
+                    className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] px-3.5 py-2 text-xs font-medium text-[#635647] hover:text-[#1E1710]"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    <span>Reset</span>
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -861,7 +1313,10 @@ export function AdminEcosystemPanel({
             <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6 space-y-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h3 className="font-display text-lg font-semibold">Discord Channel Webhooks</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-display text-lg font-semibold">Discord Channel Webhooks</h3>
+                    <HelpInfoButton section="discord_webhooks" />
+                  </div>
                   <p className="mt-1 text-xs text-[#635647]">
                     Webhook URLs stay exclusively in server env vars (<code>DISCORD_WEBHOOK_*</code>{' '}
                     or fallback <code>DISCORD_WEBHOOK_URL</code>).
@@ -954,15 +1409,49 @@ export function AdminEcosystemPanel({
                 </table>
               </div>
 
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => void handleSave({ settings: { discord: settings.discord } })}
-                className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-[#1E1710] px-4 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50"
-              >
-                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                <span>Save Discord Channel Toggles</span>
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void handleSave({ settings: { discord: settings.discord } })}
+                  className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-[#1E1710] px-4 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50"
+                >
+                  {saving ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Save className="h-3.5 w-3.5" />
+                  )}
+                  <span>Save Discord Channel Toggles</span>
+                </button>
+                {pendingReset === 'discord' ? (
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-950">
+                    <span>Reset Discord channel toggles only? (Prices, stock &amp; contacts untouched.)</span>
+                    <button
+                      type="button"
+                      onClick={() => confirmResetSection('discord')}
+                      className="rounded-md bg-[#1E1710] px-2.5 py-1 text-[11px] font-medium text-[#FAF7F2]"
+                    >
+                      Confirm Reset
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPendingReset(null)}
+                      className="rounded-md border border-amber-400 bg-white px-2.5 py-1 text-[11px] font-medium text-amber-950"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setPendingReset('discord')}
+                    className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] px-3.5 py-2 text-xs font-medium text-[#635647] hover:text-[#1E1710]"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    <span>Reset</span>
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -970,14 +1459,38 @@ export function AdminEcosystemPanel({
           {subTab === 'whatsapp' && (
             <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6 space-y-5">
               <div>
-                <h3 className="font-display text-lg font-semibold">
-                  WhatsApp Business Cloud API
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-display text-lg font-semibold">
+                    WhatsApp Business Cloud API
+                  </h3>
+                  <HelpInfoButton section="whatsapp_cloud" />
+                </div>
                 <p className="mt-1 text-xs text-[#635647]">
-                  Inbound webhook endpoint: <code className="font-mono">/api/channels/webhook</code>{' '}
-                  · Proactive messages outside the 24-hour customer care window require verified
-                  opt-in and a Meta-approved utility template.
+                  Proactive messages outside the 24-hour customer care window require verified opt-in
+                  and a Meta-approved utility template.
                 </p>
+              </div>
+
+              {/* Copyable Webhook URL */}
+              <div className="flex flex-col gap-2 rounded-xl border border-[rgba(30,23,16,0.10)] bg-[#FAF7F2] p-3.5 text-xs sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="font-semibold text-[#1E1710]">Inbound Meta Webhook Callback URL</p>
+                  <code className="mt-0.5 block truncate font-mono text-[11px] text-[#635647]">
+                    {buildWebhookUrl('/api/channels/webhook')}
+                  </code>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => copyText('wa_webhook', buildWebhookUrl('/api/channels/webhook'))}
+                  className="inline-flex min-h-[34px] shrink-0 items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3 py-1.5 text-xs font-medium hover:bg-[#F2ECE1]"
+                >
+                  {copiedKey === 'wa_webhook' ? (
+                    <Check className="h-3.5 w-3.5 text-emerald-700" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                  <span>{copiedKey === 'wa_webhook' ? 'Copied URL' : 'Copy Webhook URL'}</span>
+                </button>
               </div>
 
               <div className="grid grid-cols-2 gap-3 rounded-xl border border-[rgba(30,23,16,0.10)] bg-[#FAF7F2] p-4 text-xs sm:grid-cols-5">
@@ -1109,7 +1622,11 @@ export function AdminEcosystemPanel({
                   onClick={() => void handleSave({ settings: { whatsapp: settings.whatsapp } })}
                   className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-[#1E1710] px-4 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50"
                 >
-                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  {saving ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Save className="h-3.5 w-3.5" />
+                  )}
                   <span>Save WhatsApp Settings</span>
                 </button>
                 <button
@@ -1121,140 +1638,243 @@ export function AdminEcosystemPanel({
                   {testingKey === 'whatsapp' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                   <span>Verify Meta Graph Connection</span>
                 </button>
+                {pendingReset === 'whatsapp' ? (
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-950">
+                    <span>Reset WhatsApp toggles &amp; template names only? (Prices, stock &amp; contacts untouched.)</span>
+                    <button
+                      type="button"
+                      onClick={() => confirmResetSection('whatsapp')}
+                      className="rounded-md bg-[#1E1710] px-2.5 py-1 text-[11px] font-medium text-[#FAF7F2]"
+                    >
+                      Confirm Reset
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPendingReset(null)}
+                      className="rounded-md border border-amber-400 bg-white px-2.5 py-1 text-[11px] font-medium text-amber-950"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setPendingReset('whatsapp')}
+                    className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] px-3.5 py-2 text-xs font-medium text-[#635647] hover:text-[#1E1710]"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    <span>Reset</span>
+                  </button>
+                )}
               </div>
             </div>
           )}
 
-          {/* SUB-TAB 5: NOTIFICATION RULES */}
+          {/* SUB-TAB 5: RULES & MESSAGE TEMPLATES */}
           {subTab === 'rules' && (
-            <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6 space-y-6">
-              <div className="flex items-center gap-2">
-                <SlidersHorizontal className="h-4 w-4 text-[#8A5A17]" />
-                <h3 className="font-display text-lg font-semibold">
-                  Event Routing Matrix & Retry Policy
-                </h3>
-              </div>
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6 space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <SlidersHorizontal className="h-4 w-4 text-[#8A5A17]" />
+                    <h3 className="font-display text-lg font-semibold">
+                      Event Routing Matrix &amp; Retry Policy
+                    </h3>
+                    <HelpInfoButton section="notification_rules" />
+                  </div>
+                  {pendingReset === 'rules' ? (
+                    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-950">
+                      <span>Reset event routing matrix only? (Prices, stock &amp; contacts untouched.)</span>
+                      <button
+                        type="button"
+                        onClick={() => confirmResetSection('rules')}
+                        className="rounded-md bg-[#1E1710] px-2.5 py-1 text-[11px] font-medium text-[#FAF7F2]"
+                      >
+                        Confirm Reset
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPendingReset(null)}
+                        className="rounded-md border border-amber-400 bg-white px-2.5 py-1 text-[11px] font-medium text-amber-950"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setPendingReset('rules')}
+                      className="inline-flex min-h-[34px] items-center gap-1 rounded-lg border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] px-3 py-1.5 text-xs font-medium text-[#635647] hover:text-[#1E1710]"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      <span>Reset Matrix to Default</span>
+                    </button>
+                  )}
+                </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-[rgba(30,23,16,0.12)] text-[#635647]">
-                      <th className="py-2.5 pr-4 font-semibold">Business Event</th>
-                      <th className="py-2.5 px-3 text-center font-semibold">Enabled</th>
-                      <th className="py-2.5 px-3 text-center font-semibold">Telegram</th>
-                      <th className="py-2.5 px-3 text-center font-semibold">Discord</th>
-                      <th className="py-2.5 px-3 text-center font-semibold">WhatsApp</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[rgba(30,23,16,0.08)]">
-                    {BUSINESS_EVENT_TYPES.map((evt) => {
-                      const row = rules.events[evt];
-                      return (
-                        <tr key={evt}>
-                          <td className="py-3 pr-4">
-                            <p className="font-medium text-[#1E1710]">{EVENT_LABELS[evt]}</p>
-                            <p className="font-mono text-[10px] text-[#635647]">{evt}</p>
-                          </td>
-                          {(['enabled', 'telegram', 'discord', 'whatsapp'] as const).map((col) => (
-                            <td key={col} className="py-3 px-3 text-center">
-                              <input
-                                type="checkbox"
-                                checked={Boolean(row?.[col])}
-                                onChange={(e) =>
-                                  setRules((prev) => ({
-                                    ...prev,
-                                    events: {
-                                      ...prev.events,
-                                      [evt]: {
-                                        ...prev.events[evt],
-                                        [col]: e.target.checked,
-                                      },
-                                    },
-                                  }))
-                                }
-                                className="h-4 w-4 accent-[#B47B2B]"
-                              />
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-[rgba(30,23,16,0.12)] text-[#635647]">
+                        <th className="py-2.5 pr-4 font-semibold">Business Event</th>
+                        <th className="py-2.5 px-3 text-center font-semibold">Enabled</th>
+                        <th className="py-2.5 px-3 text-center font-semibold">Telegram</th>
+                        <th className="py-2.5 px-3 text-center font-semibold">Discord</th>
+                        <th className="py-2.5 px-3 text-center font-semibold">WhatsApp</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[rgba(30,23,16,0.08)]">
+                      {BUSINESS_EVENT_TYPES.map((evt) => {
+                        const row = rules.events[evt];
+                        return (
+                          <tr key={evt}>
+                            <td className="py-3 pr-4">
+                              <p className="font-medium text-[#1E1710]">{EVENT_LABELS[evt]}</p>
+                              <p className="font-mono text-[10px] text-[#635647]">{evt}</p>
                             </td>
-                          ))}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            {(['enabled', 'telegram', 'discord', 'whatsapp'] as const).map((col) => (
+                              <td key={col} className="py-3 px-3 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(row?.[col])}
+                                  onChange={(e) =>
+                                    setRules((prev) => ({
+                                      ...prev,
+                                      events: {
+                                        ...prev.events,
+                                        [evt]: {
+                                          ...prev.events[evt],
+                                          [col]: e.target.checked,
+                                        },
+                                      },
+                                    }))
+                                  }
+                                  className="h-4 w-4 accent-[#B47B2B]"
+                                />
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 border-t border-[rgba(30,23,16,0.10)] pt-5 sm:grid-cols-2 lg:grid-cols-4">
+                  <div>
+                    <label className="block text-xs font-medium text-[#1E1710]">
+                      Owner Alert Email Override
+                    </label>
+                    <input
+                      type="email"
+                      value={rules.ownerNotificationEmailOverride || ''}
+                      onChange={(e) =>
+                        setRules((prev) => ({
+                          ...prev,
+                          ownerNotificationEmailOverride: e.target.value,
+                        }))
+                      }
+                      placeholder={
+                        readiness?.messaging?.maskedOwnerEmail || 'Leave blank for server env'
+                      }
+                      className="mt-1 min-h-[40px] w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-white px-3 py-2 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#1E1710]">
+                      Max Retry Attempts (1–8)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={8}
+                      value={rules.maxRetries}
+                      onChange={(e) =>
+                        setRules((prev) => ({ ...prev, maxRetries: Number(e.target.value || 4) }))
+                      }
+                      className="mt-1 min-h-[40px] w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-white px-3 py-2 font-mono text-xs tabular-nums"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#1E1710]">
+                      Base Backoff Seconds (5–600)
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={600}
+                      value={rules.baseBackoffSeconds}
+                      onChange={(e) =>
+                        setRules((prev) => ({
+                          ...prev,
+                          baseBackoffSeconds: Number(e.target.value || 30),
+                        }))
+                      }
+                      className="mt-1 min-h-[40px] w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-white px-3 py-2 font-mono text-xs tabular-nums"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#1E1710]">
+                      Low Stock Alert Threshold (jars)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={rules.lowStockThreshold}
+                      onChange={(e) =>
+                        setRules((prev) => ({
+                          ...prev,
+                          lowStockThreshold: Number(e.target.value || 5),
+                        }))
+                      }
+                      className="mt-1 min-h-[40px] w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-white px-3 py-2 font-mono text-xs tabular-nums"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void handleSave({ rules })}
+                  className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-[#1E1710] px-4 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50"
+                >
+                  {saving ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Save className="h-3.5 w-3.5" />
+                  )}
+                  <span>Save Notification Rules</span>
+                </button>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 border-t border-[rgba(30,23,16,0.10)] pt-5 sm:grid-cols-3">
-                <div>
-                  <label className="block text-xs font-medium text-[#1E1710]">
-                    Max Retry Attempts (1–8)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={8}
-                    value={rules.maxRetries}
-                    onChange={(e) =>
-                      setRules((prev) => ({ ...prev, maxRetries: Number(e.target.value || 4) }))
-                    }
-                    className="mt-1 min-h-[40px] w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-white px-3 py-2 font-mono text-xs tabular-nums"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#1E1710]">
-                    Base Backoff Seconds (5–600)
-                  </label>
-                  <input
-                    type="number"
-                    min={5}
-                    max={600}
-                    value={rules.baseBackoffSeconds}
-                    onChange={(e) =>
-                      setRules((prev) => ({
-                        ...prev,
-                        baseBackoffSeconds: Number(e.target.value || 30),
-                      }))
-                    }
-                    className="mt-1 min-h-[40px] w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-white px-3 py-2 font-mono text-xs tabular-nums"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#1E1710]">
-                    Low Stock Alert Threshold (jars)
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={rules.lowStockThreshold}
-                    onChange={(e) =>
-                      setRules((prev) => ({
-                        ...prev,
-                        lowStockThreshold: Number(e.target.value || 5),
-                      }))
-                    }
-                    className="mt-1 min-h-[40px] w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-white px-3 py-2 font-mono text-xs tabular-nums"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => void handleSave({ rules })}
-                className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-[#1E1710] px-4 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50"
-              >
-                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                <span>Save Notification Rules</span>
-              </button>
+              {/* Message Template Customizer & Live Preview */}
+              <NotificationTemplatesEditor
+                rules={rules}
+                saving={saving}
+                getIdToken={getIdToken}
+                onChangeRules={setRules}
+                onSaveRules={async (nextRules) => handleSave({ rules: nextRules })}
+                onFeedback={showBanner}
+              />
             </div>
           )}
 
-          {/* SUB-TAB 6: HISTORY & DLQ */}
+          {/* SUB-TAB 6: DIAGNOSTICS & TESTS */}
+          {subTab === 'diagnostics' && (
+            <BackendDiagnosticsSuite
+              getIdToken={getIdToken}
+              chatIdsOverride={settings.telegram.chatIdsOverride}
+            />
+          )}
+
+          {/* SUB-TAB 7: HISTORY & DLQ */}
           {subTab === 'history' && (
             <div className="space-y-6">
               {/* Filter & Worker Controls */}
               <div className="flex flex-col gap-3 rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <HelpInfoButton section="notification_history_dlq" />
                   <select
                     value={filterChannel}
                     onChange={(e) => {
@@ -1335,7 +1955,7 @@ export function AdminEcosystemPanel({
               <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-5">
                 <div className="flex items-center justify-between">
                   <h3 className="font-display text-base font-semibold">
-                    Notification Queue & Dead-Letter Jobs ({totalJobs})
+                    Notification Queue &amp; Dead-Letter Jobs ({totalJobs})
                   </h3>
                   <div className="flex items-center gap-2 text-xs">
                     <button
@@ -1362,7 +1982,7 @@ export function AdminEcosystemPanel({
                     <thead>
                       <tr className="border-b border-[rgba(30,23,16,0.10)] text-[#635647]">
                         <th className="py-2 pr-3 font-semibold">Channel</th>
-                        <th className="py-2 pr-3 font-semibold">Event & Summary</th>
+                        <th className="py-2 pr-3 font-semibold">Event &amp; Summary</th>
                         <th className="py-2 pr-3 font-semibold">Status</th>
                         <th className="py-2 pr-3 font-semibold">Attempts</th>
                         <th className="py-2 pr-3 font-semibold">Timestamp</th>

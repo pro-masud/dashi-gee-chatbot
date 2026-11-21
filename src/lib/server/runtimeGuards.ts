@@ -33,6 +33,9 @@ assertNoTestModeInProduction();
 
 export function isTestProcessRuntime(): boolean {
   assertNoTestModeInProduction();
+  if (process.env.NODE_ENV === 'production') {
+    return false;
+  }
   return (
     process.env.NODE_ENV === 'test' ||
     process.env.DESHI_GEE_TEST_MODE === '1' ||

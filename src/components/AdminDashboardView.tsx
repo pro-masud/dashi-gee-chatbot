@@ -52,6 +52,8 @@ import type { RefillReminderDoc } from '../lib/chatbot/types';
 import { formatBdt } from '../data/deshiGeeData';
 import { AdminChatbotPanel } from './AdminChatbotPanel';
 import { AdminEcosystemPanel } from './AdminEcosystemPanel';
+import { HelpInfoButton } from './admin/AdminHelpModal';
+import { StorefrontImpactPreview } from './admin/StorefrontImpactPreview';
 import { useStorefront } from './StorefrontProvider';
 
 interface AdminDashboardViewProps {
@@ -828,7 +830,10 @@ export function AdminDashboardView({
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6">
-              <h2 className="font-display text-lg font-semibold">Recent Orders</h2>
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="font-display text-lg font-semibold">Recent Orders</h2>
+                <HelpInfoButton section="overview" />
+              </div>
               <div className="mt-4 divide-y divide-[rgba(30,23,16,0.08)] text-sm">
                 {orders.slice(0, 6).map((o) => (
                   <div
@@ -927,6 +932,7 @@ export function AdminDashboardView({
               <Download className="h-3.5 w-3.5 text-[#8A5A17]" />
               <span>Export CSV ({filteredOrders.length})</span>
             </button>
+            <HelpInfoButton section="orders" />
           </div>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
@@ -1327,9 +1333,12 @@ export function AdminDashboardView({
           className="mt-8 grid grid-cols-1 gap-6 rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4 sm:p-6 md:grid-cols-3"
         >
           <div className="space-y-4">
-            <h2 className="font-display text-lg font-semibold">
-              Single-Product Pricing &amp; Stock
-            </h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-display text-lg font-semibold">
+                Single-Product Pricing &amp; Stock
+              </h2>
+              <HelpInfoButton section="store_pricing_stock" />
+            </div>
             {(['250g', '500g', '1kg'] as const).map((w) => {
               const priceKey = w === '250g' ? 'price250g' : w === '500g' ? 'price500g' : 'price1kg';
               const stockKey = w === '250g' ? 'stock250g' : w === '500g' ? 'stock500g' : 'stock1kg';
@@ -1371,9 +1380,12 @@ export function AdminDashboardView({
           </div>
 
           <div className="space-y-4">
-            <h2 className="font-display text-lg font-semibold">
-              Bangladesh Delivery &amp; MFS Numbers
-            </h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-display text-lg font-semibold">
+                Bangladesh Delivery &amp; MFS Numbers
+              </h2>
+              <HelpInfoButton section="store_delivery_payments" />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-[#635647]">Dhaka City (৳)</label>
@@ -1580,9 +1592,12 @@ export function AdminDashboardView({
           </div>
 
           <div className="space-y-4">
-            <h2 className="font-display text-lg font-semibold">
-              Contact, Origin &amp; Social Links
-            </h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-display text-lg font-semibold">
+                Contact, Origin &amp; Social Links
+              </h2>
+              <HelpInfoButton section="store_contact_social" />
+            </div>
             <div>
               <label className="block text-xs text-[#635647]">WhatsApp Number</label>
               <input
@@ -1643,6 +1658,12 @@ export function AdminDashboardView({
             </div>
           </div>
 
+          <StorefrontImpactPreview
+            savedSettings={settings}
+            draftSettings={draftSettings}
+            onResetDraft={() => setDraftSettings(settings)}
+          />
+
           <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[rgba(30,23,16,0.10)] pt-4 md:col-span-3">
             <span className="text-xs font-medium text-[#8A5A17]">{settingsSavedMsg}</span>
             <button
@@ -1668,9 +1689,12 @@ export function AdminDashboardView({
             onSubmit={handleSaveBatch}
             className="space-y-4 rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6"
           >
-            <h2 className="font-display text-lg font-semibold">
-              Batch Provenance &amp; Lab Record
-            </h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-display text-lg font-semibold">
+                Batch Provenance &amp; Lab Record
+              </h2>
+              <HelpInfoButton section="batches" />
+            </div>
             <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
               <div>
                 <label className="text-[#635647]">Batch Code</label>
@@ -1763,7 +1787,10 @@ export function AdminDashboardView({
             onSubmit={handleSaveCoupon}
             className="space-y-4 rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6"
           >
-            <h2 className="font-display text-lg font-semibold">Promo Coupons</h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-display text-lg font-semibold">Promo Coupons</h2>
+              <HelpInfoButton section="coupons" />
+            </div>
             <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
               <div>
                 <label className="text-[#635647]">Code</label>
@@ -1874,9 +1901,12 @@ export function AdminDashboardView({
       {tab === 'reviews' && (
         <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-12">
           <div className="space-y-4 lg:col-span-8">
-            <h2 className="font-display text-lg font-semibold">
-              Customer Review Moderation Queue
-            </h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-display text-lg font-semibold">
+                Customer Review Moderation Queue
+              </h2>
+              <HelpInfoButton section="reviews" />
+            </div>
             {reviews.map((rev) => (
               <div
                 key={rev.id}
@@ -1951,9 +1981,12 @@ export function AdminDashboardView({
                   <BellRing className="h-4 w-4 text-[#B47B2B]" />
                   <span>Refill Reminders ({refillReminders.length})</span>
                 </h2>
-                <span className="font-mono text-xs tabular-nums text-[#8A5A17]">
-                  {refillDueCount} due
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs tabular-nums text-[#8A5A17]">
+                    {refillDueCount} due
+                  </span>
+                  <HelpInfoButton section="refill_reminders" />
+                </div>
               </div>
               <p className="mt-1 text-xs text-[#635647]">
                 Opt-in customer refill schedules. Dispatch triggers configured WhatsApp/Email
@@ -2024,9 +2057,12 @@ export function AdminDashboardView({
             </div>
 
             <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6">
-              <h2 className="font-display text-lg font-semibold">
-                Newsletter Subscribers ({subscribers.length})
-              </h2>
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="font-display text-lg font-semibold">
+                  Newsletter Subscribers ({subscribers.length})
+                </h2>
+                <HelpInfoButton section="subscribers" />
+              </div>
               <ul className="mt-4 divide-y divide-[rgba(30,23,16,0.08)] text-xs">
                 {subscribers.map((s) => (
                   <li key={s.id} className="flex justify-between py-2.5">

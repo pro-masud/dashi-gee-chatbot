@@ -3,10 +3,12 @@ import {
   DISCORD_CHANNEL_KEYS,
   mapEventToDiscordChannel,
   maskPhoneForAdminAlert,
+  renderNotificationTemplate,
   sanitizeNotificationError,
   type BusinessEventPayload,
   type BusinessEventType,
   type DiscordChannelKey,
+  type NotificationTemplateOverride,
 } from '../notifications/types';
 
 export interface DiscordChannelReadiness {
@@ -137,7 +139,10 @@ export interface DiscordEmbedPayload {
   }>;
 }
 
-export function buildDiscordEmbedPayload(event: BusinessEventPayload): DiscordEmbedPayload {
+export function buildDiscordEmbedPayload(
+  event: BusinessEventPayload,
+  templateOverride?: NotificationTemplateOverride
+): DiscordEmbedPayload {
   const channelKey = mapEventToDiscordChannel(event.type);
   const fields: Array<{ name: string; value: string; inline?: boolean }> = [];
 
@@ -203,12 +208,20 @@ export function buildDiscordEmbedPayload(event: BusinessEventPayload): DiscordEm
   const adminUrl = buildAdminDashboardUrl(event.adminPath || '/admin');
   const validHttpUrl = /^https?:\/\//i.test(adminUrl) ? adminUrl : undefined;
 
+  const customTitle = templateOverride?.titleTemplate
+    ? renderNotificationTemplate(templateOverride.titleTemplate, event, { maskPhone: true })
+    : '';
+  const customBody = templateOverride?.bodyTemplate
+    ? renderNotificationTemplate(templateOverride.bodyTemplate, event, { maskPhone: true })
+    : '';
+
   return {
     username: 'Deshi Gee Operations',
     embeds: [
       {
-        title: (event.title || event.type.replace(/_/g, ' ')).slice(0, 240),
-        description: event.summary ? event.summary.slice(0, 1500) : undefined,
+        title: (customTitle || event.title || event.type.replace(/_/g, ' ')).slice(0, 240),
+        description:
+          customBody || event.summary ? (customBody || event.summary || '').slice(0, 1500) : undefined,
         color: getEmbedColor(event.type),
         url: validHttpUrl,
         fields: fields.slice(0, 12),
@@ -225,7 +238,11 @@ export function buildDiscordEmbedPayload(event: BusinessEventPayload): DiscordEm
  */
 export async function sendDiscordEventNotification(
   event: BusinessEventPayload,
-  options?: { channelKeyOverride?: DiscordChannelKey; fetchImpl?: typeof fetch }
+  options?: {
+    channelKeyOverride?: DiscordChannelKey;
+    templateOverride?: NotificationTemplateOverride;
+    fetchImpl?: typeof fetch;
+  }
 ): Promise<DiscordSendResult> {
   const channelKey = options?.channelKeyOverride || mapEventToDiscordChannel(event.type);
   const { url } = resolveDiscordWebhookUrl(channelKey);
@@ -240,7 +257,7 @@ export async function sendDiscordEventNotification(
     };
   }
 
-  const payload = buildDiscordEmbedPayload(event);
+  const payload = buildDiscordEmbedPayload(event, options?.templateOverride);
   const doFetch = options?.fetchImpl || fetch;
 
   try {

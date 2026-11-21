@@ -1,9 +1,12 @@
 import {
+  renderNotificationTemplate,
   sanitizeNotificationError,
   type BusinessEventPayload,
   type IntegrationSettingsDoc,
+  type NotificationTemplateOverride,
 } from '../notifications/types';
 import { normalizeBangladeshPhone } from '../chatbot/orderToken';
+import { isWithinDhakaQuietHours } from '../chatbot/channelEngine';
 
 export interface WhatsAppCloudReadiness {
   configured: boolean;
@@ -260,13 +263,19 @@ export async function sendWhatsAppTemplateMessage(params: {
 
 /**
  * Policy-compliant WhatsApp business event dispatcher:
+ * - Blocks explicitly opted-out customers (`whatsappOptIn === false`).
  * - Requires customer opt-in (`whatsappOptIn === true`) OR active 24h customer-care window.
+ * - Enforces Asia/Dhaka quiet hours (22:00–08:00 BST) for proactive customer notifications.
  * - Uses approved template messages for proactive order confirmation / status updates outside 24h.
  */
 export async function sendWhatsAppBusinessEventNotification(
   event: BusinessEventPayload,
   waSettings: IntegrationSettingsDoc['whatsapp'],
-  options?: { fetchImpl?: typeof fetch }
+  options?: {
+    templateOverride?: NotificationTemplateOverride;
+    fetchImpl?: typeof fetch;
+    now?: Date;
+  }
 ): Promise<WhatsAppSendResult> {
   if (!event.customerPhone) {
     return {
@@ -308,16 +317,45 @@ export async function sendWhatsAppBusinessEventNotification(
     };
   }
 
+  if (event.whatsappOptIn === false) {
+    return {
+      ok: false,
+      configured: getWhatsAppCloudReadiness().configured,
+      skippedReason: 'customer_opted_out',
+      error: 'Skipped WhatsApp notification: customer has opted out / unsubscribed.',
+      retryable: false,
+    };
+  }
+
+  if (!event.withinWhatsapp24hWindow && isWithinDhakaQuietHours(options?.now ?? new Date())) {
+    return {
+      ok: false,
+      configured: getWhatsAppCloudReadiness().configured,
+      skippedReason: 'quiet_hours_dhaka',
+      error: 'Skipped proactive customer WhatsApp notification during Bangladesh quiet hours (22:00–08:00 Asia/Dhaka).',
+      retryable: false,
+    };
+  }
+
   if (event.withinWhatsapp24hWindow && !event.whatsappTemplateName) {
-    const bodyText = [
-      event.title || 'Deshi Gee Order Update',
-      event.orderNumber ? `Order: ${event.orderNumber}` : '',
-      event.itemsSummary ? `Items: ${event.itemsSummary}` : '',
-      typeof event.totalBdt === 'number' && event.totalBdt > 0 ? `Total: ৳${Math.round(event.totalBdt)}` : '',
-      event.orderStatus ? `Status: ${event.orderStatus}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const customWaBody = options?.templateOverride?.whatsappMessageTemplate
+      ? renderNotificationTemplate(options.templateOverride.whatsappMessageTemplate, event, {
+          maskPhone: false,
+        })
+      : '';
+    const bodyText =
+      customWaBody ||
+      [
+        event.title || 'Deshi Gee Order Update',
+        event.orderNumber ? `Order: ${event.orderNumber}` : '',
+        event.itemsSummary ? `Items: ${event.itemsSummary}` : '',
+        typeof event.totalBdt === 'number' && event.totalBdt > 0
+          ? `Total: ৳${Math.round(event.totalBdt)}`
+          : '',
+        event.orderStatus ? `Status: ${event.orderStatus}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
 
     return sendWhatsAppTextMessage({
       toPhone: event.customerPhone,

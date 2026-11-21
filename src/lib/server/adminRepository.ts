@@ -489,6 +489,7 @@ export async function adminCreatePendingReview(input: {
   orderNumber: string;
   photoData: string;
 }): Promise<{ id: string }> {
+  ensureLiveWriteAllowedInTest('adminCreatePendingReview');
   ensureAdminAvailable();
   const id = `rev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   try {
@@ -517,6 +518,7 @@ export async function adminCreatePendingReview(input: {
 }
 
 export async function adminIncrementReviewHelpfulAtomic(reviewId: string): Promise<boolean> {
+  ensureLiveWriteAllowedInTest('adminIncrementReviewHelpfulAtomic');
   ensureAdminAvailable();
   const cleanId = String(reviewId || '').trim();
   if (!/^[a-zA-Z0-9_-]{4,96}$/.test(cleanId)) return false;
@@ -546,6 +548,7 @@ export async function adminSubscribeNewsletter(
   email: string,
   lang: 'en' | 'bn'
 ): Promise<{ id: string }> {
+  ensureLiveWriteAllowedInTest('adminSubscribeNewsletter');
   ensureAdminAvailable();
   const clean = email.trim().toLowerCase();
   const id = `sub_${clean.replace(/[^a-z0-9]/g, '_').slice(0, 96)}`;

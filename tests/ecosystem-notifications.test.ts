@@ -279,7 +279,7 @@ describe('WhatsApp Business Cloud API & Webhook Compliance', () => {
         whatsappOptIn: true,
       },
       waSettings,
-      { fetchImpl: templateFetch }
+      { fetchImpl: templateFetch, now: new Date('2026-04-01T06:00:00Z') }
     );
     assert.equal(sent.ok, true);
     assert.equal(sent.messageId, 'wamid.test123');

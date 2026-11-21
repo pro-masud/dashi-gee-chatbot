@@ -13,6 +13,17 @@ export const BUSINESS_EVENT_TYPES = [
 
 export type BusinessEventType = (typeof BUSINESS_EVENT_TYPES)[number];
 
+export const CUSTOMER_CAPABLE_EVENTS = [
+  'ORDER_CREATED',
+  'ORDER_UPDATED',
+  'ORDER_CANCELLED',
+  'CUSTOMER_MESSAGE_RECEIVED',
+] as const;
+
+export function isCustomerCapableEvent(eventType: BusinessEventType): boolean {
+  return (CUSTOMER_CAPABLE_EVENTS as readonly string[]).includes(eventType);
+}
+
 export const NOTIFICATION_CHANNELS = ['telegram', 'discord', 'whatsapp'] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 
@@ -98,6 +109,22 @@ export interface IntegrationSettingsDoc {
   updatedBy?: string;
 }
 
+export type NotificationRecipientScope = 'admin' | 'customer' | 'both';
+
+export interface NotificationTemplateVariableDef {
+  key: string;
+  label: string;
+  sample: string;
+}
+
+export interface NotificationTemplateOverride {
+  titleTemplate?: string;
+  bodyTemplate?: string;
+  emailSubjectTemplate?: string;
+  whatsappMessageTemplate?: string;
+  recipientScope?: NotificationRecipientScope;
+}
+
 export interface EventChannelRule {
   enabled: boolean;
   telegram: boolean;
@@ -106,10 +133,12 @@ export interface EventChannelRule {
 }
 
 /**
- * Per-event notification toggles & retry policy stored in Firestore (`notification_rules/main`).
+ * Per-event notification toggles, custom templates & retry policy stored in Firestore (`notification_rules/main`).
  */
 export interface NotificationRulesDoc {
   events: Record<BusinessEventType, EventChannelRule>;
+  templates?: Partial<Record<BusinessEventType, NotificationTemplateOverride>>;
+  ownerNotificationEmailOverride?: string;
   maxRetries: number;
   baseBackoffSeconds: number;
   lowStockThreshold: number;
@@ -200,6 +229,313 @@ export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettingsDoc = {
   updatedAtIso: '',
 };
 
+export const EVENT_SUPPORTED_VARIABLES: Record<
+  BusinessEventType,
+  NotificationTemplateVariableDef[]
+> = {
+  ORDER_CREATED: [
+    { key: 'order_id', label: 'Order ID', sample: 'DG-20261121-1042' },
+    { key: 'customer_name', label: 'Customer Name', sample: 'Farhana Rahman' },
+    { key: 'customer_phone', label: 'Customer Phone (masked for admin)', sample: '0171****890' },
+    { key: 'items_summary', label: 'Items Summary', sample: '500g × 2' },
+    { key: 'order_total', label: 'Order Total (BDT)', sample: '৳2,450' },
+    { key: 'payment_method', label: 'Payment Method', sample: 'COD' },
+    { key: 'payment_status', label: 'Payment Status', sample: 'cod_due' },
+    { key: 'delivery_location', label: 'Delivery Area & District', sample: 'Dhanmondi, Dhaka' },
+    { key: 'order_status', label: 'Order Status', sample: 'pending' },
+  ],
+  ORDER_UPDATED: [
+    { key: 'order_id', label: 'Order ID', sample: 'DG-20261121-1042' },
+    { key: 'customer_name', label: 'Customer Name', sample: 'Farhana Rahman' },
+    { key: 'order_status', label: 'New Order Status', sample: 'shipped' },
+    { key: 'payment_status', label: 'Payment Status', sample: 'verified' },
+    { key: 'items_summary', label: 'Items Summary', sample: '500g × 2' },
+    { key: 'order_total', label: 'Order Total (BDT)', sample: '৳2,450' },
+    { key: 'delivery_location', label: 'Delivery Location', sample: 'Dhanmondi, Dhaka' },
+    { key: 'summary', label: 'Update Summary', sample: 'Parcel dispatched via Steadfast courier.' },
+  ],
+  ORDER_CANCELLED: [
+    { key: 'order_id', label: 'Order ID', sample: 'DG-20261121-1042' },
+    { key: 'customer_name', label: 'Customer Name', sample: 'Farhana Rahman' },
+    { key: 'order_status', label: 'Order Status', sample: 'cancelled' },
+    { key: 'order_total', label: 'Order Total (BDT)', sample: '৳2,450' },
+    { key: 'summary', label: 'Cancellation Note', sample: 'Cancelled by customer verification request.' },
+  ],
+  PAYMENT_SUCCESS: [
+    { key: 'order_id', label: 'Order ID', sample: 'DG-20261121-1042' },
+    { key: 'customer_name', label: 'Customer Name', sample: 'Farhana Rahman' },
+    { key: 'order_total', label: 'Paid Amount (BDT)', sample: '৳2,450' },
+    { key: 'payment_method', label: 'Payment Gateway', sample: 'BKASH' },
+    { key: 'payment_status', label: 'Payment Status', sample: 'verified' },
+    { key: 'summary', label: 'Verification Detail', sample: 'Server-verified online payment received.' },
+  ],
+  PAYMENT_FAILED: [
+    { key: 'order_id', label: 'Order ID', sample: 'DG-20261121-1042' },
+    { key: 'customer_name', label: 'Customer Name', sample: 'Farhana Rahman' },
+    { key: 'order_total', label: 'Order Amount (BDT)', sample: '৳2,450' },
+    { key: 'payment_method', label: 'Payment Gateway', sample: 'SSLCOMMERZ' },
+    { key: 'payment_status', label: 'Payment Status', sample: 'failed' },
+    { key: 'summary', label: 'Failure Reason', sample: 'Gateway payment was cancelled or failed.' },
+  ],
+  SUPPORT_REQUESTED: [
+    { key: 'ticket_id', label: 'Support Ticket ID', sample: 'TKT-90421' },
+    { key: 'customer_name', label: 'Customer Name', sample: 'Tanvir Ahmed' },
+    { key: 'customer_phone', label: 'Customer Phone (masked)', sample: '0181****321' },
+    { key: 'order_id', label: 'Related Order ID', sample: 'DG-20261121-1042' },
+    { key: 'priority', label: 'Priority Level', sample: 'HIGH' },
+    { key: 'summary', label: 'Issue Summary', sample: 'Customer requested human support for delivery reschedule.' },
+  ],
+  CUSTOMER_MESSAGE_RECEIVED: [
+    { key: 'customer_name', label: 'Customer Name', sample: 'Nusrat Jahan' },
+    { key: 'customer_phone', label: 'Customer Phone (masked)', sample: '0191****654' },
+    { key: 'summary', label: 'Message Preview', sample: 'Apnader 1kg jar er stock ki ache?' },
+  ],
+  LOW_STOCK: [
+    { key: 'variant_weight', label: 'Jar Weight', sample: '500g' },
+    { key: 'remaining_stock', label: 'Remaining Stock', sample: '3' },
+    { key: 'summary', label: 'Alert Summary', sample: '500g jar stock dropped below threshold.' },
+  ],
+  DAILY_SUMMARY: [
+    { key: 'order_total', label: 'Total Revenue (BDT)', sample: '৳28,400' },
+    { key: 'summary', label: 'Daily KPI Summary', sample: 'Orders: 14 (3 pending) · Revenue: ৳28,400 · Open Tickets: 1' },
+  ],
+  SYSTEM_ERROR: [
+    { key: 'error_code', label: 'Error Code', sample: 'WEBHOOK_DELIVERY_RETRY' },
+    { key: 'summary', label: 'Alert Detail', sample: 'Diagnostic check or runtime system notice.' },
+  ],
+};
+
+export const DEFAULT_EVENT_TEMPLATES: Record<
+  BusinessEventType,
+  Required<NotificationTemplateOverride>
+> = {
+  ORDER_CREATED: {
+    titleTemplate: 'New Order Received — {{order_id}}',
+    bodyTemplate:
+      '{{customer_name}} placed an order for {{items_summary}} ({{order_total}} · {{payment_method}}) to {{delivery_location}}.',
+    emailSubjectTemplate: '[Deshi Gee] New Order {{order_id}} — {{order_total}}',
+    whatsappMessageTemplate:
+      'Assalamu Alaikum {{customer_name}}, your Deshi Gee order {{order_id}} ({{items_summary}}, Total {{order_total}}) has been received. Status: {{order_status}}.',
+    recipientScope: 'both',
+  },
+  ORDER_UPDATED: {
+    titleTemplate: 'Order {{order_id}} Updated — {{order_status}}',
+    bodyTemplate: '{{customer_name}} · Order {{order_id}} is now {{order_status}}. {{summary}}',
+    emailSubjectTemplate: '[Deshi Gee] Order {{order_id}} is now {{order_status}}',
+    whatsappMessageTemplate:
+      'Deshi Gee Update: Hello {{customer_name}}, your order {{order_id}} status is now {{order_status}}. {{summary}}',
+    recipientScope: 'both',
+  },
+  ORDER_CANCELLED: {
+    titleTemplate: 'Order Cancelled — {{order_id}}',
+    bodyTemplate: 'Order {{order_id}} ({{customer_name}}, {{order_total}}) was cancelled. {{summary}}',
+    emailSubjectTemplate: '[Deshi Gee] Order {{order_id}} Cancelled',
+    whatsappMessageTemplate:
+      'Deshi Gee Update: Your order {{order_id}} has been cancelled. {{summary}}',
+    recipientScope: 'both',
+  },
+  PAYMENT_SUCCESS: {
+    titleTemplate: 'Payment Verified — {{order_id}} ({{order_total}})',
+    bodyTemplate:
+      '{{payment_method}} payment of {{order_total}} verified for {{customer_name}} (Order {{order_id}}). {{summary}}',
+    emailSubjectTemplate: '[Deshi Gee] Payment Verified for {{order_id}}',
+    whatsappMessageTemplate:
+      'Payment received! Your {{payment_method}} payment of {{order_total}} for order {{order_id}} is verified.',
+    recipientScope: 'admin',
+  },
+  PAYMENT_FAILED: {
+    titleTemplate: 'Payment Failed — {{order_id}}',
+    bodyTemplate:
+      '{{payment_method}} payment ({{order_total}}) failed for {{customer_name}} (Order {{order_id}}). {{summary}}',
+    emailSubjectTemplate: '[Deshi Gee] Payment Failed — Order {{order_id}}',
+    whatsappMessageTemplate:
+      'Payment could not be completed for order {{order_id}}. Please reply if you need assistance.',
+    recipientScope: 'admin',
+  },
+  SUPPORT_REQUESTED: {
+    titleTemplate: 'Support Escalation — {{ticket_id}} ({{priority}})',
+    bodyTemplate: '{{customer_name}} needs human support. {{summary}}',
+    emailSubjectTemplate: '[Deshi Gee Support] Ticket {{ticket_id}} ({{priority}})',
+    whatsappMessageTemplate:
+      'Your Deshi Gee support request {{ticket_id}} has been assigned to a team member.',
+    recipientScope: 'admin',
+  },
+  CUSTOMER_MESSAGE_RECEIVED: {
+    titleTemplate: 'Inbound Customer Message — {{customer_name}}',
+    bodyTemplate: '{{summary}}',
+    emailSubjectTemplate: '[Deshi Gee] New Customer Message from {{customer_name}}',
+    whatsappMessageTemplate: '{{summary}}',
+    recipientScope: 'admin',
+  },
+  LOW_STOCK: {
+    titleTemplate: 'Low Inventory Alert — {{variant_weight}} ({{remaining_stock}} left)',
+    bodyTemplate: 'Jar size {{variant_weight}} has only {{remaining_stock}} unit(s) remaining. {{summary}}',
+    emailSubjectTemplate: '[Deshi Gee Inventory] Low Stock on {{variant_weight}}',
+    whatsappMessageTemplate: 'Low stock alert: {{variant_weight}} has {{remaining_stock}} jar(s) left.',
+    recipientScope: 'admin',
+  },
+  DAILY_SUMMARY: {
+    titleTemplate: 'Deshi Gee Daily Operations Summary',
+    bodyTemplate: '{{summary}}',
+    emailSubjectTemplate: '[Deshi Gee] Daily Operations Summary',
+    whatsappMessageTemplate: 'Daily Summary: {{summary}}',
+    recipientScope: 'admin',
+  },
+  SYSTEM_ERROR: {
+    titleTemplate: 'System Alert — {{error_code}}',
+    bodyTemplate: '{{summary}}',
+    emailSubjectTemplate: '[Deshi Gee System Alert] {{error_code}}',
+    whatsappMessageTemplate: 'System Alert: {{summary}}',
+    recipientScope: 'admin',
+  },
+};
+
+export const SAMPLE_EVENT_PAYLOADS: Record<BusinessEventType, BusinessEventPayload> = {
+  ORDER_CREATED: {
+    type: 'ORDER_CREATED',
+    orderNumber: 'DG-20261121-1042',
+    customerName: 'Farhana Rahman',
+    customerPhone: '01711223890',
+    itemsSummary: '500g × 2',
+    totalBdt: 2450,
+    paymentMethod: 'cod',
+    paymentStatus: 'cod_due',
+    orderStatus: 'pending',
+    area: 'Dhanmondi',
+    district: 'Dhaka',
+    summary: 'New website order submitted via checkout.',
+  },
+  ORDER_UPDATED: {
+    type: 'ORDER_UPDATED',
+    orderNumber: 'DG-20261121-1042',
+    customerName: 'Farhana Rahman',
+    customerPhone: '01711223890',
+    itemsSummary: '500g × 2',
+    totalBdt: 2450,
+    orderStatus: 'shipped',
+    paymentStatus: 'verified',
+    area: 'Dhanmondi',
+    district: 'Dhaka',
+    summary: 'Parcel handed over to Steadfast courier.',
+  },
+  ORDER_CANCELLED: {
+    type: 'ORDER_CANCELLED',
+    orderNumber: 'DG-20261121-1042',
+    customerName: 'Farhana Rahman',
+    totalBdt: 2450,
+    orderStatus: 'cancelled',
+    summary: 'Cancelled after customer verification.',
+  },
+  PAYMENT_SUCCESS: {
+    type: 'PAYMENT_SUCCESS',
+    orderNumber: 'DG-20261121-1042',
+    customerName: 'Farhana Rahman',
+    totalBdt: 2450,
+    paymentMethod: 'bkash',
+    paymentStatus: 'verified',
+    summary: 'Server-verified online payment received.',
+  },
+  PAYMENT_FAILED: {
+    type: 'PAYMENT_FAILED',
+    orderNumber: 'DG-20261121-1042',
+    customerName: 'Farhana Rahman',
+    totalBdt: 2450,
+    paymentMethod: 'sslcommerz',
+    paymentStatus: 'failed',
+    summary: 'Payment session cancelled by payer.',
+  },
+  SUPPORT_REQUESTED: {
+    type: 'SUPPORT_REQUESTED',
+    ticketId: 'TKT-90421',
+    orderNumber: 'DG-20261121-1042',
+    customerName: 'Tanvir Ahmed',
+    customerPhone: '01811223321',
+    priority: 'high',
+    summary: 'Customer asked to reschedule delivery to tomorrow afternoon.',
+  },
+  CUSTOMER_MESSAGE_RECEIVED: {
+    type: 'CUSTOMER_MESSAGE_RECEIVED',
+    customerName: 'Nusrat Jahan',
+    customerPhone: '01911223654',
+    summary: 'Apnader 1kg jar er stock ki ache? Dhaka te delivery koto?',
+  },
+  LOW_STOCK: {
+    type: 'LOW_STOCK',
+    variantWeight: '500g',
+    remainingStock: 3,
+    summary: 'Restock recommended before afternoon dispatch cut-off.',
+  },
+  DAILY_SUMMARY: {
+    type: 'DAILY_SUMMARY',
+    totalBdt: 28400,
+    summary: 'Orders: 14 (3 pending) · Revenue: ৳28,400 · Open Tickets: 1 · Dead-Letter Alerts: 0',
+  },
+  SYSTEM_ERROR: {
+    type: 'SYSTEM_ERROR',
+    errorCode: 'DIAGNOSTIC_TEST',
+    summary: 'Test alert triggered from Deshi Gee Admin Dashboard.',
+  },
+};
+
+/**
+ * Interpolates supported `{{variable}}` tokens against a BusinessEventPayload.
+ * Unsupported variables are safely left blank/removed rather than rendering `undefined`.
+ */
+export function renderNotificationTemplate(
+  templateText: string,
+  event: BusinessEventPayload,
+  options?: { maskPhone?: boolean }
+): string {
+  const rawTemplate = String(templateText || '').trim();
+  if (!rawTemplate) return '';
+
+  const location = [event.area, event.district].filter(Boolean).join(', ');
+  const totalFormatted =
+    typeof event.totalBdt === 'number' && Number.isFinite(event.totalBdt) && event.totalBdt > 0
+      ? `৳${Math.round(event.totalBdt).toLocaleString('en-US')}`
+      : '৳0';
+  const phoneVal = event.customerPhone
+    ? options?.maskPhone !== false
+      ? maskPhoneForAdminAlert(event.customerPhone)
+      : event.customerPhone
+    : '';
+
+  const values: Record<string, string> = {
+    order_id: String(event.orderNumber || '').trim(),
+    customer_name: String(event.customerName || 'Customer').trim(),
+    customer_phone: phoneVal,
+    items_summary: String(event.itemsSummary || '').trim(),
+    order_total: totalFormatted,
+    payment_method: String(event.paymentMethod || '').trim().toUpperCase(),
+    payment_status: String(event.paymentStatus || '').trim(),
+    order_status: String(event.orderStatus || '').trim(),
+    delivery_location: location,
+    ticket_id: String(event.ticketId || '').trim(),
+    priority: String(event.priority || 'normal').trim().toUpperCase(),
+    variant_weight: String(event.variantWeight || '').trim(),
+    remaining_stock:
+      typeof event.remainingStock === 'number' && Number.isFinite(event.remainingStock)
+        ? String(event.remainingStock)
+        : '',
+    error_code: String(event.errorCode || 'NOTICE').trim(),
+    summary: String(event.summary || '').trim(),
+    admin_url: buildAdminDashboardUrl(event.adminPath || '/admin'),
+  };
+
+  const allowedKeys = new Set(
+    (EVENT_SUPPORTED_VARIABLES[event.type] || []).map((v) => v.key).concat(['admin_url'])
+  );
+
+  return rawTemplate
+    .replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_match, rawKey: string) => {
+      const key = rawKey.toLowerCase();
+      if (!allowedKeys.has(key)) return '';
+      return values[key] ?? '';
+    })
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 export const DEFAULT_NOTIFICATION_RULES: NotificationRulesDoc = {
   events: {
     ORDER_CREATED: { enabled: true, telegram: true, discord: true, whatsapp: true },
@@ -213,6 +549,8 @@ export const DEFAULT_NOTIFICATION_RULES: NotificationRulesDoc = {
     DAILY_SUMMARY: { enabled: true, telegram: true, discord: true, whatsapp: false },
     SYSTEM_ERROR: { enabled: true, telegram: true, discord: true, whatsapp: false },
   },
+  templates: {},
+  ownerNotificationEmailOverride: '',
   maxRetries: 4,
   baseBackoffSeconds: 30,
   lowStockThreshold: 5,
@@ -319,18 +657,69 @@ export function mergeNotificationRules(
       };
     }
   }
-  const maxRetries = Math.min(8, Math.max(1, Math.round(Number(src.maxRetries || DEFAULT_NOTIFICATION_RULES.maxRetries))));
+
+  const mergedTemplates: Partial<Record<BusinessEventType, NotificationTemplateOverride>> = {};
+  if (src.templates && typeof src.templates === 'object') {
+    for (const key of BUSINESS_EVENT_TYPES) {
+      const tpl = src.templates[key];
+      if (tpl && typeof tpl === 'object') {
+        const rawScope: NotificationRecipientScope | undefined =
+          tpl.recipientScope === 'admin' ||
+          tpl.recipientScope === 'customer' ||
+          tpl.recipientScope === 'both'
+            ? tpl.recipientScope
+            : undefined;
+        const cleanScope: NotificationRecipientScope | undefined = rawScope
+          ? isCustomerCapableEvent(key)
+            ? rawScope
+            : 'admin'
+          : undefined;
+        mergedTemplates[key] = {
+          ...(typeof tpl.titleTemplate === 'string' && tpl.titleTemplate.trim()
+            ? { titleTemplate: tpl.titleTemplate.trim().slice(0, 180) }
+            : {}),
+          ...(typeof tpl.bodyTemplate === 'string' && tpl.bodyTemplate.trim()
+            ? { bodyTemplate: tpl.bodyTemplate.trim().slice(0, 1200) }
+            : {}),
+          ...(typeof tpl.emailSubjectTemplate === 'string' && tpl.emailSubjectTemplate.trim()
+            ? { emailSubjectTemplate: tpl.emailSubjectTemplate.trim().slice(0, 160) }
+            : {}),
+          ...(typeof tpl.whatsappMessageTemplate === 'string' &&
+          tpl.whatsappMessageTemplate.trim()
+            ? { whatsappMessageTemplate: tpl.whatsappMessageTemplate.trim().slice(0, 1000) }
+            : {}),
+          ...(cleanScope ? { recipientScope: cleanScope } : {}),
+        };
+      }
+    }
+  }
+
+  const maxRetries = Math.min(
+    8,
+    Math.max(1, Math.round(Number(src.maxRetries || DEFAULT_NOTIFICATION_RULES.maxRetries)))
+  );
   const baseBackoffSeconds = Math.min(
     600,
-    Math.max(5, Math.round(Number(src.baseBackoffSeconds || DEFAULT_NOTIFICATION_RULES.baseBackoffSeconds)))
+    Math.max(
+      5,
+      Math.round(Number(src.baseBackoffSeconds || DEFAULT_NOTIFICATION_RULES.baseBackoffSeconds))
+    )
   );
   const lowStockThreshold = Math.min(
     100,
-    Math.max(0, Math.round(Number(src.lowStockThreshold ?? DEFAULT_NOTIFICATION_RULES.lowStockThreshold)))
+    Math.max(
+      0,
+      Math.round(Number(src.lowStockThreshold ?? DEFAULT_NOTIFICATION_RULES.lowStockThreshold))
+    )
   );
 
   return {
     events: mergedEvents,
+    templates: mergedTemplates,
+    ownerNotificationEmailOverride:
+      typeof src.ownerNotificationEmailOverride === 'string'
+        ? src.ownerNotificationEmailOverride.trim().slice(0, 120)
+        : '',
     maxRetries,
     baseBackoffSeconds,
     lowStockThreshold,
