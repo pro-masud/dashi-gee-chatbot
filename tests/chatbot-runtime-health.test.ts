@@ -17,6 +17,7 @@ import {
   setRateLimitMemoryModeForTests,
   setSessionDraftMemoryModeForTests,
 } from '../src/lib/chatbot/firestoreRest';
+import { setAdminSdkAvailableForTests } from '../src/lib/firebaseAdmin';
 
 const ORIGINAL_ENV = {
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
@@ -89,6 +90,7 @@ describe('T0.1 Gemini runtime configuration & health diagnostics', () => {
       latencyMs: 12,
       detail: 'Firestore mock reachable for test',
     }));
+    setAdminSdkAvailableForTests(true);
   });
 
   afterEach(() => {
@@ -96,6 +98,7 @@ describe('T0.1 Gemini runtime configuration & health diagnostics', () => {
     clearGeminiHealthCacheForTests();
     setGeminiClientFactoryForTests(null);
     setAdminAuthOverrideForTests(null);
+    setAdminSdkAvailableForTests(null);
     setChatLogObserverForTests(null);
     setRateLimitMemoryModeForTests(false);
     setSessionDraftMemoryModeForTests(false);

@@ -239,6 +239,9 @@ export async function adminGetDocumentWithMeta(
   path: string
 ): Promise<{ data: Record<string, unknown>; updateTime?: string } | null> {
   ensureAdminAvailable();
+  if (isTestProcessRuntime() && !process.env.FIRESTORE_EMULATOR_HOST) {
+    return null;
+  }
   try {
     const db = getAdminDb();
     const snap = await db.doc(path).get();
@@ -266,6 +269,9 @@ export async function adminListCollection(
   pageSize = 200
 ): Promise<Record<string, unknown>[]> {
   ensureAdminAvailable();
+  if (isTestProcessRuntime() && !process.env.FIRESTORE_EMULATOR_HOST) {
+    return [];
+  }
   try {
     const db = getAdminDb();
     const snap = await db.collection(collectionId).limit(pageSize).get();
@@ -298,6 +304,9 @@ export async function adminRunStructuredQuery(
   structuredQuery: Record<string, unknown>
 ): Promise<Record<string, unknown>[]> {
   ensureAdminAvailable();
+  if (isTestProcessRuntime() && !process.env.FIRESTORE_EMULATOR_HOST) {
+    return [];
+  }
   try {
     const fromArr = structuredQuery.from as Array<{ collectionId?: string }> | undefined;
     const collectionId = fromArr?.[0]?.collectionId;

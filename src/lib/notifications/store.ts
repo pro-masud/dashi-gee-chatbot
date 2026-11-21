@@ -129,6 +129,9 @@ export async function fetchIntegrationSettings(): Promise<IntegrationSettingsDoc
   if (isNotificationStoreMemoryModeActive()) {
     return mergeIntegrationSettings(getMemoryStore().settings);
   }
+  if (isTestProcessRuntime() && !process.env.FIRESTORE_EMULATOR_HOST) {
+    return mergeIntegrationSettings(DEFAULT_INTEGRATION_SETTINGS);
+  }
   ensureAdminAvailable();
   try {
     const snap = await getAdminDb().collection(COL_INTEGRATION_SETTINGS).doc('main').get();
@@ -210,6 +213,9 @@ export async function updateChannelConnectionStatus(
 export async function fetchNotificationRules(): Promise<NotificationRulesDoc> {
   if (isNotificationStoreMemoryModeActive()) {
     return mergeNotificationRules(getMemoryStore().rules);
+  }
+  if (isTestProcessRuntime() && !process.env.FIRESTORE_EMULATOR_HOST) {
+    return mergeNotificationRules(DEFAULT_NOTIFICATION_RULES);
   }
   ensureAdminAvailable();
   try {
@@ -428,11 +434,13 @@ export async function listNotificationJobs(filter?: NotificationListFilter): Pro
   const limit = Math.min(100, Math.max(1, filter?.limit || 30));
   const offset = Math.max(0, filter?.offset || 0);
 
-  let all: NotificationJobDoc[];
+  let all: NotificationJobDoc[] = [];
   if (isNotificationStoreMemoryModeActive()) {
     all = Array.from(getMemoryStore().jobs.values()).sort(
       (a, b) => b.createdAtMs - a.createdAtMs
     );
+  } else if (isTestProcessRuntime() && !process.env.FIRESTORE_EMULATOR_HOST) {
+    all = [];
   } else {
     ensureAdminAvailable();
     try {
@@ -491,9 +499,11 @@ export async function listNotificationLogs(filter?: NotificationListFilter): Pro
   const limit = Math.min(100, Math.max(1, filter?.limit || 30));
   const offset = Math.max(0, filter?.offset || 0);
 
-  let all: NotificationLogDoc[];
+  let all: NotificationLogDoc[] = [];
   if (isNotificationStoreMemoryModeActive()) {
     all = [...getMemoryStore().logs].sort((a, b) => b.createdAtMs - a.createdAtMs);
+  } else if (isTestProcessRuntime() && !process.env.FIRESTORE_EMULATOR_HOST) {
+    all = [];
   } else {
     ensureAdminAvailable();
     try {

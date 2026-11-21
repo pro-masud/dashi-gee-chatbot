@@ -261,6 +261,18 @@ export async function checkAdminSdkReadiness(): Promise<AdminSdkReadinessReport>
     };
   }
 
+  if (isTestProcessRuntime() && !process.env.FIRESTORE_EMULATOR_HOST) {
+    return {
+      ok: false,
+      mode: 'unavailable',
+      projectId: ADMIN_PROJECT_ID,
+      databaseId: ADMIN_DATABASE_ID,
+      latencyMs: Date.now() - started,
+      code: 'adc_credentials_missing',
+      detail: 'Admin SDK live probe skipped in test runtime without FIRESTORE_EMULATOR_HOST or test override.',
+    };
+  }
+
   try {
     const db = getAdminDb();
     await db.collection('store_settings').doc('main').get();

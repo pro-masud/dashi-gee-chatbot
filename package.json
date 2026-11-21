@@ -4,17 +4,17 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "predev": "[ -d node_modules/.bin ] || npm install",
+    "predev": "node -e \"if(!require('fs').existsSync('node_modules/.bin'))process.exit(1)\" || npm install",
     "dev": "node scripts/next-cli.mjs dev",
-    "prebuild": "[ -d node_modules/.bin ] || npm install",
-    "build": "NODE_ENV=production next build",
+    "prebuild": "node -e \"if(!require('fs').existsSync('node_modules/.bin'))process.exit(1)\" || npm install",
+    "build": "next build",
     "start": "next start -H 0.0.0.0",
-    "prelint": "[ -d node_modules/.bin ] || npm install",
+    "prelint": "node -e \"if(!require('fs').existsSync('node_modules/.bin'))process.exit(1)\" || npm install",
     "lint": "tsc --noEmit",
-    "test": "NODE_ENV=test tsx --test tests/*.test.ts",
-    "test:chatbot": "NODE_ENV=test tsx --test tests/chatbot-regression-50.test.ts",
-    "test:rules": "NODE_ENV=test tsx --test tests/emulator/firestore-rules-final.test.ts",
-    "test:rules:s013": "NODE_ENV=test tsx --test tests/emulator/firestore-rules-hotfix-s013.test.ts"
+    "test": "node scripts/test-cli.mjs",
+    "test:chatbot": "node scripts/test-cli.mjs tests/chatbot-regression-50.test.ts",
+    "test:rules": "node scripts/test-cli.mjs tests/emulator/firestore-rules-final.test.ts",
+    "test:rules:s013": "node scripts/test-cli.mjs tests/emulator/firestore-rules-hotfix-s013.test.ts"
   },
   "dependencies": {
     "@firebase/eslint-plugin-security-rules": "^0.0.2",

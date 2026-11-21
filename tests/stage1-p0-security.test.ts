@@ -850,6 +850,11 @@ describe('Stage 1 P0 Security — S0-01..S0-06', () => {
     } finally {
       if (prevEmulator === undefined) delete process.env.FIRESTORE_EMULATOR_HOST;
       else process.env.FIRESTORE_EMULATOR_HOST = prevEmulator;
+      setSessionDraftMemoryModeForTests(true);
+      setRateLimitMemoryModeForTests(true);
+      setOrderStorageMemoryModeForTests(true);
+      setRetentionMemoryModeForTests(true);
+      setChannelMemoryModeForTests(true);
     }
   });
 
@@ -1304,7 +1309,7 @@ describe('Stage 1 P0 Security — S0-01..S0-06', () => {
                       {
                         from: sender,
                         id,
-                        timestamp: String(nowSec),
+                        timestamp: String(Math.floor(Date.now() / 1000)),
                         type: 'text',
                         text: { body: bodyText },
                       },
