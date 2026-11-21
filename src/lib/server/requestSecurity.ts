@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import { getAppCheck } from 'firebase-admin/app-check';
 import { getAdminApp } from '../firebaseAdmin';
 import { isTestProcessRuntime } from './runtimeGuards';
 
@@ -136,6 +135,7 @@ export async function verifyOptionalAppCheck(request: Request): Promise<AppCheck
     return { ok: false, enforced: true, reason: 'missing_app_check_token' };
   }
   try {
+    const { getAppCheck } = await import('firebase-admin/app-check');
     await getAppCheck(getAdminApp()).verifyToken(token);
     return { ok: true, enforced: true };
   } catch {
