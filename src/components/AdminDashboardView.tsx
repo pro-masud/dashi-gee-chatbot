@@ -226,7 +226,11 @@ export function AdminDashboardView({
     usedCount: 0,
     stackableWithAdvance: false,
     descriptionEn: '',
+    startsAt: '',
+    maxDiscountBdt: 0,
+    freeDelivery: false,
   });
+  const [couponMsg, setCouponMsg] = useState('');
 
   useEffect(() => {
     setDraftSettings(settings);
@@ -857,8 +861,29 @@ export function AdminDashboardView({
 
   const handleSaveCoupon = async (e: FormEvent) => {
     e.preventDefault();
-    await saveAdminCoupon(couponDraft);
-    setCoupons(await fetchAdminCoupons());
+    setCouponMsg('');
+    try {
+      // Saved by the server: validated, audit-logged, and usedCount can never be overwritten.
+      const token = user ? await user.getIdToken() : '';
+      const res = await fetch('/api/admin/coupons', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(couponDraft),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        setCouponMsg(data.error || `Could not save coupon (HTTP ${res.status}).`);
+        return;
+      }
+      setCouponMsg('Coupon saved.');
+      setCoupons(await fetchAdminCoupons());
+    } catch (err) {
+      setCouponMsg(err instanceof Error ? err.message : 'Could not save coupon.');
+    }
   };
 
   const filteredOrders = useMemo(() => {
@@ -2459,12 +2484,47 @@ export function AdminDashboardView({
                 </label>
               </div>
             </div>
-            <button
-              type="submit"
-              className="min-h-[42px] rounded-lg bg-[#B47B2B] px-5 py-2.5 text-xs font-medium text-[#FFFDF9]"
-            >
-              Save Coupon Code
-            </button>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <label className="block text-xs text-[#635647]">
+                <span>Starts on</span>
+                <input
+                  type="date"
+                  value={couponDraft.startsAt || ''}
+                  onChange={(e) => setCouponDraft({ ...couponDraft, startsAt: e.target.value })}
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] bg-white px-2.5 py-1.5 text-base sm:text-sm"
+                />
+              </label>
+              <label className="block text-xs text-[#635647]">
+                <span>Max discount (৳, 0 = no cap)</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={couponDraft.maxDiscountBdt ?? 0}
+                  onChange={(e) => setCouponDraft({ ...couponDraft, maxDiscountBdt: Number(e.target.value) })}
+                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] bg-white px-2.5 py-1.5 font-mono text-base sm:text-sm"
+                />
+              </label>
+              <div className="flex items-end pb-1">
+                <label className="flex items-center gap-2 text-xs text-[#635647]">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(couponDraft.freeDelivery)}
+                    onChange={(e) => setCouponDraft({ ...couponDraft, freeDelivery: e.target.checked })}
+                  />
+                  <span>Free delivery with this coupon</span>
+                </label>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="submit"
+                className="min-h-[42px] rounded-lg bg-[#B47B2B] px-5 py-2.5 text-xs font-medium text-[#FFFDF9]"
+              >
+                Save Coupon Code
+              </button>
+              <span role="status" className="text-xs font-medium text-[#8A5A17]">{couponMsg}</span>
+            </div>
 
             <div className="border-t border-[rgba(30,23,16,0.10)] pt-4 space-y-2">
               {coupons.map((c) => (
@@ -2474,8 +2534,10 @@ export function AdminDashboardView({
                 >
                   <span className="font-mono font-semibold">{c.code}</span>
                   <span>
-                    {c.discountPct}% off · Min {formatBdt(c.minSubtotalBdt)}
+                    {c.discountPct}% off{c.maxDiscountBdt ? ` (max ${formatBdt(c.maxDiscountBdt)})` : ''}
+                    {c.freeDelivery ? ' + free delivery' : ''} · Min {formatBdt(c.minSubtotalBdt)}
                     {c.maxUses ? ` · ${c.usedCount || 0}/${c.maxUses} used` : ''}
+                    {c.startsAt ? ` · From ${c.startsAt.slice(0, 10)}` : ''}
                     {c.expiresAt ? ` · Exp ${c.expiresAt.slice(0, 10)}` : ''}
                   </span>
                 </div>

@@ -435,6 +435,10 @@ export interface CouponRecord {
   usedCount?: number;
   stackableWithAdvance?: boolean;
   descriptionEn?: string;
+  /** Coupon v2 (all optional, old coupons behave exactly as before) */
+  startsAt?: string; // YYYY-MM-DD (Asia/Dhaka); not valid before this day
+  maxDiscountBdt?: number; // caps the coupon part of the discount; 0/undefined = no cap
+  freeDelivery?: boolean; // waives the delivery fee when the coupon applies
 }
 
 export interface SubscriberRecord {

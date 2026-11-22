@@ -319,8 +319,12 @@ export function BagCheckoutDrawer({
     isStoreFieldConfirmed(settings, 'freeDeliveryThreshold') &&
     settings.freeDeliveryThreshold > 0;
   const qualifiesFree = freeThresholdConfirmed && subtotal >= settings.freeDeliveryThreshold;
+  const couponWaivesDelivery =
+    Boolean(appliedCoupon?.freeDelivery) &&
+    subtotal >= (appliedCoupon?.minSubtotalBdt ?? 0) &&
+    (paymentMethod === 'cod' || appliedCoupon?.stackableWithAdvance !== false);
   const deliveryFee =
-    cart.length === 0 || qualifiesFree ? 0 : (confirmedZoneFee ?? 0);
+    cart.length === 0 || qualifiesFree || couponWaivesDelivery ? 0 : (confirmedZoneFee ?? 0);
 
   const estimatedDeliveryWindow =
     deliveryZone === 'dhaka'
@@ -365,9 +369,18 @@ export function BagCheckoutDrawer({
     couponAllowedWithPayment
       ? appliedCoupon.discountPct
       : 0;
-  const totalDiscount = Math.round(
-    (subtotal * Math.min(50, advanceDiscountPct + couponPct)) / 100
-  );
+  const couponCapBdt = Number(appliedCoupon?.maxDiscountBdt) || 0;
+  let totalDiscount: number;
+  if (couponCapBdt > 0 && couponPct > 0) {
+    // Same poisha maths as the server (coupon share capped, advance share added, never above 50%).
+    const subtotalPoisha = subtotal * 100;
+    const couponPoisha = Math.min(Math.round((subtotalPoisha * couponPct) / 100), couponCapBdt * 100);
+    const advPct = Math.min(25, Math.max(0, Math.round(advanceDiscountPct)));
+    const advancePoisha = Math.round((subtotalPoisha * advPct) / 100);
+    totalDiscount = Math.round(Math.min(couponPoisha + advancePoisha, Math.round(subtotalPoisha / 2)) / 100);
+  } else {
+    totalDiscount = Math.round((subtotal * Math.min(50, advanceDiscountPct + couponPct)) / 100);
+  }
   const grandTotal = Math.max(0, subtotal + deliveryFee - totalDiscount);
   const remainingForFree = freeThresholdConfirmed
     ? Math.max(0, settings.freeDeliveryThreshold - subtotal)

@@ -631,7 +631,8 @@ export type CouponEligibilityReason =
   | 'inactive'
   | 'expired'
   | 'usage_limit_reached'
-  | 'below_min_subtotal';
+  | 'below_min_subtotal'
+  | 'not_started';
 
 export function evaluateCouponEligibility(
   coupon: CouponRecord | null,
@@ -643,6 +644,8 @@ export function evaluateCouponEligibility(
   reason: CouponEligibilityReason;
   discountPct: number;
   stackableWithAdvance: boolean;
+  maxDiscountBdt?: number;
+  freeDelivery?: boolean;
   messageEn: string;
   messageBn: string;
 } {
@@ -664,6 +667,16 @@ export function evaluateCouponEligibility(
       stackableWithAdvance: coupon.stackableWithAdvance ?? true,
       messageEn: `Coupon ${coupon.code} is currently inactive.`,
       messageBn: `কুপন ${coupon.code} বর্তমানে নিষ্ক্রিয় রয়েছে।`,
+    };
+  }
+  if (coupon.startsAt && coupon.startsAt > todayIso) {
+    return {
+      valid: false,
+      reason: 'not_started',
+      discountPct: 0,
+      stackableWithAdvance: coupon.stackableWithAdvance ?? true,
+      messageEn: `Coupon ${coupon.code} is not active yet (starts ${coupon.startsAt}).`,
+      messageBn: `কুপন ${coupon.code} এখনো চালু হয়নি (শুরু ${coupon.startsAt})।`,
     };
   }
   if (coupon.expiresAt && coupon.expiresAt < todayIso) {
@@ -708,6 +721,8 @@ export function evaluateCouponEligibility(
     reason: 'applied',
     discountPct: pct,
     stackableWithAdvance,
+    ...(Number(coupon.maxDiscountBdt) > 0 ? { maxDiscountBdt: Math.round(Number(coupon.maxDiscountBdt)) } : {}),
+    ...(coupon.freeDelivery === true ? { freeDelivery: true } : {}),
     messageEn:
       paymentMethod !== 'cod' && !stackableWithAdvance
         ? `Coupon ${coupon.code} (${pct}% off) applied (replaces advance payment discount).`
@@ -839,12 +854,12 @@ export function computeOrderPricingInPoisha(params: {
   const zoneInfo = resolveZoneDeliveryFeeAndEta(settings, deliveryZone);
   const freeThreshold = Math.round(Number(settings.freeDeliveryThreshold) || 0);
   const freeDeliveryApplied = freeThreshold > 0 && subtotalBdt >= freeThreshold;
-  const deliveryFeeBdt = freeDeliveryApplied ? 0 : zoneInfo.feeBdt;
-  const deliveryPoisha = deliveryFeeBdt * 100;
-
   const couponEval = coupon
     ? evaluateCouponEligibility(coupon, subtotalBdt, paymentMethod, params.todayIso)
     : null;
+  const couponWaivesDelivery = Boolean(couponEval?.valid && couponEval.freeDelivery);
+  const deliveryFeeBdt = freeDeliveryApplied || couponWaivesDelivery ? 0 : zoneInfo.feeBdt;
+  const deliveryPoisha = deliveryFeeBdt * 100;
   const couponPct = couponEval?.valid ? couponEval.discountPct : 0;
 
   const allowAdvanceStack = couponEval?.valid ? couponEval.stackableWithAdvance : true;
@@ -853,8 +868,17 @@ export function computeOrderPricingInPoisha(params: {
       ? Math.min(25, Math.max(0, Math.round(settings.advanceDiscountPct)))
       : 0;
 
-  const totalPct = Math.min(50, couponPct + advancePct);
-  const discountPoisha = Math.round((subtotalPoisha * totalPct) / 100);
+  const couponCapBdt = couponEval?.valid ? Number(couponEval.maxDiscountBdt) || 0 : 0;
+  let discountPoisha: number;
+  if (couponCapBdt > 0 && couponPct > 0) {
+    // Coupon v2: cap only the coupon's share, then add the advance share, never above 50% overall.
+    const couponPoisha = Math.min(Math.round((subtotalPoisha * couponPct) / 100), couponCapBdt * 100);
+    const advancePoisha = Math.round((subtotalPoisha * advancePct) / 100);
+    discountPoisha = Math.min(couponPoisha + advancePoisha, Math.round(subtotalPoisha / 2));
+  } else {
+    const totalPct = Math.min(50, couponPct + advancePct);
+    discountPoisha = Math.round((subtotalPoisha * totalPct) / 100);
+  }
   const totalPoisha = Math.max(100, subtotalPoisha - discountPoisha + deliveryPoisha);
 
   return {

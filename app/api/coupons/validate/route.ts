@@ -97,6 +97,8 @@ export async function POST(request: Request) {
         minSubtotalBdt: coupon.minSubtotalBdt,
         active: coupon.active,
         stackableWithAdvance: evaluation.stackableWithAdvance,
+        ...(evaluation.maxDiscountBdt ? { maxDiscountBdt: evaluation.maxDiscountBdt } : {}),
+        ...(evaluation.freeDelivery ? { freeDelivery: true } : {}),
       },
       message: uiLang === 'bn' ? evaluation.messageBn : evaluation.messageEn,
       messageEn: evaluation.messageEn,

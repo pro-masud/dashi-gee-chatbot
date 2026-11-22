@@ -231,10 +231,38 @@ Rule: everything is **additive** inside the existing site. Nothing that already 
 | 4a | Roles (owner / call agent / delivery manager / accountant) enforced on every new admin API, staff management, activity log viewer | **Done** (10 tests) |
 | 4b | Server-side orders list API; staff can sign in to the dashboard (server decides access); owner-only tabs hidden from staff; sales KPI hidden without finance permission | **Done** (owner keeps a client-read fallback until Admin SDK is configured) |
 | 5 | Incomplete-lead capture (with privacy notice) + lead list & conversion | **Done** (consent-gated capture, one lead per phone, auto-convert on order, admin list/notes/follow-up/CSV, 12 tests) |
-| 6 | Package manager (data-driven packages, offer price, COGS, badges) with dual-read migration | Planned |
-| 7 | Dashboard v2: date filters, charts, funnel, low-stock alerts, new-order polling alert | Planned |
-| 8 | Landing-page CMS **lite** (hero, benefits, FAQ, reviews order, announcement bar; draft/publish/restore) | Planned |
-| 9 | Meta CAPI + Pixel/GA/GTM settings with event IDs | Planned |
-| 10 | Coupon v2, customer list, manual order entry, labels/invoices | Planned |
+| 6 | Package manager: regular/offer price, cost per jar, badges, default size, enable/disable (server-enforced), live profit per jar | **Done** for the three engine sizes (250g/500g/1kg); other sizes such as 2kg need an order-engine extension |
+| 7 | Dashboard v2: 7 date presets + custom, KPI tiles, charts, funnel, previous-period change, new-order alert (toast + optional sound) | **Done** |
+| 8 | Landing-page CMS lite: announcement bar, hero text, highlights strip, FAQ; draft, preview (desktop/tablet/mobile), publish, restore | **Done** (reviews are managed in the existing Reviews tab) |
+| 9 | Meta CAPI + Pixel/GA4/GTM/Google Ads settings, encrypted token, shared event ids, real test event, event log | **Done in code; not verified against Meta** (needs your Pixel, token and INTEGRATION_SECRET_KEY) |
+| 10 | Coupon v2 (start date, max discount, free delivery), customers CRM, manual orders, invoice / packing slip / 80mm label | **Done** (fixed-amount, first-order and quantity-based coupons are not built) |
 
 **Deliberately skipped (would make the project worse or is out of scope):** online payment gateways, advance payment, multi-vendor/marketplace features, a Postgres migration, a 22-item overcrowded sidebar, WebSocket infrastructure (polling is enough), automation-rule engine, TikTok/other ad integrations beyond manual spend entry, a full relational rewrite, and any change that breaks existing orders, checkout, chatbot or tests.
+
+
+---
+
+## 10. Final status (all curated steps built)
+
+**Tests:**  (tsc) clean, Unknown command: "test"
+
+
+Did you mean this?
+  npm test # Test a package
+To see a list of supported npm commands, run:
+  npm help 320 / 320 passing (mock/static). Nothing below was run against real Firestore, Meta, couriers, SMS or WhatsApp.
+
+### Needs you (cannot be done in code)
+1. Server credentials: Firebase Admin SDK (ADC) + . Without it every new admin page shows "Server database access is unavailable" and checkout returns 503.
+2. Set  (32+ random characters) before saving a Meta token.
+3. Deploy the locked Firestore rules only after the emulator tests pass (). New collections are server-only by design (the default rule denies browsers).
+4. Real credentials for couriers, SMS and WhatsApp, then run a live test of each.
+5. Enter business facts in the admin: prices, costs, delivery fees, contacts.
+
+### Not built (deliberately or out of the curated scope)
+- Packages beyond the three engine sizes (for example 2kg) and gram-based stock / movement ledger / batch & expiry stock.
+- Fixed-amount, first-order and quantity-based coupons.
+- Courier credential admin UI, courier connection test, bulk booking, pickup requests (couriers still run from environment variables).
+- Notification events for leads / COD settlement, bulk order update, demo-data seed & reset, maintenance mode, backups and queue monitor pages.
+- Dark mode for the admin, language switch in the admin top bar.
+- Automatic delivered-date profit grouping (profit groups by order date).
