@@ -5,10 +5,23 @@ export type DeliveryZone = 'dhaka' | 'suburban' | 'nationwide' | 'remote';
 export type OrderStatus =
   | 'pending'
   | 'confirmed'
-  | 'processing'
-  | 'shipped'
+  | 'processing' // legacy: equivalent to packaging
+  | 'shipped' // legacy: equivalent to sent_to_courier
   | 'delivered'
-  | 'cancelled';
+  | 'cancelled'
+  // Pipeline v2 (additive)
+  | 'packaging'
+  | 'ready_to_ship'
+  | 'sent_to_courier'
+  | 'out_for_delivery'
+  | 'delivery_failed'
+  | 'returned';
+
+/** COD cash collection state — separate from the delivery status. */
+export type CollectionStatus = 'awaiting' | 'collected' | 'partial' | 'failed';
+
+/** Courier-to-store settlement state — separate from collection. */
+export type SettlementStatus = 'pending' | 'partial' | 'settled' | 'disputed';
 
 export type PaymentMethod = 'cod' | 'bkash' | 'nagad';
 
@@ -280,6 +293,14 @@ export interface OrderRecord {
   sourceChannel?: ChannelSource;
   /** Cost-of-goods snapshot (BDT) captured at order creation; powers the profit report. */
   cogsBdt?: number;
+  /** COD cash collected by the courier from the customer. Never implied by status=delivered. */
+  collectionStatus?: CollectionStatus;
+  collectedAmountBdt?: number;
+  /** Whether the courier has paid the collected cash out to the store. */
+  settlementStatus?: SettlementStatus;
+  deliveredAtIso?: string;
+  returnedAtIso?: string;
+  statusUpdatedAtIso?: string;
   attributedSessionId?: string;
   trackingTokenHash?: string;
   paymentLifecycleStatus?:

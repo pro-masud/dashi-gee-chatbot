@@ -61,7 +61,7 @@ import {
   subscribeToAuth,
   updateAdminOrderStatus,
 } from '../lib/firebase';
-import type { CourierPartner } from '../lib/storeTypes';
+import type { CollectionStatus, CourierPartner, SettlementStatus } from '../lib/storeTypes';
 import { buildOrdersCsv } from '../lib/chatbot/supportEngine';
 import type { RefillReminderDoc } from '../lib/chatbot/types';
 import { formatBdt } from '../data/deshiGeeData';
@@ -69,6 +69,14 @@ import { AdminChatbotPanel } from './AdminChatbotPanel';
 import { AdminEcosystemPanel } from './AdminEcosystemPanel';
 import { HelpInfoButton } from './admin/AdminHelpModal';
 import { ProfitExpensesPanel } from './admin/ProfitExpensesPanel';
+import {
+  COLLECTION_LABELS,
+  COLLECTION_STATUSES,
+  ORDER_STATUS_LABELS,
+  SETTLEMENT_LABELS,
+  SETTLEMENT_STATUSES,
+  allowedNextStatuses,
+} from '../lib/orders/pipeline';
 import { StorefrontImpactPreview } from './admin/StorefrontImpactPreview';
 import {
   Card,
@@ -88,6 +96,29 @@ interface AdminDashboardViewProps {
   onSettingsUpdated: (next: StoreSettingsDoc) => void;
   onBackHome: () => void;
 }
+
+type OrderFilterKey =
+  | 'all'
+  | 'pending'
+  | 'confirmed'
+  | 'packaging'
+  | 'ready_to_ship'
+  | 'in_transit'
+  | 'delivered'
+  | 'problem'
+  | 'cancelled'
+  | 'manual_review';
+
+const ORDER_FILTER_GROUPS: Record<Exclude<OrderFilterKey, 'all' | 'manual_review'>, OrderStatus[]> = {
+  pending: ['pending'],
+  confirmed: ['confirmed'],
+  packaging: ['packaging', 'processing'],
+  ready_to_ship: ['ready_to_ship'],
+  in_transit: ['sent_to_courier', 'shipped', 'out_for_delivery'],
+  delivered: ['delivered'],
+  problem: ['delivery_failed', 'returned'],
+  cancelled: ['cancelled'],
+};
 
 type AdminTab = 'overview' | 'orders' | 'finance' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
 
@@ -116,7 +147,10 @@ export function AdminDashboardView({
   } | null>(null);
 
   const [orderSearch, setOrderSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | OrderStatus | 'manual_review'>('all');
+  const [statusFilter, setStatusFilter] = useState<OrderFilterKey>('all');
+  const [pipelineBusy, setPipelineBusy] = useState(false);
+  const [pipelineMsg, setPipelineMsg] = useState('');
+  const [partialAmount, setPartialAmount] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
   const [auditLogs, setAuditLogs] = useState<OrderAuditLogRecord[]>([]);
   const [loadingAuditLogs, setLoadingAuditLogs] = useState(false);
@@ -343,6 +377,55 @@ export function AdminDashboardView({
         status: nextStatus,
         paymentStatus: nextPaymentStatus,
       });
+    }
+  };
+
+  const countGroup = (key: Exclude<OrderFilterKey, 'all' | 'manual_review'>) =>
+    orders.filter((o) => ORDER_FILTER_GROUPS[key].includes(o.status)).length;
+
+  /** Fulfilment / COD collection / settlement updates go through the server API (validated + audited). */
+  const handleOrderPipelineUpdate = async (
+    order: OrderRecord,
+    patch: {
+      status?: OrderStatus;
+      collectionStatus?: CollectionStatus;
+      collectedAmountBdt?: number;
+      settlementStatus?: SettlementStatus;
+    }
+  ) => {
+    if (!user || pipelineBusy) return;
+    setPipelineBusy(true);
+    setPipelineMsg('');
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/admin/orders/update', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-requested-with': 'DeshiGeeStorefront',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ orderNumber: order.orderNumber, ...patch }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        setPipelineMsg(data.error || `Update failed (HTTP ${res.status}).`);
+        return;
+      }
+      const updated = data.order as Partial<OrderRecord>;
+      setOrders((prev) =>
+        prev.map((o) => (o.orderNumber === order.orderNumber ? { ...o, ...updated } : o))
+      );
+      setSelectedOrder((cur) =>
+        cur && cur.orderNumber === order.orderNumber ? { ...cur, ...updated } : cur
+      );
+      setPipelineMsg(data.stockRestored ? 'Saved. Stock was restored for the cancelled order.' : 'Saved.');
+      setPartialAmount('');
+      await loadOrderAuditLogs(order.orderNumber);
+    } catch (err) {
+      setPipelineMsg(err instanceof Error ? err.message : 'Update failed.');
+    } finally {
+      setPipelineBusy(false);
     }
   };
 
@@ -615,7 +698,7 @@ export function AdminDashboardView({
     return orders.filter((o) => {
       if (statusFilter === 'manual_review') {
         if (o.reviewStatus !== 'manual_review') return false;
-      } else if (statusFilter !== 'all' && o.status !== statusFilter) {
+      } else if (statusFilter !== 'all' && !ORDER_FILTER_GROUPS[statusFilter].includes(o.status)) {
         return false;
       }
       if (orderSearch.trim()) {
@@ -1138,10 +1221,12 @@ export function AdminDashboardView({
                   ['all', 'All', orders.length],
                   ['pending', 'Pending', metrics.pending],
                   ['confirmed', 'Confirmed', metrics.confirmed],
-                  ['processing', 'Processing', orders.filter((o) => o.status === 'processing').length],
-                  ['shipped', 'Shipped', orders.filter((o) => o.status === 'shipped').length],
+                  ['packaging', 'Packaging', countGroup('packaging')],
+                  ['ready_to_ship', 'Ready to ship', countGroup('ready_to_ship')],
+                  ['in_transit', 'With courier', countGroup('in_transit')],
                   ['delivered', 'Delivered', metrics.delivered],
-                  ['cancelled', 'Cancelled', orders.filter((o) => o.status === 'cancelled').length],
+                  ['problem', 'Failed / returned', countGroup('problem')],
+                  ['cancelled', 'Cancelled', countGroup('cancelled')],
                   ['manual_review', 'Risk review', metrics.manualReview],
                 ] as [typeof statusFilter, string, number][]
               ).map(([value, label, count]) => (
@@ -1206,7 +1291,13 @@ export function AdminDashboardView({
                           {formatBdt(order.totalBdt)}
                         </span>
                         <div className="col-span-2 flex flex-wrap items-center gap-1.5 md:col-span-1 md:order-2">
-                          <StatusBadge status={order.status} />
+                          <StatusBadge status={order.status} label={ORDER_STATUS_LABELS[order.status]} />
+                          {order.status === 'delivered' && order.paymentMethod === 'cod' && (
+                            <StatusBadge
+                              status={order.collectionStatus || 'awaiting'}
+                              label={COLLECTION_LABELS[order.collectionStatus || 'awaiting']}
+                            />
+                          )}
                           <StatusBadge
                             status={order.paymentStatus}
                             label={
@@ -1322,28 +1413,95 @@ export function AdminDashboardView({
                 <div className="no-print mt-5 space-y-3">
                   <div>
                     <label className="block text-xs font-medium text-[#635647]">
-                      Update Fulfillment Status
+                      Fulfilment status
                     </label>
                     <select
                       value={selectedOrder.status}
+                      disabled={pipelineBusy}
                       onChange={(e) =>
-                        handleOrderMutation(
-                          selectedOrder,
-                          e.target.value as OrderStatus,
-                          selectedOrder.paymentStatus
-                        )
+                        handleOrderPipelineUpdate(selectedOrder, { status: e.target.value as OrderStatus })
                       }
-                      className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-3 py-2 text-base sm:text-xs"
+                      className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-3 py-2 text-base disabled:opacity-60 sm:text-xs"
                     >
-                      <option value="pending">Pending</option>
-                      <option value="confirmed">Confirmed</option>
-                      <option value="processing">Processing</option>
-                      <option value="shipped">Shipped</option>
-                      <option value="delivered">Delivered</option>
-                      <option value="cancelled">Cancelled</option>
+                      <option value={selectedOrder.status}>{ORDER_STATUS_LABELS[selectedOrder.status]} (current)</option>
+                      {allowedNextStatuses(selectedOrder.status).map((s) => (
+                        <option key={s} value={s}>
+                          → {ORDER_STATUS_LABELS[s]}
+                        </option>
+                      ))}
                     </select>
+                    {allowedNextStatuses(selectedOrder.status).length === 0 && (
+                      <p className="mt-1 text-[11px] text-[#8A7867]">
+                        This order is in a final state and cannot change status.
+                      </p>
+                    )}
                   </div>
 
+                  {selectedOrder.paymentMethod === 'cod' &&
+                    ['delivered', 'delivery_failed', 'returned'].includes(selectedOrder.status) && (
+                      <div className="space-y-2.5 rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] p-3 text-xs">
+                        <p className="font-semibold text-[#1E1710]">COD cash tracking</p>
+                        <p className="text-[11px] text-[#635647]">
+                          Delivered does not mean the cash reached you. Mark what the courier actually collected and paid out.
+                        </p>
+                        <div>
+                          <label className="block text-[11px] text-[#635647]">Collection status</label>
+                          <select
+                            value={selectedOrder.collectionStatus || 'awaiting'}
+                            disabled={pipelineBusy}
+                            onChange={(e) => {
+                              const next = e.target.value as CollectionStatus;
+                              if (next === 'partial') {
+                                const amt = Number(window.prompt('Amount collected so far (BDT)?', partialAmount || ''));
+                                if (!Number.isFinite(amt) || amt <= 0) return;
+                                void handleOrderPipelineUpdate(selectedOrder, { collectionStatus: next, collectedAmountBdt: amt });
+                              } else {
+                                void handleOrderPipelineUpdate(selectedOrder, { collectionStatus: next });
+                              }
+                            }}
+                            className="mt-0.5 w-full rounded border border-[rgba(30,23,16,0.18)] bg-white px-2.5 py-1.5 text-base disabled:opacity-60 sm:text-xs"
+                          >
+                            {COLLECTION_STATUSES.map((s) => (
+                              <option key={s} value={s}>
+                                {COLLECTION_LABELS[s]}
+                              </option>
+                            ))}
+                          </select>
+                          {typeof selectedOrder.collectedAmountBdt === 'number' && selectedOrder.collectedAmountBdt > 0 && (
+                            <p className="mt-1 font-mono text-[11px] text-[#8A5A17]">
+                              Collected {formatBdt(selectedOrder.collectedAmountBdt)} of {formatBdt(selectedOrder.totalBdt)}
+                            </p>
+                          )}
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-[#635647]">Settlement from courier</label>
+                          <select
+                            value={selectedOrder.settlementStatus || 'pending'}
+                            disabled={pipelineBusy}
+                            onChange={(e) =>
+                              handleOrderPipelineUpdate(selectedOrder, {
+                                settlementStatus: e.target.value as SettlementStatus,
+                              })
+                            }
+                            className="mt-0.5 w-full rounded border border-[rgba(30,23,16,0.18)] bg-white px-2.5 py-1.5 text-base disabled:opacity-60 sm:text-xs"
+                          >
+                            {SETTLEMENT_STATUSES.map((s) => (
+                              <option key={s} value={s}>
+                                {SETTLEMENT_LABELS[s]}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                  {pipelineMsg && (
+                    <p role="status" className="text-[11px] font-medium text-[#8A5A17]">
+                      {pipelineMsg}
+                    </p>
+                  )}
+
+                  {selectedOrder.paymentMethod !== 'cod' && (
                   <div>
                     <label className="block text-xs font-medium text-[#635647]">
                       Payment Verification Status
@@ -1365,6 +1523,7 @@ export function AdminDashboardView({
                       <option value="failed">Failed</option>
                     </select>
                   </div>
+                  )}
 
                   {/* Courier Consignment & Tracking Assignment */}
                   <form
