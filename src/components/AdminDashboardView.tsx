@@ -21,6 +21,7 @@ import {
   PhoneCall,
   LogOut,
   Menu,
+  PackageOpen,
   Plug,
   Printer,
   RefreshCw,
@@ -75,6 +76,7 @@ import { HelpInfoButton } from './admin/AdminHelpModal';
 import { ActivityLogPanel } from './admin/ActivityLogPanel';
 import { CodSettlementPanel } from './admin/CodSettlementPanel';
 import { LeadsPanel } from './admin/LeadsPanel';
+import { PackagesPanel } from './admin/PackagesPanel';
 import { StaffRolesPanel } from './admin/StaffRolesPanel';
 import type { Permission } from '../lib/auth/permissions';
 import { ProfitExpensesPanel } from './admin/ProfitExpensesPanel';
@@ -142,7 +144,7 @@ async function probeServerAdminAccess(u: User | null): Promise<boolean> {
   }
 }
 
-type AdminTab = 'overview' | 'orders' | 'finance' | 'cod' | 'leads' | 'staff' | 'activity' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
+type AdminTab = 'overview' | 'orders' | 'packages' | 'finance' | 'cod' | 'leads' | 'staff' | 'activity' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
 
 export function AdminDashboardView({
   settings,
@@ -888,6 +890,7 @@ export function AdminDashboardView({
     {
       group: 'Catalog & Store',
       items: [
+        { id: 'packages', label: 'Product & Packages', icon: PackageOpen, perm: 'catalog.manage' },
         { id: 'store', label: 'Pricing, Stock & Delivery', icon: SlidersHorizontal, ownerOnly: true },
         { id: 'batches', label: 'Batches & Coupons', icon: Ticket, ownerOnly: true },
         { id: 'reviews', label: 'Reviews & Subscribers', icon: Star, badge: pendingReviewCount, ownerOnly: true },
@@ -1828,6 +1831,10 @@ export function AdminDashboardView({
             )}
           </div>
         </div>
+      )}
+
+      {tab === 'packages' && (
+        <PackagesPanel getIdToken={async () => (user ? user.getIdToken() : '')} />
       )}
 
       {tab === 'leads' && (

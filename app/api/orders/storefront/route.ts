@@ -27,6 +27,8 @@ import {
   resolveConfiguredDistrictAndZone,
 } from '../../../../src/lib/chatbot/orderToken';
 import { extractClientIp, hashIdentifier } from '../../../../src/lib/chatbot/rateLimit';
+import { disabledSlotsInOrder } from '../../../../src/lib/packages/packages';
+import { getEnabledSlotsBestEffort } from '../../../../src/lib/server/packagesRepository';
 import { markLeadConvertedByPhone } from '../../../../src/lib/server/leadsRepository';
 import { computeOrderCogs } from '../../../../src/lib/finance/profit';
 import { getFinanceSettingsBestEffort } from '../../../../src/lib/server/financeRepository';
@@ -301,6 +303,19 @@ export async function POST(request: Request) {
     codHighValueThresholdBdt: settings.codHighValueThresholdBdt,
     codRiskThresholdScore: settings.codRiskThresholdScore,
   });
+
+  const disabledSlots = disabledSlotsInOrder(
+    { qty250g: pricing.qty250g, qty500g: pricing.qty500g, qty1kg: pricing.qty1kg },
+    await getEnabledSlotsBestEffort()
+  );
+  if (disabledSlots.length > 0) {
+    return localizedError(
+      uiLang,
+      `The ${disabledSlots.join(', ')} jar is not available right now. Please choose another size.`,
+      `${disabledSlots.join(', ')} জারটি এখন পাওয়া যাচ্ছে না। অনুগ্রহ করে অন্য সাইজ বেছে নিন।`,
+      409
+    );
+  }
 
   const financeSettings = await getFinanceSettingsBestEffort();
   const cogsBdt = computeOrderCogs(

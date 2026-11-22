@@ -41,6 +41,7 @@ import {
   testFirestoreConnection,
 } from '../lib/firebase';
 import { Lang, formatBdt, toBengaliDigits } from '../data/deshiGeeData';
+import type { PublicPackages } from '../lib/packages/packages';
 import { trackStoreEvent } from '../lib/analytics';
 import {
   DEFAULT_CHATBOT_CONFIG,
@@ -80,6 +81,8 @@ interface StorefrontContextValue {
   setChatbotConfig: Dispatch<SetStateAction<ChatbotConfigDoc>>;
   openChatAssistant: () => void;
   openCallbackRequest: () => void;
+  /** Customer-safe package display data (badges, regular vs selling price, enabled, default). */
+  packageMeta: PublicPackages | null;
 }
 
 const StorefrontContext = createContext<StorefrontContextValue | null>(null);
@@ -111,6 +114,22 @@ export function StorefrontProvider({
   const [lang, setLang] = useState<Lang>('en');
   const [hydratedStorage, setHydratedStorage] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [packageMeta, setPackageMeta] = useState<PublicPackages | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/packages/public')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d?.ok && d.packages) setPackageMeta(d.packages as PublicPackages);
+      })
+      .catch(() => {
+        // package badges are an enhancement; the storefront works without them
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -523,6 +542,7 @@ export function StorefrontProvider({
         setChatbotConfig,
         openChatAssistant,
         openCallbackRequest,
+        packageMeta,
       }}
     >
       {isAdminRoute ? (

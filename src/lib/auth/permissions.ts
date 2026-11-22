@@ -14,6 +14,7 @@ export const PERMISSIONS = [
   'orders.view',
   'orders.update',
   'leads.manage',
+  'catalog.manage',
   'cod.manage',
   'finance.view',
   'finance.manage',

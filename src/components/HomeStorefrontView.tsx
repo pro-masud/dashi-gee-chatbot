@@ -84,9 +84,11 @@ export function HomeStorefrontView() {
     chatbotConfig,
     openChatAssistant,
     openCallbackRequest,
+    packageMeta,
   } = useStorefront();
 
   const [selectedWeight, setSelectedWeight] = useState<WeightKey>('500g');
+  const weightTouchedRef = useRef(false);
   const [purchaseQty, setPurchaseQty] = useState<number>(1);
   const [galleryIdx, setGalleryIdx] = useState<number>(0);
   const [showBlueprint, setShowBlueprint] = useState<boolean>(false);
@@ -327,6 +329,13 @@ export function HomeStorefrontView() {
       mm.revert();
     };
   }, []);
+
+  // Owner-configured default size: applied once, and never over a choice the visitor already made.
+  useEffect(() => {
+    if (!packageMeta || weightTouchedRef.current) return;
+    const def = (['250g', '500g', '1kg'] as WeightKey[]).find((k) => packageMeta[k]?.isDefault && packageMeta[k]?.enabled);
+    if (def) setSelectedWeight(def);
+  }, [packageMeta]);
 
   const orderingReady = isStorefrontOrderingReady(settings);
 
@@ -910,18 +919,29 @@ export function HomeStorefrontView() {
                       const active = v.key === selectedWeight;
                       const price = getPriceForWeight(v.key);
                       const stock = getStockForWeight(v.key);
+                      const meta = packageMeta?.[v.key];
+                      const sizeDisabled = meta ? !meta.enabled : false;
                       return (
                         <button
                           key={v.key}
                           type="button"
                           aria-pressed={active}
-                          onClick={() => setSelectedWeight(v.key)}
-                          className={`relative flex min-h-[96px] flex-col items-center justify-center gap-1 rounded-2xl border px-2 py-4 text-center transition-all ${
+                          disabled={sizeDisabled}
+                          onClick={() => {
+                            weightTouchedRef.current = true;
+                            setSelectedWeight(v.key);
+                          }}
+                          className={`relative flex min-h-[96px] flex-col items-center justify-center gap-1 rounded-2xl border px-2 py-4 text-center transition-all disabled:cursor-not-allowed disabled:opacity-40 ${
                             active
                               ? 'border-[#B47B2B] bg-[#B47B2B]/10 shadow-[0_10px_30px_-15px_rgba(180,123,43,0.7)]'
                               : 'border-[rgb(var(--c-tint)/0.16)] hover:border-[rgb(var(--c-tint)/0.4)]'
                           }`}
                         >
+                          {meta && meta.badge && !sizeDisabled && (
+                            <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-[#B47B2B] px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--c-on-gold)]">
+                              {meta.badge === 'popular' ? (bn ? 'জনপ্রিয়' : 'Most popular') : bn ? 'সেরা মূল্য' : 'Best value'}
+                            </span>
+                          )}
                           {active && (
                             <span className="absolute right-2 top-2 flex h-4 w-4 items-center justify-center rounded-full bg-[#B47B2B] text-[var(--c-on-gold)]">
                               <Check className="h-2.5 w-2.5" />
@@ -932,7 +952,12 @@ export function HomeStorefrontView() {
                           </span>
                           {orderingReady && price > 0 && (
                             <span className="font-mono text-xs tabular-nums text-[var(--c-gold-text)]">
-                              {stock <= 0 ? (bn ? 'স্টক শেষ' : 'Out') : formatBdt(price)}
+                              {sizeDisabled ? (bn ? 'অনুপলব্ধ' : 'Unavailable') : stock <= 0 ? (bn ? 'স্টক শেষ' : 'Out') : formatBdt(price)}
+                            </span>
+                          )}
+                          {meta && meta.discountPct > 0 && !sizeDisabled && stock > 0 && (
+                            <span className="font-mono text-[10px] text-[var(--c-subtle)] line-through">
+                              {formatBdt(meta.regularPrice)}
                             </span>
                           )}
                         </button>

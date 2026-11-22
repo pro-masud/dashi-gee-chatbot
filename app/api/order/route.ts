@@ -1,3 +1,5 @@
+import { disabledSlotsInOrder } from '../../../src/lib/packages/packages';
+import { getEnabledSlotsBestEffort } from '../../../src/lib/server/packagesRepository';
 import { markLeadConvertedByPhone } from '../../../src/lib/server/leadsRepository';
 import { computeOrderCogs } from '../../../src/lib/finance/profit';
 import { getFinanceSettingsBestEffort } from '../../../src/lib/server/financeRepository';
@@ -474,6 +476,23 @@ export async function POST(request: Request) {
     { channel: 'whatsapp_api', url: process.env.WHATSAPP_WEBHOOK_URL },
     { channel: 'email_api', url: process.env.EMAIL_WEBHOOK_URL },
   ].filter((t) => Boolean(t.url));
+
+  const disabledSlots = disabledSlotsInOrder(
+    { qty250g: livePricing.qty250g, qty500g: livePricing.qty500g, qty1kg: livePricing.qty1kg },
+    await getEnabledSlotsBestEffort()
+  );
+  if (disabledSlots.length > 0) {
+    return jsonResp(
+      {
+        ok: false,
+        code: 'package_unavailable',
+        error: bn
+          ? `${disabledSlots.join(', ')} জারটি এখন পাওয়া যাচ্ছে না। অনুগ্রহ করে অন্য সাইজ বেছে নিন।`
+          : `The ${disabledSlots.join(', ')} jar is not available right now. Please choose another size.`,
+      },
+      409
+    );
+  }
 
   const financeSettings = await getFinanceSettingsBestEffort();
   const cogsBdt = computeOrderCogs(
