@@ -37,6 +37,74 @@ export async function listOrdersForAdmin(limit = 500): Promise<OrderRecord[]> {
   }
 }
 
+export async function readCustomerNotes(): Promise<Record<string, { note: string; updatedAtIso: string; updatedBy: string }>> {
+  try {
+    const snap = await getAdminDb().collection('customer_notes').limit(2000).get();
+    const out: Record<string, { note: string; updatedAtIso: string; updatedBy: string }> = {};
+    for (const d of snap.docs) {
+      const x = d.data();
+      out[d.id] = { note: String(x.note || ''), updatedAtIso: String(x.updatedAtIso || ''), updatedBy: String(x.updatedBy || '') };
+    }
+    return out;
+  } catch (err) {
+    if (isAdminSdkCredentialOrIamError(err)) throw new AdminSdkUnavailableError();
+    throw err;
+  }
+}
+
+export async function saveCustomerNote(phone: string, note: string, actor: { email: string; uid: string }): Promise<void> {
+  try {
+    const db = getAdminDb();
+    const nowIso = new Date().toISOString();
+    const ref = db.collection('customer_notes').doc(phone);
+    await db.runTransaction(async (tx) => {
+      const before = await tx.get(ref);
+      tx.set(ref, { note, updatedAtIso: nowIso, updatedBy: actor.email });
+      tx.set(db.collection('activity_logs').doc(), {
+        action: 'customer.note',
+        resource: `customer_notes/${phone}`,
+        actorEmail: actor.email,
+        actorUid: actor.uid,
+        before: before.exists ? { note: before.data()?.note ?? '' } : null,
+        after: { note },
+        atIso: nowIso,
+      });
+    });
+  } catch (err) {
+    if (isAdminSdkCredentialOrIamError(err)) throw new AdminSdkUnavailableError();
+    throw err;
+  }
+}
+
+/** Record who entered a manual order and where it came from (the order itself is created by the shared engine). */
+export async function tagManualOrder(
+  orderNumber: string,
+  source: string,
+  actor: { email: string; uid: string }
+): Promise<void> {
+  try {
+    const db = getAdminDb();
+    const nowIso = new Date().toISOString();
+    await db.collection('orders').doc(orderNumber).update({
+      orderSource: source,
+      createdByEmail: actor.email,
+      manualEntry: true,
+    });
+    await db.collection('activity_logs').add({
+      action: 'order.manual_create',
+      resource: `orders/${orderNumber}`,
+      actorEmail: actor.email,
+      actorUid: actor.uid,
+      before: null,
+      after: { source },
+      atIso: nowIso,
+    });
+  } catch (err) {
+    if (isAdminSdkCredentialOrIamError(err)) throw new AdminSdkUnavailableError();
+    throw err;
+  }
+}
+
 export interface OrderSignal {
   orderCount: number;
   latestOrderNumber: string;

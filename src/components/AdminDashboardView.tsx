@@ -17,6 +17,7 @@ import {
   ExternalLink,
   LayoutDashboard,
   Landmark,
+  Users,
   Loader2,
   PhoneCall,
   LogOut,
@@ -77,10 +78,13 @@ import { formatBdt } from '../data/deshiGeeData';
 import { AdminChatbotPanel } from './AdminChatbotPanel';
 import { AdminEcosystemPanel } from './AdminEcosystemPanel';
 import { HelpInfoButton } from './admin/AdminHelpModal';
+import { buildOrderDocument, printOrderDocument, type OrderDocKind } from '../lib/orders/documents';
 import { ActivityLogPanel } from './admin/ActivityLogPanel';
 import { CodSettlementPanel } from './admin/CodSettlementPanel';
 import { CmsPanel } from './admin/CmsPanel';
+import { CustomersPanel } from './admin/CustomersPanel';
 import { LeadsPanel } from './admin/LeadsPanel';
+import { ManualOrderModal } from './admin/ManualOrderModal';
 import { MarketingPanel } from './admin/MarketingPanel';
 import { OverviewAnalytics } from './admin/OverviewAnalytics';
 import { PackagesPanel } from './admin/PackagesPanel';
@@ -151,7 +155,7 @@ async function probeServerAdminAccess(u: User | null): Promise<boolean> {
   }
 }
 
-type AdminTab = 'overview' | 'orders' | 'marketing' | 'cms' | 'packages' | 'finance' | 'cod' | 'leads' | 'staff' | 'activity' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
+type AdminTab = 'overview' | 'orders' | 'customers' | 'marketing' | 'cms' | 'packages' | 'finance' | 'cod' | 'leads' | 'staff' | 'activity' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
 
 export function AdminDashboardView({
   settings,
@@ -181,6 +185,7 @@ export function AdminDashboardView({
   const [statusFilter, setStatusFilter] = useState<OrderFilterKey>('all');
   const [myPerms, setMyPerms] = useState<Permission[] | null>(null);
   const [soundOn, setSoundOn] = useState(false);
+  const [manualOrderOpen, setManualOrderOpen] = useState(false);
   const [newOrderToast, setNewOrderToast] = useState<{ orderNumber: string; customerName: string; count: number } | null>(null);
   const orderBaselineRef = useRef<number | null>(null);
   const [pipelineBusy, setPipelineBusy] = useState(false);
@@ -972,6 +977,7 @@ export function AdminDashboardView({
         { id: 'overview', label: 'Overview', icon: LayoutDashboard },
         { id: 'orders', label: 'Orders', icon: ShoppingBag, badge: metrics.pending },
         { id: 'leads', label: 'Incomplete Leads', icon: PhoneCall, perm: 'leads.manage' },
+        { id: 'customers', label: 'Customers', icon: Users, perm: 'orders.view' },
         { id: 'finance', label: 'Profit & Expenses', icon: Wallet, perm: 'finance.view' },
         { id: 'cod', label: 'COD & Settlements', icon: Landmark, perm: 'cod.manage' },
       ],
@@ -1149,6 +1155,16 @@ export function AdminDashboardView({
       )}
 
       <div className="lg:pl-64">
+        <ManualOrderModal
+          open={manualOrderOpen}
+          onClose={() => setManualOrderOpen(false)}
+          getIdToken={async () => (user ? user.getIdToken() : '')}
+          onCreated={() => {
+            void loadAdminWorkspace();
+            setPipelineMsg('');
+          }}
+        />
+
         {newOrderToast && (
           <div
             role="status"
@@ -1399,6 +1415,13 @@ export function AdminDashboardView({
                 <HelpInfoButton section="orders" />
                 <button
                   type="button"
+                  onClick={() => setManualOrderOpen(true)}
+                  className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-[#1E1710] px-3.5 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E]"
+                >
+                  <span>+ New manual order</span>
+                </button>
+                <button
+                  type="button"
                   onClick={handleExportOrdersCsv}
                   disabled={filteredOrders.length === 0}
                   className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.14)] bg-white px-3.5 text-xs font-medium text-[#1E1710] hover:bg-[#F4EFE6] disabled:opacity-50"
@@ -1565,6 +1588,33 @@ export function AdminDashboardView({
                       </button>
                     </div>
                   </div>
+
+                <div className="no-print mt-4 flex flex-wrap gap-2">
+                  {(
+                    [
+                      ['invoice', 'Invoice'],
+                      ['packing_slip', 'Packing slip'],
+                      ['label', 'Thermal label'],
+                    ] as [OrderDocKind, string][]
+                  ).map(([kind, label]) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      onClick={() => {
+                        const html = buildOrderDocument(kind, selectedOrder, {
+                          name: 'Deshi Gee',
+                          phone: settings.supportPhone || '',
+                          address: settings.businessAddress || '',
+                        });
+                        if (!printOrderDocument(html)) window.alert('Allow pop-ups for this site to print documents.');
+                      }}
+                      className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.16)] bg-white px-3 text-[11px] font-medium hover:bg-[#F4EFE6]"
+                    >
+                      <Printer className="h-3 w-3 text-[#8A5A17]" />
+                      <span>{label}</span>
+                    </button>
+                  ))}
+                </div>
 
                 <dl className="mt-5 space-y-2.5 border-y border-[rgba(30,23,16,0.10)] py-4 text-xs">
                   <div className="flex items-baseline justify-between gap-3">
@@ -1938,6 +1988,10 @@ export function AdminDashboardView({
             )}
           </div>
         </div>
+      )}
+
+      {tab === 'customers' && (
+        <CustomersPanel getIdToken={async () => (user ? user.getIdToken() : '')} />
       )}
 
       {tab === 'marketing' && (

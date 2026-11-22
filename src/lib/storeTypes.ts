@@ -303,6 +303,10 @@ export interface OrderRecord {
   deliveredAtIso?: string;
   returnedAtIso?: string;
   statusUpdatedAtIso?: string;
+  /** Where a manually entered order came from (facebook_inbox / whatsapp / phone / other). */
+  orderSource?: string;
+  createdByEmail?: string;
+  manualEntry?: boolean;
   attributedSessionId?: string;
   trackingTokenHash?: string;
   paymentLifecycleStatus?:
