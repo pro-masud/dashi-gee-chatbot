@@ -95,3 +95,12 @@ describe('RBAC — roles, permissions, staff management', () => {
     assert.equal(res.status, 403);
   });
 });
+
+import { GET as ordersAdminGet } from '../app/api/admin/orders/route';
+
+describe('Admin orders API (server-side list)', () => {
+  it('requires an authenticated admin or staff identity', async () => {
+    const res = await ordersAdminGet(new Request('http://localhost:3000/api/admin/orders'));
+    assert.equal(res.status, 401);
+  });
+});

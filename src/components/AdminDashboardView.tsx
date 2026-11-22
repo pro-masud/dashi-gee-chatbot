@@ -129,6 +129,19 @@ const ORDER_FILTER_GROUPS: Record<Exclude<OrderFilterKey, 'all' | 'manual_review
   cancelled: ['cancelled'],
 };
 
+/** Staff (non-owner) accounts are not in the client-side admin allowlist; the server decides. */
+async function probeServerAdminAccess(u: User | null): Promise<boolean> {
+  if (!u) return false;
+  try {
+    const token = await u.getIdToken();
+    const res = await fetch('/api/admin/me', { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json().catch(() => ({}));
+    return res.ok && data.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 type AdminTab = 'overview' | 'orders' | 'finance' | 'cod' | 'leads' | 'staff' | 'activity' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
 
 export function AdminDashboardView({
@@ -205,7 +218,7 @@ export function AdminDashboardView({
   useEffect(() => {
     const unsub = subscribeToAuth(async (u) => {
       setUser(u);
-      const ok = await checkIsAdminUser(u);
+      const ok = (await checkIsAdminUser(u)) || (await probeServerAdminAccess(u));
       setIsAdmin(ok);
       setAuthReady(true);
     });
@@ -228,27 +241,56 @@ export function AdminDashboardView({
   const loadAdminWorkspace = async () => {
     setLoadingData(true);
     try {
-      const [ordList, revList, batchList, couponList, subList] = await Promise.all([
-        fetchAdminOrders(),
-        fetchAdminReviews(),
-        fetchAllBatches(),
-        fetchAdminCoupons(),
-        fetchAdminSubscribers(),
-      ]);
-      setOrders(ordList);
-      setReviews(revList);
-      setBatches(batchList);
-      setCoupons(couponList);
-      setSubscribers(subList);
-
       const idToken = user ? await user.getIdToken().catch(() => '') : '';
-      const whRes = idToken
-        ? await fetch('/api/notifications/status', {
-            headers: { Authorization: `Bearer ${idToken}` },
-          })
-        : null;
-      if (whRes?.ok) {
-        setWebhookInfo(await whRes.json());
+
+      // Who am I? (owner sees everything; staff only what their role allows)
+      let perms: Permission[] | null = null;
+      if (idToken) {
+        try {
+          const meRes = await fetch('/api/admin/me', { headers: { Authorization: `Bearer ${idToken}` } });
+          const me = await meRes.json().catch(() => ({}));
+          if (meRes.ok && me.ok && Array.isArray(me.permissions)) perms = me.permissions as Permission[];
+        } catch {
+          // fall through: treated as owner by the legacy client allowlist
+        }
+      }
+      if (perms) setMyPerms(perms);
+      const isOwner = !perms || perms.includes('staff.manage');
+
+      // Orders: server API first (role-checked). Owners fall back to the legacy client read.
+      let ordList: OrderRecord[] | null = null;
+      if (idToken && (!perms || perms.includes('orders.view'))) {
+        try {
+          const res = await fetch('/api/admin/orders?limit=500', { headers: { Authorization: `Bearer ${idToken}` } });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.ok && Array.isArray(data.orders)) ordList = data.orders as OrderRecord[];
+        } catch {
+          ordList = null;
+        }
+      }
+      if (!ordList && isOwner) ordList = await fetchAdminOrders();
+      setOrders(ordList || []);
+
+      if (isOwner) {
+        const [revList, batchList, couponList, subList] = await Promise.all([
+          fetchAdminReviews(),
+          fetchAllBatches(),
+          fetchAdminCoupons(),
+          fetchAdminSubscribers(),
+        ]);
+        setReviews(revList);
+        setBatches(batchList);
+        setCoupons(couponList);
+        setSubscribers(subList);
+
+        const whRes = idToken
+          ? await fetch('/api/notifications/status', {
+              headers: { Authorization: `Bearer ${idToken}` },
+            })
+          : null;
+        if (whRes?.ok) {
+          setWebhookInfo(await whRes.json());
+        }
       }
       await loadRefillReminders();
     } catch (err) {
@@ -304,7 +346,7 @@ export function AdminDashboardView({
     setAuthError('');
     try {
       const u = await signInAdminWithGoogle();
-      const ok = await checkIsAdminUser(u);
+      const ok = (await checkIsAdminUser(u)) || (await probeServerAdminAccess(u));
       if (!ok) {
         setAuthError(
           `Signed in as ${u.email}, which is not listed in the authorized admin roster.`
@@ -830,6 +872,7 @@ export function AdminDashboardView({
     icon: ComponentType<{ className?: string }>;
     badge?: number;
     perm?: Permission;
+    ownerOnly?: boolean;
   };
   const allNavGroups: { group: string; items: NavItem[] }[] = [
     {
@@ -845,16 +888,16 @@ export function AdminDashboardView({
     {
       group: 'Catalog & Store',
       items: [
-        { id: 'store', label: 'Pricing, Stock & Delivery', icon: SlidersHorizontal },
-        { id: 'batches', label: 'Batches & Coupons', icon: Ticket },
-        { id: 'reviews', label: 'Reviews & Subscribers', icon: Star, badge: pendingReviewCount },
+        { id: 'store', label: 'Pricing, Stock & Delivery', icon: SlidersHorizontal, ownerOnly: true },
+        { id: 'batches', label: 'Batches & Coupons', icon: Ticket, ownerOnly: true },
+        { id: 'reviews', label: 'Reviews & Subscribers', icon: Star, badge: pendingReviewCount, ownerOnly: true },
       ],
     },
     {
       group: 'Automation',
       items: [
-        { id: 'chatbot', label: 'AI Chatbot', icon: Bot },
-        { id: 'ecosystem', label: 'Integrations & Alerts', icon: Plug },
+        { id: 'chatbot', label: 'AI Chatbot', icon: Bot, ownerOnly: true },
+        { id: 'ecosystem', label: 'Integrations & Alerts', icon: Plug, ownerOnly: true },
       ],
     },
     {
@@ -868,7 +911,11 @@ export function AdminDashboardView({
   const adminNav = allNavGroups
     .map((g) => ({
       ...g,
-      items: g.items.filter((i) => !i.perm || myPerms === null || myPerms.includes(i.perm)),
+      items: g.items.filter(
+        (i) =>
+          (!i.perm || myPerms === null || myPerms.includes(i.perm)) &&
+          (!i.ownerOnly || myPerms === null || myPerms.includes('staff.manage'))
+      ),
     }))
     .filter((g) => g.items.length > 0);
   const activeTabLabel =
@@ -1111,13 +1158,15 @@ export function AdminDashboardView({
           )}
 
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <KpiCard
-              label="Total sales"
-              value={formatBdt(metrics.totalSales)}
-              hint="Excludes cancelled orders"
-              icon={Banknote}
-              tone="green"
-            />
+            {(myPerms === null || myPerms.includes('finance.view')) && (
+              <KpiCard
+                label="Total sales"
+                value={formatBdt(metrics.totalSales)}
+                hint="Excludes cancelled orders"
+                icon={Banknote}
+                tone="green"
+              />
+            )}
             <KpiCard
               label="Total orders"
               value={metrics.total}
