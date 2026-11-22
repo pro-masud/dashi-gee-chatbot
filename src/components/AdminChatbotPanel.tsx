@@ -1964,7 +1964,7 @@ export function AdminChatbotPanel({
                   <>
                     {!Object.values(notificationStatus.configuredChannels || {}).some(Boolean) ? (
                       <p className="mt-1 text-[11px] text-amber-800">
-                        TODO: Configure <code>OWNER_WEBHOOK_URL</code>, <code>WHATSAPP_WEBHOOK_URL</code>, or <code>EMAIL_WEBHOOK_URL</code> in server environment variables. Orders are always preserved in Firestore.
+                        Not configured: set <code>OWNER_WEBHOOK_URL</code>, <code>WHATSAPP_WEBHOOK_URL</code>, or <code>EMAIL_WEBHOOK_URL</code> in server environment variables. Orders are always preserved in Firestore.
                       </p>
                     ) : (
                       <p className="mt-1 text-[11px] text-emerald-800">
