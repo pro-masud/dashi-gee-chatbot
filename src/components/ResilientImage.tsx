@@ -7,6 +7,8 @@ interface ResilientImageProps {
   alt: string;
   className?: string;
   fallbackTitle?: string;
+  /** Above-the-fold image: load eagerly with high fetch priority. */
+  priority?: boolean;
 }
 
 export function ResilientImage({
@@ -14,6 +16,7 @@ export function ResilientImage({
   alt,
   className = '',
   fallbackTitle = 'Deshi Gee',
+  priority = false,
 }: ResilientImageProps) {
   const [failed, setFailed] = useState(false);
 
@@ -69,6 +72,9 @@ export function ResilientImage({
       src={src}
       alt={alt}
       referrerPolicy="no-referrer"
+      loading={priority ? 'eager' : 'lazy'}
+      decoding="async"
+      fetchPriority={priority ? 'high' : 'auto'}
       onError={() => setFailed(true)}
       className={className}
     />

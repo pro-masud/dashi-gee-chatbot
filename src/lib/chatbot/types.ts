@@ -172,7 +172,7 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfigDoc = {
   botName: 'Deshi Gee Assistant',
   brandName: 'Deshi Gee',
   brandIntro:
-    'Deshi Gee is a single-product Bangladeshi artisanal food brand offering Pabna bilona cow ghee in clear apothecary glass jars.',
+    'Deshi Gee is a single-product Bangladeshi artisanal food brand offering Pabna bilona cow ghee in sealed jars.',
   brandStory:
     'Sourced from dairy households in Pabna, whole cow milk is cultured into curd in earthen pots, hand-churned with a traditional wooden bilona, and slow-clarified.',
   brandMission:
@@ -180,7 +180,7 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfigDoc = {
   founderInfo:
     'Crafted in partnership with Pabna dairy households using earthen-pot fermentation and wooden bilona churning.',
   productDescription:
-    'Single-origin Pabna cow ghee churned by traditional wooden bilona from whole cultured curd and sealed in clear apothecary glass jars (250g, 500g, and 1kg sizes).',
+    'Single-origin Pabna cow ghee churned by traditional wooden bilona from whole cultured curd and sealed in sealed jars (250g, 500g, and 1kg sizes).',
   ingredients:
     'Clarified cultured cow milkfat. No added vegetable oil, vanaspati, or artificial colour.',
   taste: 'Rich, clean, nutty traditional Bengali cow ghee flavour.',
@@ -188,7 +188,7 @@ export const DEFAULT_CHATBOT_CONFIG: ChatbotConfigDoc = {
   texture:
     'Naturally granular (danadar) crystals in cooler environments and clear liquid gold when warm.',
   productionMethod:
-    'Whole cow milk is gently boiled, cultured overnight into curd in earthen pots, hand-churned with a wooden bilona to separate makkhan, and slow-clarified before sealing in glass jars.',
+    'Whole cow milk is gently boiled, cultured overnight into curd in earthen pots, hand-churned with a wooden bilona to separate makkhan, and slow-clarified before sealing in jars.',
   shelfLife: '',
   storageInstructions:
     'Store tightly sealed in a cool, dry place away from direct sunlight and moisture. Always use a clean, dry spoon.',

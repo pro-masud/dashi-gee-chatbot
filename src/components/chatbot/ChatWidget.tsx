@@ -12,9 +12,9 @@ const ChatPanel = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="no-print fixed inset-0 z-[48] flex h-dvh flex-col items-center justify-center bg-[#FAF7F2] text-[#1E1710] shadow-2xl sm:inset-auto sm:right-6 sm:bottom-6 sm:h-[620px] sm:max-h-[85dvh] sm:w-[400px] sm:rounded-2xl sm:border sm:border-[rgba(30,23,16,0.18)]">
+      <div className="no-print fixed inset-0 z-[48] flex h-dvh flex-col items-center justify-center bg-[var(--c-bg)] text-[var(--c-ink)] shadow-2xl sm:inset-auto sm:right-6 sm:bottom-6 sm:h-[620px] sm:max-h-[85dvh] sm:w-[400px] sm:rounded-2xl sm:border sm:border-[rgb(var(--c-tint)/0.18)]">
         <Loader2 className="h-6 w-6 animate-spin text-[#B47B2B]" />
-        <p className="mt-2 text-xs text-[#635647]">Loading Deshi Gee Assistant...</p>
+        <p className="mt-2 text-xs text-[var(--c-muted)]">Loading Deshi Gee Assistant...</p>
       </div>
     ),
   }
@@ -97,7 +97,7 @@ export function ChatWidget({
             <MessageSquareText className="h-6 w-6 transition-transform duration-200 group-hover:scale-105" />
             <span
               aria-hidden="true"
-              className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 border-[#1A120B] bg-[#FFFDF9]"
+              className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 border-[#1A120B] bg-[var(--c-card)]"
             >
               <span
                 className={`h-2 w-2 rounded-full ${

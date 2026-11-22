@@ -17,9 +17,11 @@ import QRCode from 'qrcode';
 import {
   Menu,
   MessageCircle,
+  Moon,
   ShieldCheck,
   ShoppingBag,
   Sparkles,
+  Sun,
   X,
 } from 'lucide-react';
 import {
@@ -108,6 +110,31 @@ export function StorefrontProvider({
 
   const [lang, setLang] = useState<Lang>('en');
   const [hydratedStorage, setHydratedStorage] = useState(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem('dg-theme');
+      const next = stored === 'light' ? 'light' : 'dark';
+      setTheme(next);
+      document.documentElement.setAttribute('data-sf-theme', next);
+    } catch {
+      document.documentElement.setAttribute('data-sf-theme', 'dark');
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      try {
+        window.localStorage.setItem('dg-theme', next);
+      } catch {
+        // storage unavailable — keep in-memory theme only
+      }
+      document.documentElement.setAttribute('data-sf-theme', next);
+      return next;
+    });
+  };
 
   const [settings, setSettings] = useState<StoreSettingsDoc>(resolvedInitialSettings);
   const [chatbotConfig, setChatbotConfig] = useState<ChatbotConfigDoc>(
@@ -504,7 +531,7 @@ export function StorefrontProvider({
           {children}
         </div>
       ) : (
-        <div id="top" className="min-h-screen bg-[#FAF7F2] text-[#1E1710]">
+        <div id="top" className="min-h-screen bg-[var(--c-bg)] text-[var(--c-ink)]">
           {/* PRESTIGE ANNOUNCEMENT TICKER */}
           <div className="no-print relative z-40 border-b border-[#B47B2B]/20 bg-[#1A120B] px-4 py-1.5 text-xs font-medium tracking-wide text-[#FAF7F2]">
             <div className="mx-auto flex max-w-[1320px] items-center justify-between gap-4">
@@ -548,8 +575,8 @@ export function StorefrontProvider({
           <header
             className={`sticky top-0 z-30 transition-all duration-300 ${
               headerSolid || !isHome || mobileMenuOpen
-                ? 'border-b border-[rgba(30,23,16,0.10)] bg-[#FAF7F2]/95 py-2 shadow-[0_4px_24px_rgba(30,23,16,0.04)] backdrop-blur-md sm:py-3'
-                : 'bg-[#FAF7F2]/80 py-2.5 backdrop-blur-xs sm:bg-transparent sm:py-4'
+                ? 'border-b border-[rgb(var(--c-tint)/0.10)] bg-[var(--c-bg)]/95 py-2 shadow-[0_4px_24px_rgba(30,23,16,0.04)] backdrop-blur-md sm:py-3'
+                : 'bg-[var(--c-bg)]/80 py-2.5 backdrop-blur-xs sm:bg-transparent sm:py-4'
             }`}
           >
             <div className="mx-auto flex max-w-[1320px] items-center justify-between gap-2 px-4 sm:gap-5 sm:px-8">
@@ -558,11 +585,11 @@ export function StorefrontProvider({
                 onClick={() => setMobileMenuOpen(false)}
                 className="group flex shrink-0 flex-col"
               >
-                <span className="font-display flex items-center gap-1.5 text-xl font-bold tracking-tight text-[#1E1710] transition-colors group-hover:text-[#8A5A17] sm:text-2xl">
+                <span className="font-display flex items-center gap-1.5 text-xl font-bold tracking-tight text-[var(--c-ink)] transition-colors group-hover:text-[var(--c-gold-text)] sm:text-2xl">
                   <span>{bn ? 'দেশী ঘি' : 'Deshi Gee'}</span>
                   <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#B47B2B]" />
                 </span>
-                <span className="-mt-0.5 hidden font-mono text-[9px] uppercase tracking-widest text-[#8A5A17] sm:block">
+                <span className="-mt-0.5 hidden font-mono text-[9px] uppercase tracking-widest text-[var(--c-gold-text)] sm:block">
                   {bn ? 'পাবনা · খাঁটি বিলোনা' : 'Pabna · Single Origin'}
                 </span>
               </Link>
@@ -570,7 +597,7 @@ export function StorefrontProvider({
               {/* Primary Single-Line Navigation (Non-wrapping on tablet & desktop) */}
               <nav
                 aria-label="Primary Navigation"
-                className="hidden items-center gap-4 whitespace-nowrap text-xs font-medium text-[#635647] md:flex lg:gap-8 lg:text-sm"
+                className="hidden items-center gap-4 whitespace-nowrap text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--c-muted)] md:flex lg:gap-9"
               >
                 <Link
                   href="/#story"
@@ -580,7 +607,7 @@ export function StorefrontProvider({
                       navigateToSection('story');
                     }
                   }}
-                  className="relative py-2 transition-colors after:absolute after:right-0 after:bottom-1 after:left-0 after:h-[1.5px] after:origin-left after:scale-x-0 after:bg-[#B47B2B] after:transition-transform hover:text-[#1E1710] hover:after:scale-x-100"
+                  className="relative py-2 transition-colors after:absolute after:right-0 after:bottom-1 after:left-0 after:h-[1.5px] after:origin-left after:scale-x-0 after:bg-[#B47B2B] after:transition-transform hover:text-[var(--c-ink)] hover:after:scale-x-100"
                 >
                   {bn ? 'উৎস ও খামার' : 'Origin & Story'}
                 </Link>
@@ -592,7 +619,7 @@ export function StorefrontProvider({
                       navigateToSection('craft');
                     }
                   }}
-                  className="relative py-2 transition-colors after:absolute after:right-0 after:bottom-1 after:left-0 after:h-[1.5px] after:origin-left after:scale-x-0 after:bg-[#B47B2B] after:transition-transform hover:text-[#1E1710] hover:after:scale-x-100"
+                  className="relative py-2 transition-colors after:absolute after:right-0 after:bottom-1 after:left-0 after:h-[1.5px] after:origin-left after:scale-x-0 after:bg-[#B47B2B] after:transition-transform hover:text-[var(--c-ink)] hover:after:scale-x-100"
                 >
                   {bn ? 'বিলোনা প্রণালী' : 'Bilona Craft'}
                 </Link>
@@ -604,9 +631,9 @@ export function StorefrontProvider({
                       navigateToSection('proof');
                     }
                   }}
-                  className="relative py-2 transition-colors after:absolute after:right-0 after:bottom-1 after:left-0 after:h-[1.5px] after:origin-left after:scale-x-0 after:bg-[#B47B2B] after:transition-transform hover:text-[#1E1710] hover:after:scale-x-100"
+                  className="relative py-2 transition-colors after:absolute after:right-0 after:bottom-1 after:left-0 after:h-[1.5px] after:origin-left after:scale-x-0 after:bg-[#B47B2B] after:transition-transform hover:text-[var(--c-ink)] hover:after:scale-x-100"
                 >
-                  {bn ? 'ল্যাব ও ব্যাচ' : 'Lab Proof'}
+                  {bn ? 'ব্যাচ যাচাই' : 'Verify Batch'}
                 </Link>
                 <Link
                   href="/#order"
@@ -616,7 +643,7 @@ export function StorefrontProvider({
                       navigateToSection('order');
                     }
                   }}
-                  className="relative py-2 font-semibold text-[#8A5A17] transition-colors after:absolute after:right-0 after:bottom-1 after:left-0 after:h-[1.5px] after:origin-left after:scale-x-0 after:bg-[#8A5A17] after:transition-transform hover:text-[#1E1710] hover:after:scale-x-100"
+                  className="relative py-2 font-semibold text-[var(--c-gold-text)] transition-colors after:absolute after:right-0 after:bottom-1 after:left-0 after:h-[1.5px] after:origin-left after:scale-x-0 after:bg-[#8A5A17] after:transition-transform hover:text-[var(--c-ink)] hover:after:scale-x-100"
                 >
                   {bn ? 'অর্ডার করুন' : 'Order Jar'}
                 </Link>
@@ -626,11 +653,21 @@ export function StorefrontProvider({
               <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
                 <button
                   type="button"
+                  onClick={toggleTheme}
+                  aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                  title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[rgb(var(--c-tint)/0.16)] bg-[var(--c-bg)] text-[var(--c-gold-text)] shadow-xs transition-colors hover:border-[#B47B2B] hover:bg-[var(--c-surface)]"
+                >
+                  {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setLang((l) => (l === 'en' ? 'bn' : 'en'))}
                   aria-label="Toggle language between English and Bangla"
-                  className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-[rgba(30,23,16,0.16)] bg-[#FAF7F2] px-3.5 text-xs font-semibold text-[#1E1710] shadow-xs transition-colors hover:border-[#B47B2B] hover:bg-[#F2ECE1]"
+                  className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-[rgb(var(--c-tint)/0.16)] bg-[var(--c-bg)] px-3.5 text-xs font-semibold text-[var(--c-ink)] shadow-xs transition-colors hover:border-[#B47B2B] hover:bg-[var(--c-surface)]"
                 >
-                  <span className="text-[11px] uppercase tracking-wider text-[#8A5A17]">
+                  <span className="text-[11px] uppercase tracking-wider text-[var(--c-gold-text)]">
                     {lang === 'en' ? 'বাংলা' : 'EN'}
                   </span>
                 </button>
@@ -644,8 +681,8 @@ export function StorefrontProvider({
                   className="group inline-flex min-h-[44px] shrink-0 items-center gap-2 rounded-xl bg-[#1A120B] px-3.5 text-xs font-medium text-[#FAF7F2] transition-all hover:bg-[#332415] hover:shadow-[0_8px_20px_rgba(30,23,16,0.18)] sm:px-4"
                 >
                   <ShoppingBag className="h-4 w-4 text-[#E5B25D] transition-transform group-hover:scale-110" />
-                  <span className="font-medium">{bn ? 'ব্যাগ' : 'Bag'}</span>
-                  <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-[#B47B2B] px-1.5 font-mono text-[11px] font-bold text-[#FFFDF9] tabular-nums shadow-xs">
+                  <span className="hidden font-medium min-[430px]:inline">{bn ? 'ব্যাগ' : 'Bag'}</span>
+                  <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-md bg-[#B47B2B] px-1.5 font-mono text-[11px] font-bold text-[var(--c-on-gold)] tabular-nums shadow-xs">
                     {bn ? toBengaliDigits(totalBagCount) : totalBagCount}
                   </span>
                 </button>
@@ -655,7 +692,7 @@ export function StorefrontProvider({
                   onClick={() => setMobileMenuOpen((v) => !v)}
                   aria-expanded={mobileMenuOpen}
                   aria-label="Toggle mobile menu"
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[rgba(30,23,16,0.16)] bg-[#FAF7F2] text-[#1E1710] transition-colors hover:bg-[#F2ECE1] md:hidden"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[rgb(var(--c-tint)/0.16)] bg-[var(--c-bg)] text-[var(--c-ink)] transition-colors hover:bg-[var(--c-surface)] md:hidden"
                 >
                   {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
                 </button>
@@ -664,8 +701,8 @@ export function StorefrontProvider({
 
             {/* Mobile Drawer Menu */}
             {mobileMenuOpen && (
-              <div className="max-h-[calc(100dvh-3.5rem)] overflow-y-auto border-b border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] px-4 py-4 shadow-lg md:hidden">
-                <div className="flex flex-col gap-1 text-sm font-medium text-[#1E1710]">
+              <div className="max-h-[calc(100dvh-3.5rem)] overflow-y-auto border-b border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-bg)] px-4 py-4 shadow-lg md:hidden">
+                <div className="flex flex-col gap-1 text-sm font-medium text-[var(--c-ink)]">
                   <Link
                     href="/#story"
                     onClick={(e) => {
@@ -676,7 +713,7 @@ export function StorefrontProvider({
                         setMobileMenuOpen(false);
                       }
                     }}
-                    className="flex min-h-[44px] items-center rounded-lg px-2.5 active:bg-[#F2ECE1]"
+                    className="flex min-h-[44px] items-center rounded-lg px-2.5 active:bg-[var(--c-surface)]"
                   >
                     {bn ? 'গল্প ও খামার' : 'Origin & Story'}
                   </Link>
@@ -690,7 +727,7 @@ export function StorefrontProvider({
                         setMobileMenuOpen(false);
                       }
                     }}
-                    className="flex min-h-[44px] items-center rounded-lg px-2.5 active:bg-[#F2ECE1]"
+                    className="flex min-h-[44px] items-center rounded-lg px-2.5 active:bg-[var(--c-surface)]"
                   >
                     {bn ? 'বিলোনা প্রস্তুতপ্রণালী' : 'Bilona Craft'}
                   </Link>
@@ -704,9 +741,9 @@ export function StorefrontProvider({
                         setMobileMenuOpen(false);
                       }
                     }}
-                    className="flex min-h-[44px] items-center rounded-lg px-2.5 active:bg-[#F2ECE1]"
+                    className="flex min-h-[44px] items-center rounded-lg px-2.5 active:bg-[var(--c-surface)]"
                   >
-                    {bn ? 'ব্যাচ যাচাই' : 'Lab Proof'}
+                    {bn ? 'ব্যাচ যাচাই' : 'Verify Batch'}
                   </Link>
                   <Link
                     href="/#order"
@@ -718,22 +755,22 @@ export function StorefrontProvider({
                         setMobileMenuOpen(false);
                       }
                     }}
-                    className="flex min-h-[44px] items-center rounded-lg px-2.5 font-semibold text-[#8A5A17] active:bg-[#F2ECE1]"
+                    className="flex min-h-[44px] items-center rounded-lg px-2.5 font-semibold text-[var(--c-gold-text)] active:bg-[var(--c-surface)]"
                   >
                     {bn ? 'অর্ডার করুন' : 'Order Jar'}
                   </Link>
-                  <div className="mt-2 grid grid-cols-2 gap-2 border-t border-[rgba(30,23,16,0.10)] pt-3 text-xs text-[#635647]">
+                  <div className="mt-2 grid grid-cols-2 gap-2 border-t border-[rgb(var(--c-tint)/0.10)] pt-3 text-xs text-[var(--c-muted)]">
                     <Link
                       href="/track"
                       onClick={() => setMobileMenuOpen(false)}
-                      className="inline-flex min-h-[44px] items-center rounded-lg px-2.5 font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+                      className="inline-flex min-h-[44px] items-center rounded-lg px-2.5 font-medium text-[var(--c-ink)] hover:bg-[var(--c-surface)]"
                     >
                       {bn ? 'অর্ডার ট্র্যাকিং' : 'Track Order'}
                     </Link>
                     <Link
                       href="/batch"
                       onClick={() => setMobileMenuOpen(false)}
-                      className="inline-flex min-h-[44px] items-center rounded-lg px-2.5 font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+                      className="inline-flex min-h-[44px] items-center rounded-lg px-2.5 font-medium text-[var(--c-ink)] hover:bg-[var(--c-surface)]"
                     >
                       {bn ? 'ব্যাচ যাচাই' : 'Verify Batch'}
                     </Link>
@@ -743,7 +780,7 @@ export function StorefrontProvider({
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={() => setMobileMenuOpen(false)}
-                        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-2.5 font-medium text-[#8A5A17] hover:bg-[#F2ECE1]"
+                        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-2.5 font-medium text-[var(--c-gold-text)] hover:bg-[var(--c-surface)]"
                       >
                         <MessageCircle className="h-4 w-4" />
                         <span>{bn ? 'হোয়াটসঅ্যাপ' : 'WhatsApp'}</span>
@@ -755,19 +792,12 @@ export function StorefrontProvider({
                           setMobileMenuOpen(false);
                           openCallbackRequest();
                         }}
-                        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-2.5 text-left font-medium text-[#8A5A17] hover:bg-[#F2ECE1]"
+                        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-2.5 text-left font-medium text-[var(--c-gold-text)] hover:bg-[var(--c-surface)]"
                       >
                         <MessageCircle className="h-4 w-4" />
                         <span>{bn ? 'কলব্যাক অনুরোধ' : 'Request Callback'}</span>
                       </button>
                     )}
-                    <Link
-                      href="/admin"
-                      onClick={() => setMobileMenuOpen(false)}
-                      className="inline-flex min-h-[44px] items-center rounded-lg px-2.5 hover:bg-[#F2ECE1]"
-                    >
-                      Admin
-                    </Link>
                   </div>
                 </div>
               </div>
@@ -778,7 +808,7 @@ export function StorefrontProvider({
           {children}
 
           {/* SECTION 12: LUXURY ARTISANAL FOOTER */}
-          <footer className="border-t border-[rgba(30,23,16,0.12)] bg-[#1A120B] py-14 text-sm text-[#E8DFC5] sm:py-16">
+          <footer className="border-t border-[rgb(var(--c-tint)/0.12)] bg-[#1A120B] py-14 text-sm text-[#E8DFC5] sm:py-16">
             <div className="mx-auto max-w-[1320px] px-4 sm:px-8">
               <div className="grid grid-cols-1 gap-10 border-b border-[#FAF7F2]/10 pb-12 sm:grid-cols-2 lg:grid-cols-12 lg:gap-12">
                 {/* Brand Column */}
@@ -795,12 +825,12 @@ export function StorefrontProvider({
                   <p className="max-w-md text-xs leading-relaxed text-[#C5B8A5] sm:text-sm">
                     {bn
                       ? 'পাবনার সবুজ চারণভূমির দেশী গরুর খাঁটি দুধ দিয়ে মাটির হাঁড়িতে পাতা দই ও কাঠের বিলোনার প্রাচীন মন্থন পদ্ধতিতে প্রস্তুত একক উৎপত্তির খাঁটি গাওয়া ঘি।'
-                      : 'Single-origin Pabna grass-fed bilona cow ghee prepared from whole cultured curd, hand-churned in wooden pots, and sealed warm in heavy apothecary glass.'}
+                      : 'Single-origin Pabna grass-fed bilona cow ghee prepared from whole cultured curd, hand-churned in wooden pots, and sealed warm in an airtight jar.'}
                   </p>
                   <div className="flex flex-wrap items-center gap-2.5 pt-2 text-xs text-[#E5B25D]">
                     <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#D4AF37]/30 bg-[#261B12] px-3 py-1.5">
                       <ShieldCheck className="h-3.5 w-3.5 text-[#D4AF37]" />
-                      {bn ? 'কাঁচের এয়ারটাইট বয়াম' : 'Sealed Apothecary Glass'}
+                      {bn ? 'এয়ারটাইট বয়াম' : 'Airtight Sealed Jar'}
                     </span>
                     <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#D4AF37]/30 bg-[#261B12] px-3 py-1.5">
                       <Sparkles className="h-3.5 w-3.5 text-[#D4AF37]" />
@@ -855,14 +885,6 @@ export function StorefrontProvider({
                         {bn ? 'অর্ডার ট্র্যাকিং' : 'Track Order'}
                       </Link>
                     </li>
-                    <li>
-                      <Link
-                        href="/admin"
-                        className="inline-flex min-h-[36px] items-center text-[#8A7867] transition-colors hover:text-[#FAF7F2]"
-                      >
-                        Admin
-                      </Link>
-                    </li>
                   </ul>
                 </div>
 
@@ -911,7 +933,7 @@ export function StorefrontProvider({
                       </li>
                     </ul>
                   ) : (
-                    <p className="text-xs leading-relaxed text-[#8A7867]">
+                    <p className="text-xs leading-relaxed text-[var(--c-subtle)]">
                       {bn
                         ? 'স্টোরের চূড়ান্ত নীতিমালা মালিকের অনুমোদনের পর এখানে প্রকাশিত হবে।'
                         : 'Final store policies will be published here once confirmed by the store owner.'}
@@ -928,7 +950,7 @@ export function StorefrontProvider({
                     <div className="space-y-2 text-xs text-[#C5B8A5]">
                       {phoneConfigured && (
                         <p>
-                          <span className="text-[#8A7867]">{bn ? 'ফোন:' : 'Phone:'}</span>{' '}
+                          <span className="text-[var(--c-subtle)]">{bn ? 'ফোন:' : 'Phone:'}</span>{' '}
                           <a
                             href={`tel:${settings.supportPhone.replace(/[^0-9+]/g, '')}`}
                             className="font-mono text-[#FAF7F2] tabular-nums hover:underline"
@@ -939,7 +961,7 @@ export function StorefrontProvider({
                       )}
                       {whatsappConfigured && (
                         <p>
-                          <span className="text-[#8A7867]">WhatsApp:</span>{' '}
+                          <span className="text-[var(--c-subtle)]">WhatsApp:</span>{' '}
                           <a
                             href={whatsappChatHref}
                             target="_blank"
@@ -952,7 +974,7 @@ export function StorefrontProvider({
                       )}
                       {emailConfigured && (
                         <p>
-                          <span className="text-[#8A7867]">Email:</span>{' '}
+                          <span className="text-[var(--c-subtle)]">Email:</span>{' '}
                           <a
                             href={`mailto:${settings.supportEmail}`}
                             className="text-[#FAF7F2] hover:underline"
@@ -962,7 +984,7 @@ export function StorefrontProvider({
                         </p>
                       )}
                       {addressConfigured && (
-                        <p className="pt-1 leading-relaxed text-[#8A7867]">
+                        <p className="pt-1 leading-relaxed text-[var(--c-subtle)]">
                           {settings.businessAddress}
                         </p>
                       )}
@@ -979,7 +1001,7 @@ export function StorefrontProvider({
                     </div>
                   ) : (
                     <div className="space-y-2.5 text-xs text-[#C5B8A5]">
-                      <p className="leading-relaxed text-[#8A7867]">
+                      <p className="leading-relaxed text-[var(--c-subtle)]">
                         {bn
                           ? 'যেকোনো প্রশ্ন বা অর্ডার সহায়তার জন্য কলব্যাক অনুরোধ পাঠান—আমাদের টিম যোগাযোগ করবে।'
                           : 'Need help with an order or inquiry? Submit a callback request and our team will reach out.'}
@@ -1020,7 +1042,7 @@ export function StorefrontProvider({
               </div>
 
               {/* Bottom Copyright & Provenance Note */}
-              <div className="flex flex-col items-center justify-between gap-4 pt-8 text-xs text-[#8A7867] sm:flex-row">
+              <div className="flex flex-col items-center justify-between gap-4 pt-8 text-xs text-[var(--c-subtle)] sm:flex-row">
                 <p suppressHydrationWarning>
                   © {new Date().getUTCFullYear()} Deshi Gee.{' '}
                   {bn ? 'সর্বস্বত্ব সংরক্ষিত।' : 'All rights reserved.'}
@@ -1041,9 +1063,9 @@ export function StorefrontProvider({
               target="_blank"
               rel="noopener noreferrer"
               aria-label={bn ? 'হোয়াটসঅ্যাপ সাপোর্ট' : 'WhatsApp Customer Support'}
-              className="no-print fixed right-6 bottom-[92px] z-20 hidden h-11 items-center gap-2 rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2]/95 px-4 text-xs font-medium text-[#1E1710] shadow-md backdrop-blur-sm transition-transform hover:scale-[1.03] md:inline-flex"
+              className="no-print fixed right-6 bottom-[92px] z-20 hidden h-11 items-center gap-2 rounded-xl border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-bg)]/95 px-4 text-xs font-medium text-[var(--c-ink)] shadow-md backdrop-blur-sm transition-transform hover:scale-[1.03] md:inline-flex"
             >
-              <MessageCircle className="h-4 w-4 text-[#8A5A17]" />
+              <MessageCircle className="h-4 w-4 text-[var(--c-gold-text)]" />
               <span>{bn ? 'হোয়াটসঅ্যাপ' : 'WhatsApp'}</span>
             </a>
           )}
@@ -1066,17 +1088,17 @@ export function StorefrontProvider({
               role="dialog"
               aria-modal="true"
               aria-labelledby="callback-modal-title"
-              className="fixed inset-0 z-50 flex items-center justify-center bg-[#1E1710]/50 p-4 backdrop-blur-xs"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
               onClick={() => setCallbackModalOpen(false)}
             >
               <div
                 onClick={(e) => e.stopPropagation()}
-                className="w-full max-w-md rounded-2xl border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] p-5 shadow-2xl sm:p-6"
+                className="w-full max-w-md rounded-2xl border border-[rgb(var(--c-tint)/0.14)] bg-[var(--c-bg)] p-5 shadow-2xl sm:p-6"
               >
                 <div className="flex items-center justify-between gap-3">
                   <h3
                     id="callback-modal-title"
-                    className="font-display text-lg font-semibold text-[#1E1710]"
+                    className="font-display text-lg font-semibold text-[var(--c-ink)]"
                   >
                     {bn ? 'কলব্যাক অনুরোধ করুন' : 'Request a Callback'}
                   </h3>
@@ -1084,14 +1106,14 @@ export function StorefrontProvider({
                     type="button"
                     onClick={() => setCallbackModalOpen(false)}
                     aria-label={bn ? 'বন্ধ করুন' : 'Close dialog'}
-                    className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[rgba(30,23,16,0.12)] hover:bg-[#F2ECE1]"
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[rgb(var(--c-tint)/0.12)] hover:bg-[var(--c-surface)]"
                   >
                     <X className="h-4 w-4" />
                   </button>
                 </div>
                 <form onSubmit={handleSubmitCallback} className="mt-4 space-y-3">
                   <div>
-                    <label className="block text-xs font-medium text-[#635647]">
+                    <label className="block text-xs font-medium text-[var(--c-muted)]">
                       {bn ? 'আপনার নাম *' : 'Your Name *'}
                     </label>
                     <input
@@ -1099,11 +1121,11 @@ export function StorefrontProvider({
                       required
                       value={cbName}
                       onChange={(e) => setCbName(e.target.value)}
-                      className="mt-1 min-h-[44px] w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base text-[#1E1710] sm:text-sm"
+                      className="mt-1 min-h-[44px] w-full rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3 py-2 text-base text-[var(--c-ink)] sm:text-sm"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-[#635647]">
+                    <label className="block text-xs font-medium text-[var(--c-muted)]">
                       {bn ? 'মোবাইল নম্বর (01XXXXXXXXX) *' : 'Mobile Number (01XXXXXXXXX) *'}
                     </label>
                     <input
@@ -1113,11 +1135,11 @@ export function StorefrontProvider({
                       value={cbPhone}
                       onChange={(e) => setCbPhone(e.target.value)}
                       placeholder="017XXXXXXXX"
-                      className="mt-1 min-h-[44px] w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 font-mono text-base text-[#1E1710] sm:text-sm"
+                      className="mt-1 min-h-[44px] w-full rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3 py-2 font-mono text-base text-[var(--c-ink)] sm:text-sm"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-[#635647]">
+                    <label className="block text-xs font-medium text-[var(--c-muted)]">
                       {bn ? 'সংক্ষিপ্ত বার্তা' : 'Short Message'}
                     </label>
                     <textarea
@@ -1125,13 +1147,13 @@ export function StorefrontProvider({
                       value={cbNote}
                       onChange={(e) => setCbNote(e.target.value)}
                       placeholder={bn ? 'আপনার প্রশ্ন বা অর্ডারের বিষয় লিখুন' : 'How can we help you?'}
-                      className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base text-[#1E1710] sm:text-sm"
+                      className="mt-1 w-full rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3 py-2 text-base text-[var(--c-ink)] sm:text-sm"
                     />
                   </div>
                   {cbResult && (
                     <p
                       className={`text-xs font-medium ${
-                        cbResult.ok ? 'text-[#2D6A4F]' : 'text-red-700'
+                        cbResult.ok ? 'text-[var(--c-green-text)]' : 'text-red-700'
                       }`}
                     >
                       {cbResult.msg}
@@ -1159,12 +1181,12 @@ export function StorefrontProvider({
               role="dialog"
               aria-modal="true"
               aria-labelledby="policy-modal-title"
-              className="fixed inset-0 z-50 flex items-center justify-center bg-[#1E1710]/50 p-4 backdrop-blur-xs sm:p-5"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs sm:p-5"
               onClick={closePolicy}
             >
               <div
                 onClick={(e) => e.stopPropagation()}
-                className="max-h-[85dvh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-2xl border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] p-5 shadow-2xl sm:p-6"
+                className="max-h-[85dvh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-2xl border border-[rgb(var(--c-tint)/0.14)] bg-[var(--c-bg)] p-5 shadow-2xl sm:p-6"
               >
                 <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
                   {bn
@@ -1174,7 +1196,7 @@ export function StorefrontProvider({
                 <div className="flex items-center justify-between gap-3">
                   <h3
                     id="policy-modal-title"
-                    className="font-display text-lg font-semibold text-[#1E1710] sm:text-xl"
+                    className="font-display text-lg font-semibold text-[var(--c-ink)] sm:text-xl"
                   >
                     {policyModal === 'delivery' &&
                       (bn ? 'ডেলিভারি নীতিমালা (খসড়া)' : 'Delivery Policy (Draft)')}
@@ -1190,12 +1212,12 @@ export function StorefrontProvider({
                     type="button"
                     onClick={closePolicy}
                     aria-label={bn ? 'নীতিমালা বন্ধ করুন' : 'Close policy dialog'}
-                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[rgba(30,23,16,0.12)] hover:bg-[#F2ECE1]"
+                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[rgb(var(--c-tint)/0.12)] hover:bg-[var(--c-surface)]"
                   >
                     <X className="h-4 w-4" />
                   </button>
                 </div>
-                <p className="mt-4 text-sm leading-relaxed text-[#635647]">
+                <p className="mt-4 text-sm leading-relaxed text-[var(--c-muted)]">
                   {policyModal === 'delivery' &&
                     (bn
                       ? 'ডেলিভারি চার্জ ও সম্ভাব্য সময় চেকআউটে প্রদর্শিত মালিক-অনুমোদিত সেটিংস অনুযায়ী প্রযোজ্য।'

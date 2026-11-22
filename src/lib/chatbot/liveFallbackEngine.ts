@@ -221,7 +221,7 @@ export function generateLiveFallbackReply(params: {
     return {
       replyText: isBn
         ? `আপনার জন্য **${rec.recommendedWeight}** দেশী ঘিয়ের জার (৳${rec.priceBdt}, স্টকে ${rec.stockJars}টি) সবচেয়ে উপযুক্ত হবে। ${rec.reasonBn} ${freeNoteBn}`
-        : `I recommend the **${rec.recommendedWeight}** Deshi Gee glass jar (৳${rec.priceBdt}, ${rec.stockJars} in stock). ${rec.reasonEn} ${freeNoteEn}`,
+        : `I recommend the **${rec.recommendedWeight}** Deshi Gee jar (৳${rec.priceBdt}, ${rec.stockJars} in stock). ${rec.reasonEn} ${freeNoteEn}`,
       intent: 'recommendation',
       actions,
       productCards: cards,
@@ -412,8 +412,8 @@ export function generateLiveFallbackReply(params: {
     addWhatsAppAction();
     return {
       replyText: isBn
-        ? `Deshi Gee ৩টি এয়ারটাইট সিলযুক্ত কাঁচের জারে পাওয়া যায়:\n১. ২৫০ গ্রাম — ছোট ট্রায়াল সাইজ (৳${facts.pricesBdt['250g']})\n২. ৫০০ গ্রাম — নিয়মিত পারিবারিক সাইজ (৳${facts.pricesBdt['500g']})\n৩. ১ কেজি — বড় সাশ্রয়ী সাইজ (৳${facts.pricesBdt['1kg']})\n\nসবগুলো জার পরিষ্কার অ্যাপোথেকারি কাঁচের বয়ামে সিল করা হয়। আপনি কোন সাইজটি নিতে চান?`
-        : `Deshi Gee is available in 3 sealed apothecary glass jar sizes:\n1. 250g — Starter Jar (৳${facts.pricesBdt['250g']})\n2. 500g — Family Kitchen Jar (৳${facts.pricesBdt['500g']})\n3. 1kg — Household Reserve Jar (৳${facts.pricesBdt['1kg']})\n\nEach jar is poured warm and sealed with an airtight tamper-evident closure.`,
+        ? `Deshi Gee ৩টি এয়ারটাইট সিলযুক্ত জারে পাওয়া যায়:\n১. ২৫০ গ্রাম — ছোট ট্রায়াল সাইজ (৳${facts.pricesBdt['250g']})\n২. ৫০০ গ্রাম — নিয়মিত পারিবারিক সাইজ (৳${facts.pricesBdt['500g']})\n৩. ১ কেজি — বড় সাশ্রয়ী সাইজ (৳${facts.pricesBdt['1kg']})\n\nসবগুলো জার পরিষ্কার অ্যাপোথেকারি বয়ামে সিল করা হয়। আপনি কোন সাইজটি নিতে চান?`
+        : `Deshi Gee is available in 3 sealed apothecary jar sizes:\n1. 250g — Starter Jar (৳${facts.pricesBdt['250g']})\n2. 500g — Family Kitchen Jar (৳${facts.pricesBdt['500g']})\n3. 1kg — Household Reserve Jar (৳${facts.pricesBdt['1kg']})\n\nEach jar is poured warm and sealed with an airtight tamper-evident closure.`,
       intent: 'pricing',
       actions,
       productCards: buildProductComparisonCards(settings, '500g'),
@@ -483,7 +483,7 @@ export function generateLiveFallbackReply(params: {
     addWhatsAppAction();
     return {
       replyText: isBn
-        ? `ডেলিভারির সময় কাঁচের জার ভাঙা বা সিল ক্ষতিগ্রস্ত হলে ২৪ ঘণ্টার মধ্যে ছবি সহ আমাদের WhatsApp বা ফোনে জানালে বিনামূল্যে রিপ্লেসমেন্ট বা রিফান্ড করা হয়।`
+        ? `ডেলিভারির সময় জার ভাঙা বা সিল ক্ষতিগ্রস্ত হলে ২৪ ঘণ্টার মধ্যে ছবি সহ আমাদের WhatsApp বা ফোনে জানালে বিনামূল্যে রিপ্লেসমেন্ট বা রিফান্ড করা হয়।`
         : `${facts.policies.returnPolicy} ${facts.policies.replacementPolicy}`.trim(),
       intent: 'policy',
       actions,

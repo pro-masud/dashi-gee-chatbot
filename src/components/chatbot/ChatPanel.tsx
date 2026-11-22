@@ -1289,7 +1289,7 @@ export function ChatPanel({
       role="dialog"
       aria-modal="true"
       aria-label={chatbotConfig.botName}
-      className="no-print fixed inset-0 z-[48] flex h-dvh flex-col bg-[#FAF7F2] text-[#1E1710] shadow-2xl sm:inset-auto sm:right-6 sm:bottom-6 sm:h-[620px] sm:max-h-[85dvh] sm:w-[400px] sm:overflow-hidden sm:rounded-2xl sm:border sm:border-[rgba(30,23,16,0.18)]"
+      className="no-print fixed inset-0 z-[48] flex h-dvh flex-col bg-[var(--c-bg)] text-[var(--c-ink)] shadow-2xl sm:inset-auto sm:right-6 sm:bottom-6 sm:h-[620px] sm:max-h-[85dvh] sm:w-[400px] sm:overflow-hidden sm:rounded-2xl sm:border sm:border-[rgb(var(--c-tint)/0.18)]"
     >
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[rgba(250,247,242,0.12)] bg-[#1E1710] px-4 py-3 text-[#FAF7F2]">
@@ -1324,7 +1324,7 @@ export function ChatPanel({
           <button
             type="button"
             onClick={() => setLang((l) => (l === 'en' ? 'bn' : 'en'))}
-            className="min-h-[44px] min-w-[44px] rounded-lg border border-[rgba(250,247,242,0.2)] px-2.5 py-1 text-xs font-medium text-[#FAF7F2] hover:bg-white/10"
+            className="min-h-[44px] min-w-[44px] rounded-lg border border-[rgba(250,247,242,0.2)] px-2.5 py-1 text-xs font-medium text-[#FAF7F2] hover:bg-[var(--c-card)]/10"
           >
             {lang === 'en' ? 'বাংলা' : 'EN'}
           </button>
@@ -1333,7 +1333,7 @@ export function ChatPanel({
             onClick={handleClearChat}
             title={bn ? 'চ্যাট পরিষ্কার করুন' : 'Clear conversation'}
             aria-label={bn ? 'চ্যাট পরিষ্কার করুন' : 'Clear conversation'}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-[#E8DFC5]/80 hover:bg-white/10 hover:text-[#FAF7F2]"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-[#E8DFC5]/80 hover:bg-[var(--c-card)]/10 hover:text-[#FAF7F2]"
           >
             <RotateCcw className="h-4 w-4" />
           </button>
@@ -1342,7 +1342,7 @@ export function ChatPanel({
             onClick={onMinimize}
             title={bn ? 'মিনিমাইজ' : 'Minimize'}
             aria-label={bn ? 'মিনিমাইজ' : 'Minimize'}
-            className="hidden h-11 w-11 items-center justify-center rounded-lg text-[#E8DFC5]/80 hover:bg-white/10 hover:text-[#FAF7F2] sm:inline-flex"
+            className="hidden h-11 w-11 items-center justify-center rounded-lg text-[#E8DFC5]/80 hover:bg-[var(--c-card)]/10 hover:text-[#FAF7F2] sm:inline-flex"
           >
             <Minimize2 className="h-4 w-4" />
           </button>
@@ -1350,7 +1350,7 @@ export function ChatPanel({
             type="button"
             onClick={onClose}
             aria-label={bn ? 'চ্যাট বন্ধ করুন' : 'Close chat'}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-[#E8DFC5]/80 hover:bg-white/10 hover:text-[#FAF7F2]"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-[#E8DFC5]/80 hover:bg-[var(--c-card)]/10 hover:text-[#FAF7F2]"
           >
             <X className="h-4 w-4" />
           </button>
@@ -1362,12 +1362,12 @@ export function ChatPanel({
         aria-live="polite"
         className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4"
       >
-        <div className="rounded-2xl border border-[rgba(30,23,16,0.1)] bg-[#F2ECE1]/70 p-3.5 text-xs leading-relaxed text-[#1E1710]">
+        <div className="rounded-2xl border border-[rgb(var(--c-tint)/0.1)] bg-[var(--c-surface)]/70 p-3.5 text-xs leading-relaxed text-[var(--c-ink)]">
           <p>{welcomeMessage}</p>
         </div>
 
         {resumedDraft && (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(180,123,43,0.35)] bg-[#FFFDF9] px-3 py-2 text-[11px] text-[#1E1710]">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[rgba(180,123,43,0.35)] bg-[var(--c-card)] px-3 py-2 text-[11px] text-[var(--c-ink)]">
             <span>
               {bn ? 'সংরক্ষিত অর্ডার খসড়া পাওয়া গেছে: ' : 'Active order draft restored: '}
               {[
@@ -1387,14 +1387,14 @@ export function ChatPanel({
                     bn ? 'আমার অর্ডারটা সম্পূর্ণ করতে চাই' : 'Continue my order draft'
                   )
                 }
-                className="font-semibold text-[#8A5A17] hover:underline"
+                className="font-semibold text-[var(--c-gold-text)] hover:underline"
               >
                 {bn ? 'চালিয়ে যান' : 'Continue'}
               </button>
               <button
                 type="button"
                 onClick={() => setResumedDraft(null)}
-                className="text-[#635647] hover:text-[#1E1710]"
+                className="text-[var(--c-muted)] hover:text-[var(--c-ink)]"
               >
                 {bn ? 'লুকান' : 'Dismiss'}
               </button>
@@ -1404,7 +1404,7 @@ export function ChatPanel({
 
         {messages.length === 0 && quickQuestions.length > 0 && (
           <div className="space-y-1.5">
-            <p className="text-[11px] font-medium text-[#635647]">
+            <p className="text-[11px] font-medium text-[var(--c-muted)]">
               {bn ? 'দ্রুত জিজ্ঞাসা করুন:' : 'Quick questions:'}
             </p>
             <div className="flex flex-wrap gap-1.5">
@@ -1413,7 +1413,7 @@ export function ChatPanel({
                   key={`${q}_${idx}`}
                   type="button"
                   onClick={() => sendMessage(q)}
-                  className="min-h-[44px] rounded-xl border border-[rgba(180,123,43,0.35)] bg-[#FFFDF9] px-3.5 py-2 text-left text-xs font-medium text-[#1E1710] transition-colors hover:border-[#B47B2B] hover:bg-[#F2ECE1]"
+                  className="min-h-[44px] rounded-xl border border-[rgba(180,123,43,0.35)] bg-[var(--c-card)] px-3.5 py-2 text-left text-xs font-medium text-[var(--c-ink)] transition-colors hover:border-[#B47B2B] hover:bg-[var(--c-surface)]"
                 >
                   {q}
                 </button>
@@ -1463,7 +1463,7 @@ export function ChatPanel({
         )}
 
         {rolloverNotice && (
-          <div className="rounded-xl border border-[rgba(180,123,43,0.28)] bg-[#F2ECE1]/60 px-3 py-2 text-[11px] text-[#635647]">
+          <div className="rounded-xl border border-[rgba(180,123,43,0.28)] bg-[var(--c-surface)]/60 px-3 py-2 text-[11px] text-[var(--c-muted)]">
             {bn
               ? 'দ্রুত ও নির্ভুল উত্তরের জন্য একটি নতুন ধারাবাহিক সেশন চালু হয়েছে — আপনি নিশ্চিন্তে কথা চালিয়ে যেতে পারেন।'
               : 'Continuing in a fresh seamless session to keep responses fast — please keep chatting.'}
@@ -1471,7 +1471,7 @@ export function ChatPanel({
         )}
 
         {awaitingReply && messages[messages.length - 1]?.text === '' && (
-          <div className="flex items-center gap-2 px-1 text-xs text-[#635647]">
+          <div className="flex items-center gap-2 px-1 text-xs text-[var(--c-muted)]">
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[#B47B2B]" />
             <span>
               {bn ? 'তথ্য যাচাই ও উত্তর তৈরি হচ্ছে...' : 'Checking live details & composing reply...'}
@@ -1502,15 +1502,15 @@ export function ChatPanel({
       )}
 
       {/* Input Composer */}
-      <div className="shrink-0 border-t border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] px-3 pt-2.5 pb-[max(0.65rem,env(safe-area-inset-bottom))]">
+      <div className="shrink-0 border-t border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-card)] px-3 pt-2.5 pb-[max(0.65rem,env(safe-area-inset-bottom))]">
         {(pendingEvidence || evidenceError) && (
-          <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-[rgba(180,123,43,0.3)] bg-[#F2ECE1]/75 px-2.5 py-1.5 text-[11px]">
+          <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-[rgba(180,123,43,0.3)] bg-[var(--c-surface)]/75 px-2.5 py-1.5 text-[11px]">
             {evidenceError ? (
               <span className="text-red-700">{evidenceError}</span>
             ) : (
-              <span className="truncate font-medium text-[#1E1710]">
+              <span className="truncate font-medium text-[var(--c-ink)]">
                 {bn ? 'ছবি সংযুক্ত:' : 'Attached:'}{' '}
-                <span className="font-mono text-[#8A5A17]">{pendingEvidence?.filename}</span>
+                <span className="font-mono text-[var(--c-gold-text)]">{pendingEvidence?.filename}</span>
               </span>
             )}
             <button
@@ -1520,7 +1520,7 @@ export function ChatPanel({
                 setEvidenceError('');
               }}
               aria-label={bn ? 'ছবি সরান' : 'Remove attachment'}
-              className="shrink-0 text-[#635647] hover:text-[#1E1710]"
+              className="shrink-0 text-[var(--c-muted)] hover:text-[var(--c-ink)]"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -1545,7 +1545,7 @@ export function ChatPanel({
             onClick={() => fileInputRef.current?.click()}
             title={bn ? 'জার/পেমেন্ট ছবি সংযুক্ত করুন' : 'Attach damaged jar or payment photo'}
             aria-label={bn ? 'ছবি সংযুক্ত করুন' : 'Attach photo'}
-            className="inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] text-[#635647] transition-colors hover:border-[#B47B2B] hover:text-[#1E1710] disabled:opacity-45"
+            className="inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-xl border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-bg)] text-[var(--c-muted)] transition-colors hover:border-[#B47B2B] hover:text-[var(--c-ink)] disabled:opacity-45"
           >
             {uploadingEvidence ? (
               <Loader2 className="h-4 w-4 animate-spin text-[#B47B2B]" />
@@ -1579,7 +1579,7 @@ export function ChatPanel({
               className={`inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-xl border transition-colors disabled:opacity-45 ${
                 isListening
                   ? 'border-red-500 bg-red-50 text-red-700'
-                  : 'border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] text-[#635647] hover:border-[#B47B2B] hover:text-[#1E1710]'
+                  : 'border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-bg)] text-[#635647] hover:border-[#B47B2B] hover:text-[#1E1710]'
               }`}
             >
               {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
@@ -1599,7 +1599,7 @@ export function ChatPanel({
                 ? 'দাম, অর্ডার বা ডেলিভারি সম্পর্কে লিখুন...'
                 : 'Ask in English, বাংলা, or Banglish...'
             }
-            className="max-h-28 min-h-[44px] flex-1 resize-none rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-3.5 py-2.5 text-base sm:text-sm text-[#1E1710] placeholder:text-[#635647]/70 focus:border-[#B47B2B] focus:outline-none disabled:opacity-50"
+            className="max-h-28 min-h-[44px] flex-1 resize-none rounded-xl border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-bg)] px-3.5 py-2.5 text-base sm:text-sm text-[var(--c-ink)] placeholder:text-[var(--c-muted)]/70 focus:border-[#B47B2B] focus:outline-none disabled:opacity-50"
           />
           <button
             type="button"
@@ -1610,7 +1610,7 @@ export function ChatPanel({
             }
             onClick={() => sendMessage(input || (bn ? 'ছবি সংযুক্ত করেছি' : 'Attached evidence photo'))}
             aria-label={bn ? 'মেসেজ পাঠান' : 'Send message'}
-            className="inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-xl bg-[#B47B2B] text-[#FFFDF9] transition-colors hover:bg-[#9D6820] disabled:cursor-not-allowed disabled:opacity-45"
+            className="inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-xl bg-[#B47B2B] text-[var(--c-on-gold)] transition-colors hover:bg-[#9D6820] disabled:cursor-not-allowed disabled:opacity-45"
           >
             {awaitingReply ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -1619,7 +1619,7 @@ export function ChatPanel({
             )}
           </button>
         </div>
-        <p className="mt-1.5 text-center text-[10px] text-[#635647]">
+        <p className="mt-1.5 text-center text-[10px] text-[var(--c-muted)]">
           {bn
             ? 'তথ্য শুধু ডেলিভারি যাচাইয়ের জন্য ব্যবহৃত হয় · কখনোই PIN/OTP দেবেন না।'
             : 'Details used only for delivery verification · Never share PIN or OTP.'}

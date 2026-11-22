@@ -24,6 +24,7 @@ export function initHeroCanvas(canvas: HTMLCanvasElement | null): () => void {
   uniform float u_time;
   uniform vec2 u_mouse;
   uniform vec2 u_res;
+  uniform float u_dark;
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -56,13 +57,13 @@ export function initHeroCanvas(canvas: HTMLCanvasElement | null): () => void {
     float dist = length(p - mPos);
     float glow = exp(-dist * dist * 2.2);
 
-    // Warm Alabaster Linen (#FAF7F2) + Burnished Golden Amber (#B47B2B)
-    vec3 linenBase = vec3(0.980, 0.969, 0.949);
-    vec3 goldenGlow = vec3(0.847, 0.659, 0.325);
-    vec3 amberLine = vec3(0.706, 0.482, 0.169);
+    // Deep Espresso (#0B0805) + Burnished Gold contour lines (#D4AF37)
+    vec3 linenBase = mix(vec3(0.980, 0.969, 0.949), vec3(0.043, 0.031, 0.020), u_dark);
+    vec3 goldenGlow = mix(vec3(0.847, 0.659, 0.325), vec3(0.898, 0.698, 0.365), u_dark);
+    vec3 amberLine = mix(vec3(0.706, 0.482, 0.169), vec3(0.831, 0.686, 0.216), u_dark);
 
-    vec3 col = mix(linenBase, goldenGlow, glow * 0.14);
-    col = mix(col, amberLine, line * 0.065);
+    vec3 col = mix(linenBase, goldenGlow, glow * mix(0.14, 0.16, u_dark));
+    col = mix(col, amberLine, line * mix(0.065, 0.10, u_dark));
 
     outColor = vec4(col, 1.0);
   }`;
@@ -111,6 +112,7 @@ export function initHeroCanvas(canvas: HTMLCanvasElement | null): () => void {
   const uTime = gl.getUniformLocation(prog, 'u_time');
   const uMouse = gl.getUniformLocation(prog, 'u_mouse');
   const uRes = gl.getUniformLocation(prog, 'u_res');
+  const uDark = gl.getUniformLocation(prog, 'u_dark');
 
   let mouseX = 0.72;
   let mouseY = 0.48;
@@ -172,6 +174,7 @@ export function initHeroCanvas(canvas: HTMLCanvasElement | null): () => void {
     gl.uniform1f(uTime, t);
     gl.uniform2f(uMouse, mouseX, mouseY);
     gl.uniform2f(uRes, canvas.width, canvas.height);
+    gl.uniform1f(uDark, document.documentElement.getAttribute('data-sf-theme') === 'light' ? 0.0 : 1.0);
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 

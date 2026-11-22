@@ -364,7 +364,7 @@ export async function bookCourierParcel(
             250
           ),
           cod_amount: Math.max(0, Math.round(req.codAmountBdt)),
-          note: (req.note || 'Deshi Gee glass jar — handle with care').slice(0, 200),
+          note: (req.note || 'Deshi Gee jar — handle with care').slice(0, 200),
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
@@ -476,7 +476,7 @@ export async function bookCourierParcel(
           recipient_zone: pathaoLocation.zoneId,
           delivery_type: 48,
           item_type: 2,
-          special_instruction: (req.note || 'Fragile glass jar — handle carefully').slice(0, 180),
+          special_instruction: (req.note || 'Fragile — handle carefully').slice(0, 180),
           item_quantity: 1,
           item_weight: weightKg,
           amount_to_collect: Math.max(0, Math.round(req.codAmountBdt)),
@@ -565,7 +565,7 @@ export async function bookCourierParcel(
         merchant_invoice_id: req.orderNumber,
         cash_collection_amount: Math.max(0, Math.round(req.codAmountBdt)),
         parcel_weight: Math.max(250, Math.round(req.weightGrams || 500)),
-        instruction: (req.note || 'Fragile glass jar — Deshi Gee').slice(0, 180),
+        instruction: (req.note || 'Fragile jar — Deshi Gee').slice(0, 180),
         value: Math.max(100, Math.round(req.codAmountBdt || 1000)),
       }),
     });

@@ -21,12 +21,15 @@ import {
   Camera,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   ExternalLink,
   FileCheck2,
   Leaf,
   Lightbulb,
   Loader2,
+  Maximize2,
   MessageSquareText,
   Minus,
   Plus,
@@ -37,6 +40,7 @@ import {
   ThumbsUp,
   Truck,
   Upload,
+  X,
 } from 'lucide-react';
 import { initHeroCanvas } from '../webgl/heroCanvas';
 import { initSpecsCanvas } from '../webgl/specsCanvas';
@@ -103,6 +107,48 @@ export function HomeStorefrontView() {
   const [revSubmitting, setRevSubmitting] = useState(false);
   const [revStatusMsg, setRevStatusMsg] = useState('');
   const [helpfulVotedIds, setHelpfulVotedIds] = useState<Set<string>>(new Set());
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string; name: string } | null>(null);
+  const reviewTrackRef = useRef<HTMLDivElement | null>(null);
+  const [canPrevReview, setCanPrevReview] = useState(false);
+  const [canNextReview, setCanNextReview] = useState(false);
+
+  useEffect(() => {
+    const track = reviewTrackRef.current;
+    if (!track) return;
+    const update = () => {
+      setCanPrevReview(track.scrollLeft > 4);
+      setCanNextReview(track.scrollLeft + track.clientWidth < track.scrollWidth - 4);
+    };
+    update();
+    track.addEventListener('scroll', update, { passive: true });
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    ro?.observe(track);
+    return () => {
+      track.removeEventListener('scroll', update);
+      ro?.disconnect();
+    };
+  }, [reviews.length]);
+
+  const scrollReviews = (dir: 1 | -1) => {
+    const track = reviewTrackRef.current;
+    if (!track) return;
+    track.scrollBy({ left: dir * Math.min(420, track.clientWidth * 0.9), behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLightbox(null);
+    };
+    window.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [lightbox]);
 
   // Newsletter State
   const [newsEmail, setNewsEmail] = useState('');
@@ -527,558 +573,545 @@ export function HomeStorefrontView() {
   return (
     <>
       <main className="pb-24 md:pb-0">
-        {/* SECTION 01: LUXURY EDITORIAL HERO */}
-        <section className="relative overflow-hidden border-b border-[rgba(30,23,16,0.08)] bg-gradient-to-b from-[#FAF7F2] via-[#FAF7F2] to-[#F5EFE6]">
-          {/* Subtle Ambient Radial Glow */}
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute left-1/2 top-1/4 -translate-x-1/2 -translate-y-1/2 h-[500px] w-[500px] rounded-full bg-gradient-to-br from-[#D4AF37]/10 via-[#B47B2B]/5 to-transparent blur-3xl lg:h-[700px] lg:w-[700px]"
-          />
-
+        {/* SECTION 01: LUXURY CINEMATIC HERO */}
+        <section className="premium-grain relative isolate overflow-hidden bg-[var(--c-bg)]">
           <canvas
             ref={heroCanvasRef}
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 hidden h-full w-full lg:block"
+            className="pointer-events-none absolute inset-0 -z-10 hidden h-full w-full lg:block"
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -right-48 top-1/4 -z-10 h-[680px] w-[680px] rounded-full bg-[radial-gradient(closest-side,rgba(229,178,93,0.20),transparent)] blur-2xl"
           />
 
-          <div className="relative z-10 mx-auto grid max-w-[1320px] grid-cols-1 items-center gap-10 px-4 py-10 sm:px-8 sm:py-14 lg:min-h-[calc(100dvh-80px)] lg:grid-cols-12 lg:gap-14 lg:py-16">
-            <div className="lg:col-span-7">
-              {/* Provenance Badge */}
-              <div className="inline-flex items-center gap-2 rounded-full border border-[#B47B2B]/25 bg-[#FAF7F2]/80 px-3.5 py-1.5 backdrop-blur-xs">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#B47B2B] animate-pulse" />
-                <span className="font-mono text-[11px] font-semibold uppercase tracking-widest text-[#8A5A17]">
-                  {settings.originLocation} · {bn ? 'একক ঐতিহ্যবাহী ঘি' : 'Single-Origin Bilona'}
-                </span>
-              </div>
+          <div className="relative mx-auto grid max-w-[1320px] grid-cols-1 items-center gap-16 px-5 pb-24 pt-12 sm:px-8 lg:min-h-[calc(100dvh-96px)] lg:grid-cols-12 lg:gap-12 lg:pb-32 lg:pt-16">
+            <div className="lg:col-span-6">
+              <p className="eyebrow">
+                {settings.originLocation} · {bn ? 'একক উৎসের বিলোনা ঘি' : 'Single-Origin Bilona'}
+              </p>
 
-              {/* Grand Headline with Serif Display & Gold Accent */}
-              <h1 className="font-display mt-4 text-3xl font-semibold leading-[1.12] tracking-tight text-[#1E1710] sm:mt-5 sm:text-5xl lg:text-[3.85rem]">
+              <h1 className="display-hero mt-7">
                 {bn ? (
                   <>
                     পাবনার চারণভূমির কাঁচা দুধে{' '}
-                    <span className="gold-gradient-text italic font-normal">পাতাদইয়ের কাঠের বিলোনা</span> ঘি
+                    <span className="gold-gradient-text italic">কাঠের বিলোনায়</span> মন্থিত ঘি
                   </>
                 ) : (
                   <>
-                    Single-Origin Pabna Cow Ghee.{' '}
-                    <span className="gold-gradient-text italic font-normal">Pure Bilona Craft.</span>
+                    Pabna Cow Ghee,{' '}
+                    <span className="gold-gradient-text italic">slow-churned</span> the old way.
                   </>
                 )}
               </h1>
 
-              {/* Subtitle */}
-              <p className="mt-4 max-w-[50ch] text-base leading-relaxed text-[#635647] sm:mt-6 sm:text-lg">
+              <p className="mt-7 max-w-[46ch] text-base leading-[1.8] text-[var(--c-muted)] sm:text-lg">
                 {bn
-                  ? 'কোনো ক্রিম নয়—সকালের সংগৃহীত দেশী গরুর সম্পূর্ণ দুধে পাতা দই কাঠের বিলোনায় মন্থন করে মাটির মৃদু আঁচে তৈরি খাঁটি সোনালী দানাদার গাওয়া ঘি।'
-                  : 'Cultured exclusively from whole pasture cow milk curd, slow-churned at dawn with a wooden bilona, and preserved warm in sealed apothecary glass.'}
+                  ? 'সকালের সংগৃহীত দেশী গরুর সম্পূর্ণ দুধ থেকে পাতা দই, কাঠের বিলোনায় মন্থন আর মাটির মৃদু আঁচ—শেষে বয়ামে সিল করা খাঁটি দানাদার গাওয়া ঘি।'
+                  : 'Whole-milk curd from Pabna pastures, hand-churned in a wooden bilona and sealed warm in an airtight jar. One product, made honestly.'}
               </p>
 
-              {/* Three Pillars Micro-Chips */}
-              <div className="mt-5 flex flex-wrap gap-2 sm:gap-2.5 text-xs text-[#1E1710]">
-                <span className="inline-flex items-center gap-1.5 rounded-md border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] px-3 py-1 font-medium">
-                  <Sparkles className="h-3 w-3 text-[#B47B2B]" />
-                  {bn ? '১০০% দই মন্থিত বাটার' : 'Whole Curd Butterfat'}
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-md border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] px-3 py-1 font-medium">
-                  <Leaf className="h-3 w-3 text-[#2D6A4F]" />
-                  {bn ? 'কোনো রাসায়নিক বা প্রিজারভেটিভ নেই' : 'Zero Additives'}
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-md border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] px-3 py-1 font-medium">
-                  <ShieldCheck className="h-3 w-3 text-[#B47B2B]" />
-                  {bn ? 'কাঁচের এয়ারটাইট বয়াম' : 'Apothecary Glass Jar'}
-                </span>
-              </div>
-
-              {/* Primary Call to Action */}
-              <div className="mt-7 flex flex-col gap-3 sm:mt-9 sm:flex-row sm:items-center sm:gap-4">
-                <a
-                  href="#order"
-                  className="group relative inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#B47B2B] via-[#C98A2C] to-[#96621B] px-8 py-3.5 text-sm font-semibold text-[#FFFDF9] shadow-[0_10px_25px_-5px_rgba(180,123,43,0.35)] transition-all hover:scale-[1.02] hover:shadow-[0_15px_30px_-5px_rgba(180,123,43,0.45)] sm:w-auto whitespace-nowrap"
-                >
+              <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center">
+                <a href="#order" className="btn-gold w-full sm:w-auto">
                   <ShoppingBag className="h-4 w-4" />
-                  <span>{bn ? 'এখনই অর্ডার করুন' : 'Order Fresh Batch'}</span>
-                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                  <span>{bn ? 'এখনই অর্ডার করুন' : 'Order the Jar'}</span>
+                  <ArrowRight className="h-4 w-4" />
                 </a>
-
-                <a
-                  href="#craft"
-                  className="inline-flex min-h-[50px] w-full items-center justify-center rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-7 py-3.5 text-sm font-semibold text-[#1E1710] hover:bg-[#F2ECE1] transition-all sm:w-auto whitespace-nowrap"
-                >
-                  {bn ? 'তৈরির চার ধাপ দেখুন' : 'Explore The Craft'}
+                <a href="#craft" className="btn-ghost w-full sm:w-auto">
+                  {bn ? 'তৈরির গল্প' : 'See the Craft'}
                 </a>
               </div>
 
-              {/* Micro Trust Strip Beneath Hero CTA — truthful craft facts only (D9) */}
-              <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-[rgba(30,23,16,0.08)] pt-4 text-xs text-[#635647]">
-                <span className="flex items-center gap-1.5">
-                  <Truck className="h-3.5 w-3.5 text-[#B47B2B]" />
-                  {bn ? 'সারাদেশে ক্যাশ অন ডেলিভারি' : 'Cash on Delivery Nationwide'}
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <Award className="h-3.5 w-3.5 text-[#B47B2B]" />
-                  {bn ? 'পাবনার একক উৎস' : 'Single-Origin Pabna Sourcing'}
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <ShieldCheck className="h-3.5 w-3.5 text-[#B47B2B]" />
-                  {bn ? 'কাঁচের এয়ারটাইট বয়াম' : 'Sealed Apothecary Glass'}
-                </span>
-              </div>
+              {orderingReady && minConfirmedPrice !== null && (
+                <p className="mt-8 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-[var(--c-muted)]">
+                  <span className="uppercase tracking-[0.2em] text-[11px]">
+                    {bn ? 'শুরু' : 'From'}
+                  </span>
+                  <span className="font-display whitespace-nowrap text-2xl text-[var(--c-gold-text)] tabular-nums">
+                    {formatBdt(minConfirmedPrice)}
+                  </span>
+                  <span className="hidden h-px w-8 bg-[rgb(var(--c-tint)/0.3)] sm:inline-block" />
+                  <span>{bn ? 'সারাদেশে ক্যাশ অন ডেলিভারি' : 'Cash on delivery nationwide'}</span>
+                </p>
+              )}
             </div>
 
-            {/* Right Jar Showcase Stage with Interactive 3D Perspective */}
             <div
               ref={heroStageRef}
-              className="hero-perspective flex justify-center lg:col-span-5"
+              className="hero-perspective relative flex justify-center lg:col-span-6 lg:justify-end"
             >
-              <div
-                ref={tiltWrapRef}
-                className="jar-tilt-wrap relative w-full max-w-[460px]"
-              >
-                {/* Backlight Ambient Glow */}
+              <div ref={tiltWrapRef} className="jar-tilt-wrap relative w-full max-w-[500px]">
+                {/* Offset gold hairline frame */}
                 <div
                   aria-hidden="true"
-                  className="pointer-events-none absolute -inset-4 rounded-3xl bg-gradient-to-tr from-[#D4AF37]/20 via-[#B47B2B]/15 to-transparent blur-2xl"
+                  className="absolute inset-0 translate-x-4 translate-y-4 rounded-[2rem] border border-[#D4AF37]/45 sm:translate-x-5 sm:translate-y-5"
                 />
-
-                <div className="relative aspect-[4/3] w-full overflow-hidden rounded-3xl border border-[rgba(180,123,43,0.25)] bg-[#F2ECE1] shadow-[0_30px_70px_-15px_rgba(30,23,16,0.18)] sm:aspect-[3/4]">
+                <div className="relative aspect-[4/5] w-full overflow-hidden rounded-[2rem] border border-[rgb(var(--c-tint)/0.14)] bg-[var(--c-surface)] shadow-[0_50px_90px_-30px_rgb(var(--c-shadow))]">
                   <ResilientImage
                     src={IMAGES.heroFront}
                     alt={
                       bn
-                        ? 'পাবনার খাঁটি দানাদার দেশী গরুর ঘিয়ের কাঁচের জার'
-                        : 'Sealed glass apothecary jar of golden granular Pabna Deshi Cow Ghee'
+                        ? 'পাবনার খাঁটি দানাদার দেশী গরুর ঘিয়ের জার'
+                        : 'Sealed jar of golden granular Pabna Deshi Cow Ghee'
                     }
                     fallbackTitle="Deshi Gee"
+                    priority
                     className="h-full w-full object-cover"
                   />
 
-                  {/* Floating Batch Wax Stamp Badge — shown ONLY when a real batch record exists */}
                   {activeBatch?.batchCode && (
-                    <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 rounded-full border border-[#D4AF37]/60 bg-[#1A120B]/90 px-3 py-1 font-mono text-[11px] font-semibold text-[#F5D692] backdrop-blur-md shadow-md">
+                    <div className="absolute top-5 right-5 z-10 flex items-center gap-2 rounded-full border border-[#D4AF37]/60 bg-[#1A120B]/90 px-3.5 py-1.5 font-mono text-[11px] font-semibold text-[#F5D692] backdrop-blur-md shadow-md">
                       <span className="h-2 w-2 rounded-full bg-[#2D6A4F]" />
                       <span>{activeBatch.batchCode}</span>
                     </div>
                   )}
 
-                  {/* Gradient Overlay at Bottom */}
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#140E08]/90 via-[#140E08]/40 to-transparent px-5 pb-5 pt-16 text-[#FAF7F2] sm:px-6 sm:pb-6">
-                    <p className="font-mono text-[10px] uppercase tracking-widest text-[#E5B25D]">
-                      {bn ? 'পাবনা গাওয়া ঘি' : 'Pabna Artisanal Ghee'}
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#140E08]/92 via-[#140E08]/45 to-transparent px-6 pb-6 pt-24 text-[#FAF7F2]">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-[#E5B25D]">
+                      {bn ? 'পাবনা গাওয়া ঘি' : 'Pabna Artisanal Ghee'}
                     </p>
-                    <div className="mt-1 flex flex-wrap items-baseline justify-between gap-2">
-                      <p className="font-display text-lg font-semibold sm:text-xl">
-                        {bn ? settings.productNameBn : settings.productNameEn}
-                      </p>
-                      {orderingReady && minConfirmedPrice !== null && maxConfirmedPrice !== null && (
-                        <p className="font-mono text-sm font-semibold tabular-nums text-[#F5D692]">
-                          {minConfirmedPrice === maxConfirmedPrice
-                            ? formatBdt(minConfirmedPrice)
-                            : `${formatBdt(minConfirmedPrice)} – ${formatBdt(maxConfirmedPrice)}`}
-                        </p>
-                      )}
-                    </div>
+                    <p className="font-display mt-1.5 text-xl font-medium sm:text-2xl">
+                      {bn ? settings.productNameBn : settings.productNameEn}
+                    </p>
                   </div>
                 </div>
               </div>
             </div>
+          </div>
+
+          <a
+            href="#order"
+            aria-label={bn ? 'নিচে স্ক্রল করুন' : 'Scroll down'}
+            className="scroll-cue absolute bottom-6 left-1/2 hidden -translate-x-1/2 flex-col items-center gap-2 text-[10px] uppercase tracking-[0.3em] text-[var(--c-subtle)] lg:flex"
+          >
+            <span>{bn ? 'স্ক্রল' : 'Scroll'}</span>
+            <span className="h-8 w-px bg-gradient-to-b from-[var(--c-gold-text)] to-transparent" />
+          </a>
+        </section>
+
+        {/* PROMISE MARQUEE */}
+        <section
+          aria-label={bn ? 'আমাদের প্রতিশ্রুতি' : 'Our promises'}
+          className="overflow-hidden border-y border-[rgb(var(--c-tint)/0.10)] bg-[var(--c-band)] py-5"
+        >
+          <div className="marquee">
+            {[0, 1].map((dup) => (
+              <ul
+                key={dup}
+                aria-hidden={dup === 1 ? 'true' : undefined}
+                className="flex shrink-0 items-center"
+              >
+                {(bn
+                  ? [
+                      'পাবনার একক উৎস',
+                      'কাঠের বিলোনায় মন্থন',
+                      'পূর্ণ দইয়ের বাটারফ্যাট',
+                      'কোনো সংযোজন নেই',
+                      'এয়ারটাইট সিল করা বয়াম',
+                      'সারাদেশে ক্যাশ অন ডেলিভারি',
+                    ]
+                  : [
+                      'Single-Origin Pabna',
+                      'Wooden Bilona Churn',
+                      'Whole Curd Butterfat',
+                      'Zero Additives',
+                      'Airtight Sealed Jar',
+                      'Cash on Delivery Nationwide',
+                    ]
+                ).map((item) => (
+                  <li
+                    key={`${dup}-${item}`}
+                    className="flex items-center gap-8 pr-8 font-display text-lg italic text-[var(--c-muted)] sm:text-xl"
+                  >
+                    <span>{item}</span>
+                    <span aria-hidden="true" className="text-[var(--c-gold-text)]">
+                      ✦
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ))}
           </div>
         </section>
 
         {/* SECTION 02: SINGLE-PRODUCT PURCHASE MODULE & WEIGHT CONFIGURATOR */}
         <section
           id="order"
-          className="scroll-mt-16 sm:scroll-mt-20 mx-auto max-w-[1320px] px-4 py-14 sm:px-8 sm:py-20 lg:py-24"
+          className="scroll-mt-16 sm:scroll-mt-20 mx-auto max-w-[1320px] px-5 py-20 sm:px-8 lg:py-28"
         >
-          {/* Section Subtitle */}
-          <div className="mb-10 text-center max-w-2xl mx-auto">
-            <span className="font-mono text-xs font-semibold uppercase tracking-widest text-[#8A5A17]">
+          <div className="mx-auto mb-14 max-w-2xl text-center">
+            <span className="eyebrow is-centered">
               {bn ? 'খাঁটি একক ঐতিহ্য' : 'Authentic Single Product'}
             </span>
-            <h2 className="font-display mt-2 text-3xl font-semibold tracking-tight text-[#1E1710] sm:text-4xl">
-              {bn ? 'পছন্দের বয়াম ও পরিমাণ বেছে নিন' : 'Select Packaging Size & Reserve'}
+            <h2 className="section-title mt-5">
+              {bn ? 'পছন্দের বয়াম ও পরিমাণ বেছে নিন' : 'Choose your jar'}
             </h2>
-            <p className="mt-2 text-sm text-[#635647]">
+            <p className="mt-4 text-sm leading-relaxed text-[var(--c-muted)] sm:text-base">
               {bn
-                ? 'কাঁচের এয়ারটাইট বয়ামে সংরক্ষিত পাবনার খাঁটি কাঠের বিলোনা ঘি'
-                : 'Sealed warm in apothecary glass jars for maximum aroma preservation'}
+                ? 'এয়ারটাইট বয়ামে সংরক্ষিত পাবনার খাঁটি কাঠের বিলোনা ঘি'
+                : 'Pabna bilona ghee, sealed warm in an airtight jar to keep every note of aroma.'}
             </p>
           </div>
 
-          <div className="grid grid-cols-1 items-stretch gap-10 lg:grid-cols-12 lg:gap-14">
-            {/* Left Gallery & Proportion Preview */}
-            <div className="flex flex-col gap-4 lg:col-span-6">
-              <div
-                ref={galleryPreviewRef}
-                className="scroll-mt-20 relative flex min-h-[340px] flex-1 flex-col justify-between overflow-hidden rounded-3xl border border-[rgba(30,23,16,0.12)] bg-[#F2ECE1] p-5 sm:min-h-[500px] shadow-[0_12px_36px_-10px_rgba(30,23,16,0.08)]"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <span className="block font-mono text-[11px] uppercase tracking-wider text-[#635647] tabular-nums sm:text-xs">
-                      {bn ? selectedVariantMeta.labelBn : selectedVariantMeta.labelEn} ·{' '}
-                      {bn
-                        ? selectedVariantMeta.jarHeightNoteBn
-                        : selectedVariantMeta.jarHeightNoteEn}
-                    </span>
-                    <span className="mt-0.5 block text-xs font-semibold text-[#8A5A17]">
-                      {showBlueprint
-                        ? bn
-                          ? 'সিল ডায়াগ্রাম (৩ডি ওয়্যারফ্রেম)'
-                          : 'Airtight Brass Seal Diagram'
-                        : bn
-                          ? activeGallery.labelBn
-                          : activeGallery.labelEn}
-                    </span>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowBlueprint((v) => !v)}
-                    className="inline-flex min-h-[44px] cursor-pointer items-center gap-1.5 rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-3.5 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#EAE1D2] hover:border-[#B47B2B] transition-colors whitespace-nowrap shrink-0 shadow-xs"
-                  >
+          <div className="grid grid-cols-1 items-start gap-12 lg:grid-cols-12 lg:gap-16">
+            {/* Gallery */}
+            <div className="lg:sticky lg:top-28 lg:col-span-6">
+              <div ref={galleryPreviewRef} className="scroll-mt-24">
+                <div className="relative">
+                  <div
+                    aria-hidden="true"
+                    className="absolute inset-0 -translate-x-3 translate-y-3 rounded-[2rem] border border-[#D4AF37]/35 sm:-translate-x-4 sm:translate-y-4"
+                  />
+                  <div className="relative aspect-[5/6] w-full overflow-hidden rounded-[2rem] border border-[rgb(var(--c-tint)/0.14)] bg-[var(--c-surface)] shadow-[0_40px_80px_-35px_rgb(var(--c-shadow))] sm:aspect-[4/4.4]">
                     {showBlueprint ? (
-                      <>
-                        <Camera className="h-3.5 w-3.5 text-[#8A5A17]" />
-                        <span>{bn ? 'জারের আসল ছবি' : 'Jar Photograph'}</span>
-                      </>
+                      <div className="flex h-full w-full items-center justify-center p-6">
+                        <canvas
+                          ref={specsCanvasRef}
+                          aria-label="Jar brass aroma seal wireframe"
+                          className="h-full w-full"
+                        />
+                      </div>
                     ) : (
-                      <>
-                        <Box className="h-3.5 w-3.5 text-[#8A5A17]" />
-                        <span>{bn ? 'সিল ডায়াগ্রাম (3D)' : 'Brass Seal (3D)'}</span>
-                      </>
+                      <div
+                        className="h-full w-full transition-transform duration-500 ease-out"
+                        style={{ transform: `scale(${Math.max(1, previewScale)})` }}
+                      >
+                        <ResilientImage
+                          key={activeGallery.src}
+                          src={activeGallery.src}
+                          alt={bn ? activeGallery.altBn : activeGallery.altEn}
+                          fallbackTitle="Deshi Gee"
+                          className="h-full w-full object-cover"
+                        />
+                      </div>
                     )}
-                  </button>
+
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-[#140E08]/85 via-[#140E08]/30 to-transparent px-5 pb-5 pt-20 text-[#FAF7F2]">
+                      <div className="min-w-0">
+                        <p className="font-mono text-[10px] uppercase tracking-[0.26em] text-[#E5B25D]">
+                          {bn ? selectedVariantMeta.labelBn : selectedVariantMeta.labelEn}
+                        </p>
+                        <p className="mt-1 truncate text-sm">
+                          {showBlueprint
+                            ? bn
+                              ? 'সিল ডায়াগ্রাম (৩ডি ওয়্যারফ্রেম)'
+                              : 'Airtight brass seal diagram'
+                            : bn
+                              ? selectedVariantMeta.jarHeightNoteBn
+                              : selectedVariantMeta.jarHeightNoteEn}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowBlueprint((v) => !v)}
+                        className="pointer-events-auto inline-flex min-h-[40px] shrink-0 items-center gap-1.5 rounded-full border border-white/30 bg-black/35 px-3.5 text-[11px] font-medium text-white backdrop-blur-md transition-colors hover:bg-black/55"
+                      >
+                        {showBlueprint ? (
+                          <>
+                            <Camera className="h-3.5 w-3.5" />
+                            <span>{bn ? 'আসল ছবি' : 'Photo'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Box className="h-3.5 w-3.5" />
+                            <span>{bn ? 'সিল ডায়াগ্রাম' : 'Seal 3D'}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="my-4 flex flex-1 items-center justify-center overflow-hidden p-4 sm:p-6">
-                  {showBlueprint ? (
-                    <div className="h-64 w-full sm:h-80">
-                      <canvas
-                        ref={specsCanvasRef}
-                        aria-label="Apothecary jar brass aroma seal wireframe"
-                        className="h-full w-full"
-                      />
-                    </div>
-                  ) : (
-                    <div
-                      className="aspect-[4/3] w-full max-w-[420px] overflow-hidden rounded-2xl border border-[rgba(30,23,16,0.10)] bg-[#FAF7F2] shadow-sm transition-transform duration-300 ease-out"
-                      style={{ transform: `scale(${previewScale})` }}
-                    >
-                      <ResilientImage
-                        key={activeGallery.src}
-                        src={activeGallery.src}
-                        alt={bn ? activeGallery.altBn : activeGallery.altEn}
-                        fallbackTitle="Deshi Gee"
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <p className="text-xs text-[#635647]">
-                  {showBlueprint
-                    ? bn
-                      ? 'ডাবল-গ্যাস্কেট পিতলের ঢাকনা ও মোটা কাঁচের বয়াম আর্দ্রতা থেকে সুরক্ষা দেয়।'
-                      : 'Heavy apothecary clear glass with airtight brass collar protects natural aroma.'
-                    : bn
-                      ? activeGallery.altBn
-                      : activeGallery.altEn}
-                </p>
-              </div>
-
-              {/* 4-Angle Thumbnail Gallery */}
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {PRODUCT_GALLERY.map((item, idx) => {
-                  const active = idx === galleryIdx && !showBlueprint;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      aria-pressed={active}
-                      onClick={() => {
-                        setShowBlueprint(false);
-                        setGalleryIdx(idx);
-                      }}
-                      className={`group cursor-pointer touch-manipulation select-none overflow-hidden rounded-xl border text-left transition-all ${
-                        active
-                          ? 'border-[#B47B2B] ring-2 ring-[#B47B2B]/40 shadow-md opacity-100'
-                          : 'border-[rgba(30,23,16,0.12)] opacity-80 hover:border-[rgba(30,23,16,0.3)] hover:opacity-100'
-                      }`}
-                    >
-                      <div className="aspect-[4/3] w-full bg-[#EAE1D2]">
+                <div className="mt-8 grid grid-cols-4 gap-3 sm:gap-4">
+                  {PRODUCT_GALLERY.map((item, idx) => {
+                    const active = idx === galleryIdx && !showBlueprint;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        aria-pressed={active}
+                        aria-label={bn ? item.labelBn : item.labelEn}
+                        onClick={() => {
+                          setShowBlueprint(false);
+                          setGalleryIdx(idx);
+                        }}
+                        className={`group aspect-square cursor-pointer touch-manipulation select-none overflow-hidden rounded-2xl border-2 transition-all ${
+                          active
+                            ? 'border-[#B47B2B] shadow-md'
+                            : 'border-transparent opacity-70 hover:opacity-100'
+                        }`}
+                      >
                         <ResilientImage
                           src={item.src}
                           alt={bn ? item.altBn : item.altEn}
-                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"
                         />
-                      </div>
-                      <span
-                        className={`flex items-center justify-between gap-1 px-2.5 py-2 text-xs font-medium transition-colors ${
-                          active
-                            ? 'bg-[#B47B2B] text-[#FFFDF9]'
-                            : 'bg-[#FAF7F2] text-[#1E1710]'
-                        }`}
-                      >
-                        <span className="truncate">{bn ? item.labelBn : item.labelEn}</span>
-                        {active && <Check className="h-3 w-3 shrink-0" />}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Right Contiguous Purchase Panel */}
-            <div className="flex flex-col justify-center lg:col-span-6">
-              <div className="flex items-center gap-2">
-                {!orderingReady ? (
-                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-amber-900/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-amber-900">
-                    <span className="h-1.5 w-1.5 rounded-full bg-amber-700" />
-                    {bn ? 'অনলাইন অর্ডার সাময়িকভাবে অনুপলব্ধ' : 'Ordering is temporarily unavailable'}
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-[#2D6A4F]/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-[#2D6A4F]">
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#2D6A4F]" />
-                    {isOutOfStock
-                      ? bn
-                        ? 'স্টক সমাপ্ত'
-                        : 'Out of Stock'
-                      : bn
-                        ? `স্টকে আছে (${activeStock}টি জার)`
-                        : `In Stock (${activeStock} jars)`}
-                  </span>
-                )}
-              </div>
-
-              <div className="mt-2.5 flex flex-wrap items-baseline justify-between gap-3">
-                <h2 className="font-display text-2xl font-bold tracking-tight text-[#1E1710] sm:text-4xl">
-                  {bn ? settings.productNameBn : settings.productNameEn}
-                </h2>
-                {orderingReady && activePrice > 0 && (
-                  <span className="font-mono text-2xl font-bold tabular-nums text-[#8A5A17] sm:text-3xl">
-                    {formatBdt(activePrice)}
-                  </span>
-                )}
-              </div>
-
-              <p className="mt-3 text-sm leading-relaxed text-[#635647] sm:text-base">
-                {bn
-                  ? 'সকালের সংগৃহীত দেশী গরুর দুধ দিয়ে মাটির হাঁড়িতে পাতা দই, কাঠের বিলোনার মন্থন এবং মৃদু আঁচে তৈরি সোনালী দানাদার ঘি।'
-                  : 'Prepared in small batches from cultured Pabna cow milk curd, wood-churned with a traditional bilona, and slow-clarified.'}
-              </p>
-
-              {/* Weight Selector Cards */}
-              <div className="mt-6 sm:mt-7">
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <span className="font-medium uppercase tracking-wider text-[#635647]">
-                    {bn ? 'ওজন নির্বাচন করুন' : 'Select Packaging Weight'}
-                  </span>
-                  <span className="text-[11px] text-[#8A5A17]">
-                    {bn ? 'কাঁচের এয়ারটাইট বয়াম' : 'Heavy Glass Sealed'}
-                  </span>
-                </div>
-
-                <div className="mt-3.5 grid grid-cols-3 gap-2 sm:gap-3">
-                  {WEIGHT_VARIANTS.map((v) => {
-                    const active = v.key === selectedWeight;
-                    const price = getPriceForWeight(v.key);
-                    const stock = getStockForWeight(v.key);
-                    return (
-                      <button
-                        key={v.key}
-                        type="button"
-                        onClick={() => setSelectedWeight(v.key)}
-                        className={`relative flex min-h-[76px] flex-col items-start justify-center rounded-2xl border px-2.5 pb-3 pt-4 text-left transition-all sm:p-3.5 ${
-                          active
-                            ? 'border-[#B47B2B] bg-[#FFFDF9] ring-2 ring-[#B47B2B]/35 shadow-sm'
-                            : 'border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] text-[#635647] hover:border-[rgba(30,23,16,0.28)] hover:text-[#1E1710]'
-                        }`}
-                      >
-                        <span className="text-xs font-bold text-[#1E1710] tracking-tight sm:text-sm">
-                          {bn ? v.labelBn : v.labelEn}
-                        </span>
-                        {orderingReady && price > 0 && (
-                          <span className="mt-1 font-mono text-xs font-semibold tabular-nums text-[#8A5A17]">
-                            {stock <= 0
-                              ? bn
-                                ? 'স্টক শেষ'
-                                : 'Out'
-                              : formatBdt(price)}
-                          </span>
-                        )}
                       </button>
                     );
                   })}
                 </div>
               </div>
+            </div>
 
-              {/* Quantity Stepper + Add to Bag + Buy Now OR Ordering Unavailable Notice (D7) */}
-              {!orderingReady ? (
-                <div
-                  role="status"
-                  data-testid="storefront-ordering-unavailable"
-                  className="mt-6 rounded-2xl border border-amber-300/60 bg-amber-50/70 p-4 text-sm text-[#1E1710]"
-                >
-                  <p className="font-semibold">
-                    {bn ? 'অনলাইন অর্ডার সাময়িকভাবে অনুপলব্ধ' : 'Ordering is temporarily unavailable'}
-                  </p>
-                  <p className="mt-1 text-xs leading-relaxed text-[#635647]">
-                    {bn
-                      ? 'মূল্য, ডেলিভারি চার্জ ও অর্ডার সিস্টেম চূড়ান্ত নিশ্চিত হলে সরাসরি অনলাইন অর্ডার চালু হবে। আপডেট জানতে কলব্যাক অনুরোধ করুন।'
-                      : 'Online checkout is temporarily unavailable while store pricing and ordering services are being finalized. Please check back shortly or request a callback.'}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={openCallbackRequest}
-                    className="mt-3 inline-flex min-h-[44px] items-center justify-center rounded-xl bg-[#1A120B] px-5 py-2 text-xs font-semibold text-[#FAF7F2] hover:bg-[#332415]"
-                  >
-                    {bn ? 'কলব্যাক অনুরোধ করুন' : 'Request a Callback'}
-                  </button>
-                </div>
-              ) : (
-                <div className="mt-6 grid grid-cols-[auto_1fr] gap-2.5 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
-                  <div className="inline-flex min-h-[50px] items-center rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] shadow-xs">
-                    <button
-                      type="button"
-                      disabled={isOutOfStock || purchaseQty <= 1}
-                      onClick={() => setPurchaseQty((q) => Math.max(1, q - 1))}
-                      aria-label="Decrease quantity"
-                      className="flex h-12 w-11 items-center justify-center text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <Minus className="h-4 w-4" />
-                    </button>
-                    <span className="w-10 text-center font-mono text-base font-bold tabular-nums text-[#1E1710]">
-                      {bn ? toBengaliDigits(purchaseQty) : purchaseQty}
+            {/* Purchase panel */}
+            <div className="lg:col-span-6">
+              <div className="luxury-card rounded-[2rem] p-6 sm:p-9">
+                <div className="flex items-center justify-between gap-3">
+                  {!orderingReady ? (
+                    <span className="inline-flex items-center gap-2 rounded-full bg-amber-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-amber-600">
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                      {bn ? 'অনলাইন অর্ডার সাময়িকভাবে অনুপলব্ধ' : 'Ordering is temporarily unavailable'}
                     </span>
-                    <button
-                      type="button"
-                      disabled={isOutOfStock || purchaseQty >= activeStock}
-                      onClick={() =>
-                        setPurchaseQty((q) =>
-                          activeStock > 0 ? Math.min(activeStock, q + 1) : 1
-                        )
-                      }
-                      aria-label="Increase quantity"
-                      className="flex h-12 w-11 items-center justify-center text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <Plus className="h-4 w-4" />
+                  ) : (
+                    <span className="inline-flex items-center gap-2 rounded-full bg-[#2D6A4F]/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--c-green-text)]">
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#2D6A4F]" />
+                      {isOutOfStock
+                        ? bn
+                          ? 'স্টক সমাপ্ত'
+                          : 'Out of stock'
+                        : bn
+                          ? `স্টকে আছে (${activeStock}টি জার)`
+                          : `In stock · ${activeStock} jars`}
+                    </span>
+                  )}
+                </div>
+
+                <h2 className="section-title mt-6 !text-[clamp(1.8rem,1.3rem+1.8vw,2.6rem)]">
+                  {bn ? settings.productNameBn : settings.productNameEn}
+                </h2>
+
+                {orderingReady && activePrice > 0 && (
+                  <p className="mt-4 flex items-baseline gap-3">
+                    <span className="font-display text-4xl tabular-nums text-[var(--c-gold-text)] sm:text-5xl">
+                      {formatBdt(activePrice)}
+                    </span>
+                    <span className="text-xs uppercase tracking-[0.2em] text-[var(--c-subtle)]">
+                      / {bn ? selectedVariantMeta.labelBn : selectedVariantMeta.labelEn}
+                    </span>
+                  </p>
+                )}
+
+                <p className="mt-5 text-sm leading-[1.85] text-[var(--c-muted)] sm:text-base">
+                  {bn
+                    ? 'সকালের সংগৃহীত দেশী গরুর দুধ দিয়ে মাটির হাঁড়িতে পাতা দই, কাঠের বিলোনার মন্থন এবং মৃদু আঁচে তৈরি সোনালী দানাদার ঘি।'
+                    : 'Prepared in small batches from cultured Pabna cow milk curd, wood-churned with a traditional bilona, and slow-clarified.'}
+                </p>
+
+                <div className="gold-rule my-8" />
+
+                {/* Weight selector */}
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--c-subtle)]">
+                    {bn ? 'ওজন নির্বাচন করুন' : 'Select size'}
+                  </p>
+
+                  <div className="mt-4 grid grid-cols-3 gap-3">
+                    {WEIGHT_VARIANTS.map((v) => {
+                      const active = v.key === selectedWeight;
+                      const price = getPriceForWeight(v.key);
+                      const stock = getStockForWeight(v.key);
+                      return (
+                        <button
+                          key={v.key}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => setSelectedWeight(v.key)}
+                          className={`relative flex min-h-[96px] flex-col items-center justify-center gap-1 rounded-2xl border px-2 py-4 text-center transition-all ${
+                            active
+                              ? 'border-[#B47B2B] bg-[#B47B2B]/10 shadow-[0_10px_30px_-15px_rgba(180,123,43,0.7)]'
+                              : 'border-[rgb(var(--c-tint)/0.16)] hover:border-[rgb(var(--c-tint)/0.4)]'
+                          }`}
+                        >
+                          {active && (
+                            <span className="absolute right-2 top-2 flex h-4 w-4 items-center justify-center rounded-full bg-[#B47B2B] text-[var(--c-on-gold)]">
+                              <Check className="h-2.5 w-2.5" />
+                            </span>
+                          )}
+                          <span className="font-display text-xl font-medium text-[var(--c-ink)]">
+                            {bn ? v.labelBn : v.labelEn}
+                          </span>
+                          {orderingReady && price > 0 && (
+                            <span className="font-mono text-xs tabular-nums text-[var(--c-gold-text)]">
+                              {stock <= 0 ? (bn ? 'স্টক শেষ' : 'Out') : formatBdt(price)}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Quantity + actions */}
+                {!orderingReady ? (
+                  <div
+                    role="status"
+                    data-testid="storefront-ordering-unavailable"
+                    className="mt-8 rounded-2xl border border-amber-400/40 bg-amber-500/10 p-5 text-sm text-[var(--c-ink)]"
+                  >
+                    <p className="font-semibold">
+                      {bn ? 'অনলাইন অর্ডার সাময়িকভাবে অনুপলব্ধ' : 'Ordering is temporarily unavailable'}
+                    </p>
+                    <p className="mt-1.5 text-xs leading-relaxed text-[var(--c-muted)]">
+                      {bn
+                        ? 'মূল্য, ডেলিভারি চার্জ ও অর্ডার সিস্টেম চূড়ান্ত নিশ্চিত হলে সরাসরি অনলাইন অর্ডার চালু হবে। আপডেট জানতে কলব্যাক অনুরোধ করুন।'
+                        : 'Online checkout is temporarily unavailable while store pricing and ordering services are being finalized. Please check back shortly or request a callback.'}
+                    </p>
+                    <button type="button" onClick={openCallbackRequest} className="btn-gold mt-4 !min-h-[46px] !px-6">
+                      {bn ? 'কলব্যাক অনুরোধ করুন' : 'Request a Callback'}
                     </button>
                   </div>
+                ) : (
+                  <div className="mt-8 space-y-3">
+                    <div className="flex items-stretch gap-3">
+                      <div className="inline-flex min-h-[52px] shrink-0 items-center rounded-full border border-[rgb(var(--c-tint)/0.22)]">
+                        <button
+                          type="button"
+                          disabled={isOutOfStock || purchaseQty <= 1}
+                          onClick={() => setPurchaseQty((q) => Math.max(1, q - 1))}
+                          aria-label="Decrease quantity"
+                          className="flex h-12 w-12 items-center justify-center rounded-full text-[var(--c-ink)] transition-colors hover:bg-[rgb(var(--c-tint)/0.08)] disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                          <Minus className="h-4 w-4" />
+                        </button>
+                        <span className="w-8 text-center font-mono text-base font-bold tabular-nums text-[var(--c-ink)]">
+                          {bn ? toBengaliDigits(purchaseQty) : purchaseQty}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={isOutOfStock || purchaseQty >= activeStock}
+                          onClick={() =>
+                            setPurchaseQty((q) => (activeStock > 0 ? Math.min(activeStock, q + 1) : 1))
+                          }
+                          aria-label="Increase quantity"
+                          className="flex h-12 w-12 items-center justify-center rounded-full text-[var(--c-ink)] transition-colors hover:bg-[rgb(var(--c-tint)/0.08)] disabled:cursor-not-allowed disabled:opacity-30"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      </div>
 
-                  <button
-                    type="button"
-                    disabled={isOutOfStock}
-                    onClick={() => handleAddToCart(false)}
-                    className="inline-flex min-h-[50px] flex-1 items-center justify-center gap-2 rounded-xl border border-[#1E1710] bg-[#FAF7F2] px-5 py-3 text-sm font-semibold text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-45 transition-colors whitespace-nowrap shadow-xs"
-                  >
-                    {justAdded ? (
-                      <>
-                        <Check className="h-4 w-4 text-[#8A5A17]" />
-                        <span>{bn ? 'ব্যাগে যোগ হয়েছে ✓' : 'Added to Bag ✓'}</span>
-                      </>
-                    ) : (
-                      <>
-                        <ShoppingBag className="h-4 w-4" />
-                        <span>{bn ? 'ব্যাগে যোগ করুন' : 'Add to Bag'}</span>
-                      </>
-                    )}
-                  </button>
+                      <button
+                        type="button"
+                        disabled={isOutOfStock}
+                        onClick={() => handleAddToCart(false)}
+                        className="btn-ghost min-w-0 flex-1 disabled:opacity-45"
+                      >
+                        {justAdded ? (
+                          <>
+                            <Check className="h-4 w-4 text-[var(--c-gold-text)]" />
+                            <span>{bn ? 'যোগ হয়েছে' : 'Added'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <ShoppingBag className="h-4 w-4" />
+                            <span>{bn ? 'ব্যাগে যোগ করুন' : 'Add to Bag'}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
 
-                  <button
-                    type="button"
-                    disabled={isOutOfStock}
-                    onClick={() => handleAddToCart(true)}
-                    className="col-span-2 inline-flex min-h-[50px] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#B47B2B] to-[#96621B] px-6 py-3 text-sm font-semibold text-[#FFFDF9] hover:shadow-[0_8px_20px_rgba(180,123,43,0.35)] disabled:opacity-45 sm:col-span-1 sm:flex-1 transition-all whitespace-nowrap"
-                  >
-                    <span>{bn ? 'অর্ডার করুন · ' : 'Buy Now · '}</span>
-                    <span className="font-mono tabular-nums font-bold">
-                      {formatBdt(activePrice * purchaseQty)}
-                    </span>
-                  </button>
-                </div>
-              )}
-
-              {/* Delivery ETA Reassurance Box — shown ONLY when owner confirmed ETAs */}
-              {hasConfirmedEtas && (
-                <div className="mt-4 flex items-center gap-2 rounded-xl border border-[rgba(30,23,16,0.08)] bg-[#F4EFE6]/60 px-4 py-2.5 text-xs text-[#635647]">
-                  <Truck className="h-4 w-4 text-[#B47B2B] shrink-0" />
-                  <span>
-                    {bn
-                      ? `${settings.estimatedDhakaDays ? `ঢাকার ভেতরে ${settings.estimatedDhakaDays}` : ''}${settings.estimatedDhakaDays && settings.estimatedOutsideDays ? ' ও ' : ''}${settings.estimatedOutsideDays ? `বাইরে ${settings.estimatedOutsideDays}` : ''} সময়ে ক্যাশ অন ডেলিভারি।`
-                      : `${settings.estimatedDhakaDays ? `Inside Dhaka: ${settings.estimatedDhakaDays}` : ''}${settings.estimatedDhakaDays && settings.estimatedOutsideDays ? ' · ' : ''}${settings.estimatedOutsideDays ? `Nationwide: ${settings.estimatedOutsideDays}` : ''}. Cash on Delivery.`}
-                  </span>
-                </div>
-              )}
-
-              {/* Product Transparency Specification Table */}
-              <dl className="mt-7 divide-y divide-[rgba(30,23,16,0.08)] border-y border-[rgba(30,23,16,0.08)] text-sm">
-                <div className="flex items-baseline justify-between gap-4 py-3">
-                  <dt className="shrink-0 text-[#635647]">
-                    {bn ? 'উপাদান' : 'Ingredients'}
-                  </dt>
-                  <dd className="text-right font-medium text-[#1E1710]">
-                    {bn
-                      ? 'গরুর দুধের মিল্কফ্যাট (কোনো বনস্পতি বা কৃত্রিম রং নয়)'
-                      : 'Clarified Cultured Cow Milkfat'}
-                  </dd>
-                </div>
-                <div className="flex items-baseline justify-between gap-4 py-3">
-                  <dt className="shrink-0 text-[#635647]">
-                    {bn ? 'সুবাস ও স্বাদ' : 'Aroma & Tasting Notes'}
-                  </dt>
-                  <dd className="text-right font-medium text-[#1E1710]">
-                    {bn
-                      ? 'হালকা ভাজা বাদাম ও মিষ্টি ক্যারামেল সুবাস'
-                      : 'Warm toasted hazelnut, caramelized butter'}
-                  </dd>
-                </div>
-                <div className="flex items-baseline justify-between gap-4 py-3">
-                  <dt className="shrink-0 text-[#635647]">
-                    {bn ? 'সংরক্ষণ নির্দেশনা' : 'Storage Guidance'}
-                  </dt>
-                  <dd className="text-right font-medium text-[#1E1710]">
-                    {bn
-                      ? 'মুখ শক্ত করে বন্ধ রেখে শুকনো ও ঠান্ডা স্থানে রাখুন'
-                      : 'Keep tightly sealed in a cool, dry pantry'}
-                  </dd>
-                </div>
-                {settings.originLocation && (
-                  <div className="flex items-baseline justify-between gap-4 py-3">
-                    <dt className="shrink-0 text-[#635647]">
-                      {bn ? 'উৎপাদন তথ্য' : 'Production Origin'}
-                    </dt>
-                    <dd className="text-right font-medium text-[#1E1710]">
-                      {settings.originLocation}
-                    </dd>
+                    <button
+                      type="button"
+                      disabled={isOutOfStock}
+                      onClick={() => handleAddToCart(true)}
+                      className="btn-gold w-full disabled:opacity-45"
+                    >
+                      <span>{bn ? 'অর্ডার করুন' : 'Buy Now'}</span>
+                      <span className="h-3 w-px bg-current opacity-40" />
+                      <span className="tabular-nums">{formatBdt(activePrice * purchaseQty)}</span>
+                    </button>
                   </div>
                 )}
-              </dl>
+
+                {hasConfirmedEtas && (
+                  <div className="mt-5 flex items-center gap-3 rounded-2xl bg-[rgb(var(--c-tint)/0.05)] px-4 py-3 text-xs text-[var(--c-muted)]">
+                    <Truck className="h-4 w-4 shrink-0 text-[var(--c-gold-text)]" />
+                    <span>
+                      {bn
+                        ? `${settings.estimatedDhakaDays ? `ঢাকার ভেতরে ${settings.estimatedDhakaDays}` : ''}${settings.estimatedDhakaDays && settings.estimatedOutsideDays ? ' ও ' : ''}${settings.estimatedOutsideDays ? `বাইরে ${settings.estimatedOutsideDays}` : ''} সময়ে ক্যাশ অন ডেলিভারি।`
+                        : `${settings.estimatedDhakaDays ? `Inside Dhaka: ${settings.estimatedDhakaDays}` : ''}${settings.estimatedDhakaDays && settings.estimatedOutsideDays ? ' · ' : ''}${settings.estimatedOutsideDays ? `Nationwide: ${settings.estimatedOutsideDays}` : ''}. Cash on Delivery.`}
+                    </span>
+                  </div>
+                )}
+
+                {/* Assurance row */}
+                <ul className="mt-8 grid grid-cols-3 gap-3 text-center">
+                  {[
+                    { Icon: Truck, en: 'Cash on Delivery', bn: 'ক্যাশ অন ডেলিভারি' },
+                    { Icon: ShieldCheck, en: 'Airtight Sealed', bn: 'এয়ারটাইট সিল' },
+                    { Icon: Leaf, en: 'Zero Additives', bn: 'কোনো সংযোজন নেই' },
+                  ].map(({ Icon, en, bn: bnLabel }) => (
+                    <li key={en} className="flex flex-col items-center gap-2">
+                      <span className="flex h-10 w-10 items-center justify-center rounded-full border border-[rgb(var(--c-tint)/0.18)] text-[var(--c-gold-text)]">
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <span className="text-[11px] font-medium leading-snug text-[var(--c-muted)]">
+                        {bn ? bnLabel : en}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+
+                {/* Specification list */}
+                <dl className="mt-8 divide-y divide-[rgb(var(--c-tint)/0.10)] border-t border-[rgb(var(--c-tint)/0.10)] text-sm">
+                  <div className="flex items-baseline justify-between gap-6 py-3.5">
+                    <dt className="shrink-0 text-[var(--c-subtle)]">{bn ? 'উপাদান' : 'Ingredients'}</dt>
+                    <dd className="text-right font-medium text-[var(--c-ink)]">
+                      {bn
+                        ? 'গরুর দুধের মিল্কফ্যাট (কোনো বনস্পতি বা কৃত্রিম রং নয়)'
+                        : 'Clarified Cultured Cow Milkfat'}
+                    </dd>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-6 py-3.5">
+                    <dt className="shrink-0 text-[var(--c-subtle)]">{bn ? 'সুবাস ও স্বাদ' : 'Tasting notes'}</dt>
+                    <dd className="text-right font-medium text-[var(--c-ink)]">
+                      {bn
+                        ? 'হালকা ভাজা বাদাম ও মিষ্টি ক্যারামেল সুবাস'
+                        : 'Warm toasted hazelnut, caramelized butter'}
+                    </dd>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-6 py-3.5">
+                    <dt className="shrink-0 text-[var(--c-subtle)]">{bn ? 'সংরক্ষণ' : 'Storage'}</dt>
+                    <dd className="text-right font-medium text-[var(--c-ink)]">
+                      {bn
+                        ? 'মুখ শক্ত করে বন্ধ রেখে শুকনো ও ঠান্ডা স্থানে রাখুন'
+                        : 'Keep tightly sealed in a cool, dry pantry'}
+                    </dd>
+                  </div>
+                  {settings.originLocation && (
+                    <div className="flex items-baseline justify-between gap-6 py-3.5">
+                      <dt className="shrink-0 text-[var(--c-subtle)]">{bn ? 'উৎপাদন তথ্য' : 'Origin'}</dt>
+                      <dd className="text-right font-medium text-[var(--c-ink)]">{settings.originLocation}</dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
             </div>
           </div>
         </section>
 
         {/* SECTION 03: CRAFT & BATCH TRANSPARENCY */}
-        <section className="border-y border-[rgba(30,23,16,0.08)] bg-[#F4EFE6]/60 py-16 lg:py-20">
+        <section className="border-y border-[rgb(var(--c-tint)/0.08)] bg-[var(--c-band)]/60 py-16 lg:py-20">
           <div className="mx-auto max-w-[1320px] px-5 sm:px-8">
             <div className="max-w-2xl">
-              <span className="font-mono text-xs font-semibold uppercase tracking-widest text-[#8A5A17]">
+              <span className="eyebrow">
                 {bn ? 'স্বচ্ছতা ও প্রক্রিয়া' : 'Craft & Transparency'}
               </span>
-              <h2 className="font-display mt-2 text-3xl font-bold tracking-tight text-[#1E1710]">
+              <h2 className="section-title mt-4">
                 {bn
-                  ? 'উৎস থেকে কাঁচের বয়াম—স্বচ্ছ প্রস্তুতপ্রণালী'
-                  : 'Transparent preparation from pasture to glass'}
+                  ? 'উৎস থেকে বয়াম—স্বচ্ছ প্রস্তুতপ্রণালী'
+                  : 'Transparent preparation from pasture to jar'}
               </h2>
             </div>
 
             <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-3">
               <div className="luxury-card rounded-2xl p-6">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#B47B2B]/10 text-[#8A5A17]">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#B47B2B]/10 text-[var(--c-gold-text)]">
                   <Leaf className="h-5 w-5" />
                 </div>
-                <p className="mt-4 font-mono text-xs font-semibold uppercase tracking-wider text-[#8A5A17]">
+                <p className="mt-4 font-mono text-xs font-semibold uppercase tracking-wider text-[var(--c-gold-text)]">
                   {bn ? 'দুধের উৎস ও উপাদান' : 'Milk Sourcing & Curd'}
                 </p>
-                <p className="mt-2 text-sm leading-relaxed text-[#635647]">
+                <p className="mt-2 text-sm leading-relaxed text-[var(--c-muted)]">
                   {bn
                     ? 'পাবনার খামার থেকে সংগৃহীত গরুর দুধ মাটির হাঁড়িতে দই পেতে কাঠের বিলোনায় মন্থন করা হয়।'
                     : 'Whole cow milk sourced in Pabna, fermented into curd in earthen pots and churned with a wooden bilona.'}
@@ -1086,33 +1119,33 @@ export function HomeStorefrontView() {
               </div>
 
               <div className="luxury-card rounded-2xl p-6">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#B47B2B]/10 text-[#8A5A17]">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#B47B2B]/10 text-[var(--c-gold-text)]">
                   <Award className="h-5 w-5" />
                 </div>
-                <p className="mt-4 font-mono text-xs font-semibold uppercase tracking-wider text-[#8A5A17]">
+                <p className="mt-4 font-mono text-xs font-semibold uppercase tracking-wider text-[var(--c-gold-text)]">
                   {bn ? 'ব্যাচ পাসপোর্ট' : 'Batch Traceability'}
                 </p>
                 {activeBatch?.batchCode ? (
                   <dl className="mt-3 space-y-2 text-xs">
-                    <div className="flex justify-between border-b border-[rgba(30,23,16,0.06)] pb-1.5">
-                      <dt className="text-[#635647]">{bn ? 'সক্রিয় ব্যাচ' : 'Active Batch'}</dt>
-                      <dd className="font-mono font-bold text-[#1E1710]">{activeBatch.batchCode}</dd>
+                    <div className="flex justify-between border-b border-[rgb(var(--c-tint)/0.06)] pb-1.5">
+                      <dt className="text-[var(--c-muted)]">{bn ? 'সক্রিয় ব্যাচ' : 'Active Batch'}</dt>
+                      <dd className="font-mono font-bold text-[var(--c-ink)]">{activeBatch.batchCode}</dd>
                     </div>
                     {activeBatch.productionDate && (
-                      <div className="flex justify-between border-b border-[rgba(30,23,16,0.06)] pb-1.5">
-                        <dt className="text-[#635647]">{bn ? 'উৎপাদনের তারিখ' : 'Produced'}</dt>
+                      <div className="flex justify-between border-b border-[rgb(var(--c-tint)/0.06)] pb-1.5">
+                        <dt className="text-[var(--c-muted)]">{bn ? 'উৎপাদনের তারিখ' : 'Produced'}</dt>
                         <dd className="font-mono">{activeBatch.productionDate}</dd>
                       </div>
                     )}
                     {activeBatch.expiryDate && (
                       <div className="flex justify-between">
-                        <dt className="text-[#635647]">{bn ? 'মেয়াদোত্তীর্ণ' : 'Best Before'}</dt>
+                        <dt className="text-[var(--c-muted)]">{bn ? 'মেয়াদোত্তীর্ণ' : 'Best Before'}</dt>
                         <dd className="font-mono">{activeBatch.expiryDate}</dd>
                       </div>
                     )}
                   </dl>
                 ) : (
-                  <p className="mt-2 text-sm leading-relaxed text-[#635647]">
+                  <p className="mt-2 text-sm leading-relaxed text-[var(--c-muted)]">
                     {bn
                       ? 'বর্তমান ব্যাচের তথ্য অ্যাডমিন প্যানেল থেকে যুক্ত হলে এখানে প্রদর্শিত হবে।'
                       : 'Active batch details will appear here once recorded by the store team.'}
@@ -1121,13 +1154,13 @@ export function HomeStorefrontView() {
               </div>
 
               <div className="luxury-card rounded-2xl p-6">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#B47B2B]/10 text-[#8A5A17]">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#B47B2B]/10 text-[var(--c-gold-text)]">
                   <ShieldCheck className="h-5 w-5" />
                 </div>
-                <p className="mt-4 font-mono text-xs font-semibold uppercase tracking-wider text-[#8A5A17]">
+                <p className="mt-4 font-mono text-xs font-semibold uppercase tracking-wider text-[var(--c-gold-text)]">
                   {bn ? 'সংরক্ষণ নির্দেশনা' : 'Care & Storage'}
                 </p>
-                <p className="mt-2 text-sm leading-relaxed text-[#635647]">
+                <p className="mt-2 text-sm leading-relaxed text-[var(--c-muted)]">
                   {bn
                     ? 'সর্বদা শুকনো ও পরিষ্কার চামচ ব্যবহার করুন এবং সূর্যের আলো থেকে দূরে সাধারণ তাপমাত্রায় রাখুন।'
                     : 'Always scoop with a clean, dry spoon and keep sealed away from direct heat and sunlight.'}
@@ -1173,9 +1206,9 @@ export function HomeStorefrontView() {
                 }`}
               >
                 <p className="font-mono text-xs uppercase tracking-widest text-[#F5D692] tabular-nums">
-                  {currentStage.index}. {bn ? 'দুধ থেকে কাঁচের জার' : 'From Milk to Jar'}
+                  {currentStage.index}. {bn ? 'দুধ থেকে জার' : 'From Milk to Jar'}
                 </p>
-                <h2 className="font-display mt-2 text-4xl font-semibold tracking-tight lg:text-5xl">
+                <h2 className="section-title mt-4 !text-[#FAF7F2]">
                   {bn ? currentStage.titleBn : currentStage.titleEn}
                 </h2>
                 <p className="mt-2.5 text-lg text-[#FAF7F2]/90">
@@ -1200,7 +1233,7 @@ export function HomeStorefrontView() {
                     onClick={() => handleJumpStage(idx)}
                     className={`rounded-lg px-3.5 py-2 font-mono text-xs font-medium tabular-nums transition-colors ${
                       idx === activeStage
-                        ? 'bg-[#B47B2B] text-[#FFFDF9]'
+                        ? 'bg-[#B47B2B] text-[var(--c-on-gold)]'
                         : 'text-[#E8DFC5]/75 hover:text-[#FAF7F2]'
                     }`}
                   >
@@ -1215,9 +1248,9 @@ export function HomeStorefrontView() {
           <div className="space-y-6 px-4 py-12 sm:space-y-8 sm:px-8 sm:py-16 lg:hidden">
             <div>
               <p className="font-mono text-xs uppercase tracking-widest text-[#F5D692]">
-                {bn ? 'দুধ থেকে কাঁচের জার' : 'From Milk to Jar'}
+                {bn ? 'দুধ থেকে জার' : 'From Milk to Jar'}
               </p>
-              <h2 className="font-display mt-2 text-2xl font-semibold sm:text-3xl">
+              <h2 className="section-title mt-4 !text-[#FAF7F2]">
                 {bn ? 'চার ধাপের বিলোনা পদ্ধতি' : 'Four stages of Bilona craft'}
               </h2>
             </div>
@@ -1271,7 +1304,7 @@ export function HomeStorefrontView() {
                 onPointerCancel={() => {
                   isDraggingRef.current = false;
                 }}
-                className="relative aspect-[16/10] w-full cursor-ew-resize select-none overflow-hidden rounded-3xl border border-[rgba(30,23,16,0.14)] bg-[#1A120B] shadow-[0_20px_50px_-10px_rgba(30,23,16,0.16)] touch-none"
+                className="relative aspect-[16/10] w-full cursor-ew-resize select-none overflow-hidden rounded-3xl border border-[rgb(var(--c-tint)/0.14)] bg-[#1A120B] shadow-[0_20px_50px_-10px_rgba(30,23,16,0.16)] touch-none"
               >
                 <div className="absolute inset-0">
                   <ResilientImage
@@ -1325,34 +1358,34 @@ export function HomeStorefrontView() {
                   style={{ left: `${splitPct}%` }}
                   className="absolute inset-y-0 z-10 flex w-14 -translate-x-1/2 items-center justify-center focus:outline-none touch-none"
                 >
-                  <div className="h-full w-0.5 bg-[#FFFDF9] shadow-md" />
+                  <div className="h-full w-0.5 bg-[var(--c-card)] shadow-md" />
                   <div className="absolute flex h-12 w-12 items-center justify-center rounded-full border-2 border-[#D4AF37] bg-[#1A120B] text-[#F5D692] shadow-xl">
                     <ArrowLeftRight className="h-4 w-4" />
                   </div>
                 </div>
               </div>
-              <p className="mt-3 text-center text-xs text-[#8A5A17] sm:text-left flex items-center justify-center sm:justify-start gap-1.5">
+              <p className="mt-3 text-center text-xs text-[var(--c-gold-text)] sm:text-left flex items-center justify-center sm:justify-start gap-1.5">
                 <Sparkles className="h-3.5 w-3.5" />
                 <span>{bn ? 'হ্যান্ডেলটি টেনে তাপমাত্রাভেদে রূপের পরিবর্তন দেখুন' : 'Drag slider to observe natural temperature crystallization'}</span>
               </p>
             </div>
 
             <div className="lg:col-span-5">
-              <span className="font-mono text-xs font-semibold uppercase tracking-widest text-[#8A5A17]">
+              <span className="eyebrow">
                 {bn ? 'প্রাকৃতিক টেক্সচার ও বিজ্ঞান' : 'Natural Crystallization'}
               </span>
-              <h2 className="font-display mt-2 text-2xl font-bold tracking-tight text-[#1E1710] sm:text-3xl lg:text-4xl">
+              <h2 className="section-title mt-4">
                 {bn
                   ? 'তাপমাত্রার সাথে দানাদার রূপের স্বাভাবিক পরিবর্তন'
                   : 'Granular in cool weather, liquid gold when warm'}
               </h2>
-              <p className="mt-4 text-sm leading-relaxed text-[#635647] sm:text-base">
+              <p className="mt-4 text-sm leading-relaxed text-[var(--c-muted)] sm:text-base">
                 {bn
                   ? 'প্রাকৃতিক মিল্কফ্যাটের বিভিন্ন ফ্যাটি অ্যাসিডের গলনাঙ্ক ভিন্ন। তাই শীতল আবহাওয়ায় ঘি স্বাভাবিকভাবেই দানাদার হয়ে জমে এবং উষ্ণ আবহাওয়ায় গলে গিয়ে সোনালী তরল রূপ নেয়।'
                   : 'Natural butterfat naturally crystallizes into coarse danadar grains in cool weather and melts into clear golden liquid in warm conditions.'}
               </p>
-              <div className="mt-6 rounded-2xl border border-[rgba(30,23,16,0.08)] bg-[#F4EFE6]/70 p-4 text-xs text-[#635647]">
-                <p className="flex items-center gap-1.5 font-semibold text-[#1E1710]">
+              <div className="mt-6 rounded-2xl border border-[rgb(var(--c-tint)/0.08)] bg-[var(--c-band)]/70 p-4 text-xs text-[var(--c-muted)]">
+                <p className="flex items-center gap-1.5 font-semibold text-[var(--c-ink)]">
                   <Lightbulb className="h-4 w-4 shrink-0 text-[#B47B2B]" />
                   <span>{bn ? 'গুরুত্বপূর্ণ তথ্য:' : 'Craft Note:'}</span>
                 </p>
@@ -1369,19 +1402,19 @@ export function HomeStorefrontView() {
         {/* SECTION 06: PROOF & BATCH VERIFICATION QR */}
         <section
           id="proof"
-          className="scroll-mt-16 sm:scroll-mt-20 border-y border-[rgba(30,23,16,0.08)] bg-[#F4EFE6]/50 py-16 lg:py-24"
+          className="scroll-mt-16 sm:scroll-mt-20 border-y border-[rgb(var(--c-tint)/0.08)] bg-[var(--c-band)]/50 py-16 lg:py-24"
         >
           <div className="mx-auto grid max-w-[1320px] grid-cols-1 items-center gap-10 px-4 sm:px-8 md:grid-cols-12">
             <div className="space-y-4 md:col-span-8">
-              <span className="font-mono text-xs font-semibold uppercase tracking-widest text-[#8A5A17]">
+              <span className="eyebrow">
                 {bn ? 'ব্যাচ যাচাই ও রেকর্ড' : 'Provenance & Batch Verification'}
               </span>
-              <h2 className="font-display text-2xl font-bold tracking-tight text-[#1E1710] sm:text-3xl lg:text-4xl">
+              <h2 className="section-title">
                 {bn
                   ? 'ব্যাচ কোড দিয়ে উৎপাদন তথ্য যাচাই করুন'
                   : 'Inspect published batch records online'}
               </h2>
-              <p className="max-w-[54ch] text-sm leading-relaxed text-[#635647] sm:text-base">
+              <p className="max-w-[54ch] text-sm leading-relaxed text-[var(--c-muted)] sm:text-base">
                 {bn
                   ? 'স্টোর কর্তৃপক্ষ যখন কোনো ব্যাচের তথ্য ও রিপোর্ট প্রকাশ করে, তখন ব্যাচ কোড দিয়ে তার উৎপাদন ও মেয়াদ সংক্রান্ত তথ্য অনলাইনে দেখা যায়।'
                   : 'When a harvest batch record is published by the store owner, its production dates and any uploaded documentation can be inspected on the batch lookup page.'}
@@ -1390,12 +1423,12 @@ export function HomeStorefrontView() {
               {activeBatch?.batchCode ? (
                 <div className="grid grid-cols-1 gap-4 pt-2 sm:grid-cols-2">
                   <div className="luxury-card rounded-2xl p-4 text-xs">
-                    <p className="text-[#8A5A17] font-mono uppercase tracking-wider font-semibold">{bn ? 'বর্তমান সক্রিয় ব্যাচ' : 'Active Batch'}</p>
-                    <p className="mt-1 font-mono text-base font-bold text-[#1E1710]">
+                    <p className="text-[var(--c-gold-text)] font-mono uppercase tracking-wider font-semibold">{bn ? 'বর্তমান সক্রিয় ব্যাচ' : 'Active Batch'}</p>
+                    <p className="mt-1 font-mono text-base font-bold text-[var(--c-ink)]">
                       {activeBatch.batchCode}
                     </p>
                     {(activeBatch.productionDate || activeBatch.expiryDate) && (
-                      <p className="mt-1 text-[#635647]">
+                      <p className="mt-1 text-[var(--c-muted)]">
                         {activeBatch.productionDate || '—'} → {activeBatch.expiryDate || '—'}
                       </p>
                     )}
@@ -1403,27 +1436,21 @@ export function HomeStorefrontView() {
 
                   {(activeBatch.licenceDetails || activeBatch.labReportStatus) && (
                     <div className="luxury-card rounded-2xl p-4 text-xs">
-                      <p className="text-[#8A5A17] font-mono uppercase tracking-wider font-semibold">
+                      <p className="text-[var(--c-gold-text)] font-mono uppercase tracking-wider font-semibold">
                         {bn ? 'ব্যাচ স্ট্যাটাস' : 'Batch Record Status'}
                       </p>
                       {activeBatch.licenceDetails && (
-                        <p className="mt-1 font-medium text-[#1E1710]">
+                        <p className="mt-1 font-medium text-[var(--c-ink)]">
                           {activeBatch.licenceDetails}
                         </p>
                       )}
                       {activeBatch.labReportStatus && (
-                        <p className="mt-1 text-[#2D6A4F] font-semibold">{activeBatch.labReportStatus}</p>
+                        <p className="mt-1 text-[var(--c-green-text)] font-semibold">{activeBatch.labReportStatus}</p>
                       )}
                     </div>
                   )}
                 </div>
-              ) : (
-                <div className="luxury-card rounded-2xl p-4 text-xs text-[#635647]">
-                  {bn
-                    ? 'সক্রিয় ব্যাচের তথ্য এখনো প্রকাশ করা হয়নি। ব্যাচ কোড থাকলে নিচের যাচাই পেজে সার্চ করতে পারেন।'
-                    : 'No active batch record has been published yet. If you have a jar batch code, you can look it up on the batch verification page.'}
-                </div>
-              )}
+              ) : null}
 
               <div className="flex flex-col gap-3 pt-3 sm:flex-row sm:flex-wrap">
                 <Link
@@ -1432,7 +1459,7 @@ export function HomeStorefrontView() {
                       ? `/batch?code=${encodeURIComponent(activeBatch.batchCode)}`
                       : '/batch'
                   }
-                  className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-[#1A120B] px-6 py-2.5 text-xs font-semibold text-[#FAF7F2] hover:bg-[#332415] transition-colors sm:w-auto shadow-xs"
+                  className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-[var(--c-accent)] px-6 py-2.5 text-xs font-semibold text-[var(--c-on-accent)] hover:bg-[var(--c-accent-hover)] transition-colors sm:w-auto shadow-xs"
                 >
                   <FileCheck2 className="h-4 w-4 text-[#D4AF37]" />
                   <span>
@@ -1445,19 +1472,19 @@ export function HomeStorefrontView() {
                     href={activeBatch.labReportUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-6 py-2.5 text-xs font-semibold text-[#1E1710] hover:bg-[#F2ECE1] transition-colors sm:w-auto"
+                    className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-bg)] px-6 py-2.5 text-xs font-semibold text-[var(--c-ink)] hover:bg-[var(--c-surface)] transition-colors sm:w-auto"
                   >
                     <span>{bn ? 'ব্যাচ ডকুমেন্ট দেখুন' : 'Open Batch Document'}</span>
-                    <ExternalLink className="h-3.5 w-3.5 text-[#8A5A17]" />
+                    <ExternalLink className="h-3.5 w-3.5 text-[var(--c-gold-text)]" />
                   </a>
                 )}
               </div>
             </div>
 
             {activeBatch?.batchCode && (
-              <div className="flex flex-col items-center rounded-3xl border-2 border-[#D4AF37]/30 bg-[#FAF7F2] p-8 md:col-span-4 shadow-[0_15px_40px_-10px_rgba(30,23,16,0.08)]">
+              <div className="flex flex-col items-center rounded-3xl border-2 border-[#D4AF37]/30 bg-[var(--c-bg)] p-8 md:col-span-4 shadow-[0_15px_40px_-10px_rgba(30,23,16,0.08)]">
                 {qrCodeUrl && (
-                  <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] p-2 bg-[#FFFDF9] shadow-xs">
+                  <div className="rounded-2xl border border-[rgb(var(--c-tint)/0.12)] p-2 bg-[var(--c-card)] shadow-xs">
                     <img
                       src={qrCodeUrl}
                       alt={`Batch verification QR for ${activeBatch.batchCode}`}
@@ -1465,10 +1492,10 @@ export function HomeStorefrontView() {
                     />
                   </div>
                 )}
-                <p className="mt-4 font-mono text-sm font-bold text-[#1E1710]">
+                <p className="mt-4 font-mono text-sm font-bold text-[var(--c-ink)]">
                   {activeBatch.batchCode}
                 </p>
-                <p className="mt-1 text-center text-xs text-[#635647]">
+                <p className="mt-1 text-center text-xs text-[var(--c-muted)]">
                   {bn
                     ? 'মোবাইল ক্যামেরা দিয়ে স্ক্যান করে ব্যাচ তথ্য দেখুন'
                     : 'Scan with camera to inspect published batch record'}
@@ -1485,18 +1512,18 @@ export function HomeStorefrontView() {
         >
           <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-12 lg:gap-16">
             <div className="grid grid-cols-12 gap-4 lg:col-span-6">
-              <div className="col-span-7 aspect-[4/3] overflow-hidden rounded-3xl border border-[rgba(30,23,16,0.12)] bg-[#F2ECE1] shadow-[0_15px_35px_-10px_rgba(30,23,16,0.12)]">
+              <div className="col-span-7 aspect-[4/3] overflow-hidden rounded-3xl border border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-surface)] shadow-[0_15px_35px_-10px_rgba(30,23,16,0.12)]">
                 <ResilientImage
                   src={IMAGES.founderPortrait}
                   alt={
                     bn
                       ? 'পাবনার খামার প্রাঙ্গণে হাতে তৈরি দেশী ঘিয়ের জারসহ প্রতিষ্ঠাতা'
-                      : 'Founder holding a sealed glass jar of Deshi Gee at the Pabna farmstead courtyard'
+                      : 'Founder holding a sealed jar of Deshi Gee at the Pabna farmstead courtyard'
                   }
                   className="h-full w-full object-cover transition-transform duration-500 hover:scale-[1.03]"
                 />
               </div>
-              <div className="col-span-5 aspect-[4/3] self-end overflow-hidden rounded-3xl border border-[rgba(30,23,16,0.12)] bg-[#F2ECE1] shadow-[0_15px_35px_-10px_rgba(30,23,16,0.12)]">
+              <div className="col-span-5 aspect-[4/3] self-end overflow-hidden rounded-3xl border border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-surface)] shadow-[0_15px_35px_-10px_rgba(30,23,16,0.12)]">
                 <ResilientImage
                   src={IMAGES.milkSourcing}
                   alt={
@@ -1510,22 +1537,22 @@ export function HomeStorefrontView() {
             </div>
 
             <div className="lg:col-span-6 space-y-4">
-              <span className="font-mono text-xs font-semibold uppercase tracking-widest text-[#8A5A17]">
+              <span className="eyebrow">
                 {bn ? 'উৎস ও ঐতিহ্যবাহী দর্শন' : 'Heritage & Pastoral Roots'}
               </span>
-              <h2 className="font-display text-3xl font-bold tracking-tight text-[#1E1710] sm:text-4xl">
+              <h2 className="section-title">
                 {bn
                   ? 'একটিই পণ্য—যেন প্রতিটি রান্নাঘরে পৌঁছায় চেনা গ্রামের খাঁটি ঘ্রাণ'
                   : 'Dedicated to one honest jar of Pabna bilona ghee'}
               </h2>
-              <p className="text-sm leading-relaxed text-[#635647] sm:text-base">
+              <p className="text-sm leading-relaxed text-[var(--c-muted)] sm:text-base">
                 {bn
                   ? 'শহুরে কৃত্রিম খাদ্যের ভিড়ে আসল দই-মন্থিত গাওয়া ঘিয়ের অমূল্য স্বাদ ফিরিয়ে আনাই আমাদের লক্ষ্য। আমরা একাধিক পণ্যের ব্যবসা না করে শুধুমাত্র পাবনার নদী তীরের চারণভূমির খাঁটি কাঁচা দুধ ও কাঠের বিলোনার প্রাচীন মন্থন পদ্ধতির উপর মনোযোগ দিয়েছি।'
                   : 'Deshi Gee began with a simple commitment: avoid supermarket mass-production and focus completely on perfecting single-origin Pabna grass-fed bilona cow ghee.'}
               </p>
-              <div className="pt-2 flex items-center gap-2 text-xs font-semibold text-[#1E1710]">
-                <span className="text-[#8A5A17]">{bn ? 'উৎপাদন ও সংগ্রহ কেন্দ্র:' : 'Pastoral Origin:'}</span>
-                <span className="font-mono text-[#8A5A17] bg-[#F4EFE6] px-3 py-1 rounded-full border border-[#B47B2B]/20">
+              <div className="pt-2 flex items-center gap-2 text-xs font-semibold text-[var(--c-ink)]">
+                <span className="text-[var(--c-gold-text)]">{bn ? 'উৎপাদন ও সংগ্রহ কেন্দ্র:' : 'Pastoral Origin:'}</span>
+                <span className="font-mono text-[var(--c-gold-text)] bg-[var(--c-band)] px-3 py-1 rounded-full border border-[#B47B2B]/20">
                   {settings.originLocation}
                 </span>
               </div>
@@ -1534,13 +1561,13 @@ export function HomeStorefrontView() {
         </section>
 
         {/* SECTION 08: WAYS TO ENJOY DESHI GHEE */}
-        <section className="border-y border-[rgba(30,23,16,0.08)] bg-[#F4EFE6]/40 py-16 lg:py-24">
+        <section className="border-y border-[rgb(var(--c-tint)/0.08)] bg-[var(--c-band)]/40 py-16 lg:py-24">
           <div className="mx-auto max-w-[1320px] px-5 sm:px-8">
             <div className="max-w-2xl">
-              <span className="font-mono text-xs font-semibold uppercase tracking-widest text-[#8A5A17]">
+              <span className="eyebrow">
                 {bn ? 'বাঙালি রান্না ও পরিবেশন' : 'Culinary Traditions'}
               </span>
-              <h2 className="font-display mt-2 text-3xl font-bold tracking-tight text-[#1E1710]">
+              <h2 className="section-title mt-4">
                 {bn
                   ? 'প্রতিদিনের খাবারে খাঁটি ঘিয়ের সুবাস'
                   : 'Five everyday ways across Bengali kitchens'}
@@ -1559,7 +1586,7 @@ export function HomeStorefrontView() {
                         : 'sm:col-span-2 lg:col-span-3'
                   }`}
                 >
-                  <div className="aspect-[4/3] w-full overflow-hidden bg-[#EAE1D2]">
+                  <div className="aspect-[4/3] w-full overflow-hidden bg-[var(--c-elev)]">
                     <ResilientImage
                       src={dish.image}
                       alt={bn ? dish.titleBn : dish.titleEn}
@@ -1568,14 +1595,14 @@ export function HomeStorefrontView() {
                   </div>
                   <div className="flex flex-1 flex-col justify-between p-5">
                     <div>
-                      <h3 className="font-display text-lg font-bold text-[#1E1710]">
+                      <h3 className="font-display text-lg font-bold text-[var(--c-ink)]">
                         {bn ? dish.titleBn : dish.titleEn}
                       </h3>
-                      <p className="mt-1.5 text-xs leading-relaxed text-[#635647]">
+                      <p className="mt-1.5 text-xs leading-relaxed text-[var(--c-muted)]">
                         {bn ? dish.descBn : dish.descEn}
                       </p>
                     </div>
-                    <div className="mt-4 border-t border-[rgba(30,23,16,0.08)] pt-3 flex items-start gap-1.5 text-[11px] font-medium text-[#8A5A17]">
+                    <div className="mt-4 border-t border-[rgb(var(--c-tint)/0.08)] pt-3 flex items-start gap-1.5 text-[11px] font-medium text-[var(--c-gold-text)]">
                       <Sparkles className="h-3 w-3 shrink-0 mt-0.5 text-[#B47B2B]" />
                       <span>{bn ? dish.tipBn : dish.tipEn}</span>
                     </div>
@@ -1587,96 +1614,193 @@ export function HomeStorefrontView() {
         </section>
 
         {/* SECTION 09: CUSTOMER REVIEWS & MODERATED FEEDBACK */}
-        <section className="mx-auto max-w-[1320px] px-5 py-20 sm:px-8 lg:py-24">
-          <div className="grid grid-cols-1 gap-12 lg:grid-cols-12">
-            <div className="lg:col-span-7">
-              <div className="flex flex-wrap items-baseline justify-between gap-4 border-b border-[rgba(30,23,16,0.10)] pb-6">
-                <div>
-                  <span className="font-mono text-xs font-semibold uppercase tracking-widest text-[#8A5A17]">
-                    {bn ? 'ক্রেতাদের অভিজ্ঞতা' : 'Customer Experience Ledger'}
-                  </span>
-                  <h2 className="font-display mt-2 text-3xl font-bold text-[#1E1710]">
-                    {bn ? 'যাচাইকৃত গ্রাহকদের মতামত' : 'Genuine kitchen feedback'}
-                  </h2>
-                </div>
+        <section className="mx-auto max-w-[1320px] px-5 py-20 sm:px-8 lg:py-28">
+          <div className="grid grid-cols-1 gap-12 lg:grid-cols-12 lg:gap-16">
+            {/* Summary */}
+            <div className="lg:col-span-4 lg:sticky lg:top-28 lg:self-start">
+              <span className="eyebrow">
+                {bn ? 'ক্রেতাদের অভিজ্ঞতা' : 'Customer Experience'}
+              </span>
+              <h2 className="section-title mt-5">
+                {bn ? 'যাচাইকৃত গ্রাহকদের মতামত' : 'Genuine kitchen feedback'}
+              </h2>
 
-                {avgRating && (
-                  <div className="text-right">
-                    <p className="font-mono text-3xl font-bold tabular-nums text-[#1E1710]">
-                      {avgRating} <span className="text-sm font-normal text-[#8A5A17]">/ 5.0</span>
-                    </p>
-                    <p className="text-xs text-[#635647] tabular-nums">
-                      {reviews.length}{' '}
-                      {bn ? 'টি অনুমোদিত রিভিউ' : 'approved reviews'}
-                    </p>
+              {avgRating && (
+                <div className="mt-9">
+                  <div className="flex items-end gap-4">
+                    <span className="font-display text-6xl leading-none tabular-nums text-[var(--c-gold-text)]">
+                      {avgRating}
+                    </span>
+                    <div className="pb-1">
+                      <div className="flex gap-0.5 text-[#D4AF37]">
+                        {Array.from({ length: 5 }).map((_, idx) => (
+                          <Star
+                            key={idx}
+                            className={`h-4 w-4 ${idx < Math.round(Number(avgRating)) ? 'fill-current' : 'opacity-30'}`}
+                          />
+                        ))}
+                      </div>
+                      <p className="mt-1 text-xs tabular-nums text-[var(--c-muted)]">
+                        {bn
+                          ? `${reviews.length}টি অনুমোদিত রিভিউ`
+                          : `Based on ${reviews.length} approved ${reviews.length === 1 ? 'review' : 'reviews'}`}
+                      </p>
+                    </div>
+                  </div>
+
+                  <ul className="mt-6 space-y-2" aria-label={bn ? 'রেটিং বিন্যাস' : 'Rating breakdown'}>
+                    {[5, 4, 3, 2, 1].map((star) => {
+                      const count = reviews.filter((r) => r.rating === star).length;
+                      const pct = reviews.length ? (count / reviews.length) * 100 : 0;
+                      return (
+                        <li key={star} className="flex items-center gap-3 text-xs text-[var(--c-muted)]">
+                          <span className="w-3 tabular-nums">{star}</span>
+                          <Star className="h-3 w-3 fill-current text-[#D4AF37]" />
+                          <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-[rgb(var(--c-tint)/0.12)]">
+                            <span
+                              className="block h-full rounded-full bg-gradient-to-r from-[#B47B2B] to-[#D4AF37]"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </span>
+                          <span className="w-4 text-right tabular-nums">{count}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+
+              <div className="mt-9 flex flex-wrap items-center gap-3">
+                {!showReviewForm && (
+                  <button type="button" onClick={() => setShowReviewForm(true)} className="btn-ghost !min-h-[48px] !px-6">
+                    <span>{bn ? 'রিভিউ লিখুন' : 'Write a review'}</span>
+                  </button>
+                )}
+                {(canPrevReview || canNextReview) && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => scrollReviews(-1)}
+                      disabled={!canPrevReview}
+                      aria-label={bn ? 'আগের রিভিউ' : 'Previous reviews'}
+                      className="flex h-12 w-12 items-center justify-center rounded-full border border-[rgb(var(--c-tint)/0.25)] text-[var(--c-ink)] transition-colors hover:border-[#B47B2B] hover:text-[var(--c-gold-text)] disabled:opacity-35 disabled:hover:border-[rgb(var(--c-tint)/0.25)] disabled:hover:text-[var(--c-ink)]"
+                    >
+                      <ChevronLeft className="h-5 w-5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => scrollReviews(1)}
+                      disabled={!canNextReview}
+                      aria-label={bn ? 'পরের রিভিউ' : 'Next reviews'}
+                      className="flex h-12 w-12 items-center justify-center rounded-full border border-[rgb(var(--c-tint)/0.25)] text-[var(--c-ink)] transition-colors hover:border-[#B47B2B] hover:text-[var(--c-gold-text)] disabled:opacity-35 disabled:hover:border-[rgb(var(--c-tint)/0.25)] disabled:hover:text-[var(--c-ink)]"
+                    >
+                      <ChevronRight className="h-5 w-5" />
+                    </button>
                   </div>
                 )}
               </div>
+            </div>
 
+            {/* Reviews */}
+            <div className="min-w-0 lg:col-span-8 lg:flex lg:items-center">
               {reviews.length === 0 ? (
-                <div className="mt-8 rounded-3xl border border-[rgba(30,23,16,0.10)] bg-[#F4EFE6]/50 p-10 text-center">
-                  <p className="font-display text-lg font-semibold text-[#1E1710]">
-                    {bn
-                      ? 'এখনও কোনো অনুমোদিত রিভিউ প্রদর্শিত হয়নি'
-                      : 'No approved reviews published yet'}
+                <div className="rounded-[2rem] border border-dashed border-[rgb(var(--c-tint)/0.25)] p-12 text-center">
+                  <span aria-hidden="true" className="font-display text-6xl leading-none text-[var(--c-gold-text)] opacity-40">
+                    “
+                  </span>
+                  <p className="mt-2 font-display text-2xl text-[var(--c-ink)]">
+                    {bn ? 'আপনিই হতে পারেন প্রথম রিভিউদাতা' : 'Be the first to share'}
                   </p>
-                  <p className="mt-2 text-sm text-[#635647] max-w-md mx-auto">
+                  <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-[var(--c-muted)]">
                     {bn
-                      ? 'আমরা কেবল প্রকৃত ক্রেতাদের অনুমোদিত রিভিউ প্রকাশ করি। আপনার অভিজ্ঞতা ডানদিকের ফর্মে শেয়ার করুন।'
-                      : 'We publish only genuine customer feedback approved after moderation. Share your experience using the form.'}
+                      ? 'আমরা কেবল প্রকৃত ক্রেতাদের অনুমোদিত রিভিউ প্রকাশ করি।'
+                      : 'We publish only genuine customer feedback approved after moderation.'}
                   </p>
                 </div>
               ) : (
-                <div className="mt-8 space-y-4">
+                <div
+                  ref={reviewTrackRef}
+                  tabIndex={0}
+                  aria-label={bn ? 'গ্রাহক রিভিউ স্লাইডার' : 'Customer reviews slider'}
+                  className="-mx-5 flex w-full snap-x snap-mandatory items-stretch gap-5 overflow-x-auto scroll-smooth px-5 pb-4 [scrollbar-width:none] sm:mx-0 sm:px-0 [&::-webkit-scrollbar]:hidden"
+                >
                   {reviews.map((rev) => (
                     <article
                       key={rev.id}
-                      className="luxury-card rounded-2xl p-6"
+                      className="luxury-card flex min-h-[260px] w-[86%] shrink-0 snap-start flex-col rounded-[1.75rem] p-7 sm:w-[calc(50%-10px)] sm:p-8"
                     >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-bold text-[#1E1710]">
-                            {rev.customerName}{' '}
-                            <span className="font-normal text-[#635647]">
-                              · {rev.district}
-                            </span>
-                          </p>
-                          {rev.verifiedPurchase && (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#2D6A4F]">
-                              <Check className="h-3 w-3" />
-                              {bn ? 'যাচাইকৃত ক্রেতা' : 'Verified Purchase'}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-0.5 text-[#B47B2B]">
-                          {Array.from({ length: rev.rating }).map((_, idx) => (
-                            <Star key={idx} className="h-4 w-4 fill-current text-[#D4AF37]" />
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex gap-0.5 text-[#D4AF37]">
+                          {Array.from({ length: 5 }).map((_, idx) => (
+                            <Star
+                              key={idx}
+                              className={`h-4 w-4 ${idx < rev.rating ? 'fill-current' : 'opacity-25'}`}
+                            />
                           ))}
                         </div>
+                        <span aria-hidden="true" className="font-display text-6xl leading-[0.6] text-[var(--c-gold-text)] opacity-35">
+                          “
+                        </span>
                       </div>
 
-                      <p className="mt-3 text-sm leading-relaxed text-[#1E1710]">
+                      <p
+                        className={`mt-5 line-clamp-6 flex-1 font-display text-xl leading-[1.55] text-[var(--c-ink)] ${bn ? '' : 'italic'}`}
+                      >
                         {rev.comment}
                       </p>
 
-                      {rev.photoData && (
-                        <img
-                          src={rev.photoData}
-                          alt={`Customer photo by ${rev.customerName}`}
-                          className="mt-4 max-h-48 rounded-xl border border-[rgba(30,23,16,0.10)] object-cover shadow-xs"
-                        />
-                      )}
-
-                      <div className="mt-4 flex items-center justify-end border-t border-[rgba(30,23,16,0.06)] pt-2">
+                      <div className="mt-6 flex items-center gap-3.5 border-t border-[rgb(var(--c-tint)/0.10)] pt-5">
+                        {rev.photoData ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setLightbox({
+                                src: rev.photoData,
+                                alt: `Customer photo by ${rev.customerName}`,
+                                name: rev.customerName,
+                              })
+                            }
+                            aria-label={bn ? 'ছবি বড় করে দেখুন' : 'View photo full size'}
+                            className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-2xl border-2 sm:h-16 sm:w-16 border-[#B47B2B]/50"
+                          >
+                            <img
+                              src={rev.photoData}
+                              alt={`Customer photo by ${rev.customerName}`}
+                              loading="lazy"
+                              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-110"
+                            />
+                            <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
+                              <Maximize2 className="h-4 w-4 text-white" />
+                            </span>
+                            <span className="absolute bottom-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white">
+                              <Camera className="h-3 w-3" />
+                            </span>
+                          </button>
+                        ) : (
+                          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[#B47B2B]/15 font-display text-xl sm:h-16 sm:w-16 text-[var(--c-gold-text)]">
+                            {rev.customerName.trim().charAt(0).toUpperCase()}
+                          </span>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="break-words text-sm font-semibold leading-tight text-[var(--c-ink)] sm:truncate">
+                            {rev.customerName}
+                          </p>
+                          <p className="truncate text-xs text-[var(--c-muted)]">{rev.district}</p>
+                          {rev.verifiedPurchase && (
+                            <span className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--c-green-text)]">
+                              <Check className="h-3 w-3" />
+                              {bn ? 'যাচাইকৃত ক্রেতা' : 'Verified buyer'}
+                            </span>
+                          )}
+                        </div>
                         <button
                           type="button"
                           onClick={() => handleHelpfulVote(rev)}
-                          className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-3 text-xs text-[#635647] hover:bg-[#F2ECE1] hover:text-[#1E1710] transition-colors"
+                          aria-label={bn ? 'সহায়ক' : 'Helpful'}
+                          className="inline-flex min-h-[40px] shrink-0 items-center gap-1.5 rounded-full border border-[rgb(var(--c-tint)/0.15)] px-3 text-xs text-[var(--c-muted)] transition-colors hover:border-[#B47B2B] hover:text-[var(--c-ink)]"
                         >
                           <ThumbsUp className="h-3.5 w-3.5 text-[#B47B2B]" />
-                          <span className="tabular-nums">
-                            {bn ? 'সহায়ক' : 'Helpful'} ({rev.helpfulCount})
-                          </span>
+                          <span className="tabular-nums">{rev.helpfulCount}</span>
                         </button>
                       </div>
                     </article>
@@ -1684,139 +1808,180 @@ export function HomeStorefrontView() {
                 </div>
               )}
             </div>
+          </div>
 
-            {/* Submit Review Form */}
-            <form
-              onSubmit={handleSubmitReview}
-              className="space-y-4 self-start rounded-3xl border border-[rgba(30,23,16,0.12)] bg-[#F4EFE6]/80 p-7 lg:col-span-5 shadow-[0_10px_30px_rgba(30,23,16,0.06)]"
-            >
-              <h3 className="font-display text-xl font-bold text-[#1E1710]">
-                {bn ? 'আপনার অভিজ্ঞতা লিখুন' : 'Share Your Experience'}
-              </h3>
-              <p className="text-xs text-[#635647]">
-                {bn
-                  ? 'আপনার প্রতিটি রিভিউ অন্যান্য ক্রেতাদের খাঁটি ঘি বেছে নিতে সাহায্য করবে।'
-                  : 'Your genuine feedback guides fellow patrons across Bangladesh.'}
-              </p>
+          {/* Write a review */}
+          <div className="mx-auto mt-12 max-w-3xl">
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="block text-xs font-semibold text-[#635647]">
-                    {bn ? 'নাম *' : 'Your Name *'}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={revName}
-                    onChange={(e) => setRevName(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3.5 py-2.5 text-base sm:text-sm shadow-xs focus:border-[#B47B2B] focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-[#635647]">
-                    {bn ? 'জেলা / এলাকা *' : 'District / Area *'}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={revDistrict}
-                    onChange={(e) => setRevDistrict(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3.5 py-2.5 text-base sm:text-sm shadow-xs focus:border-[#B47B2B] focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="block text-xs font-semibold text-[#635647]">
-                    {bn ? 'রেটিং' : 'Rating'}
-                  </label>
-                  <select
-                    value={revRating}
-                    onChange={(e) => setRevRating(Number(e.target.value))}
-                    className="mt-1 w-full rounded-xl border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3.5 py-2.5 text-base sm:text-sm shadow-xs focus:border-[#B47B2B] focus:outline-none"
-                  >
-                    <option value={5}>{bn ? '৫ / ৫ — অসাধারণ' : '5 / 5 — Excellent'}</option>
-                    <option value={4}>{bn ? '৪ / ৫ — খুব ভালো' : '4 / 5 — Very Good'}</option>
-                    <option value={3}>{bn ? '৩ / ৫ — ভালো' : '3 / 5 — Good'}</option>
-                    <option value={2}>{bn ? '২ / ৫ — মোটামুটি' : '2 / 5 — Fair'}</option>
-                    <option value={1}>{bn ? '১ / ৫ — উন্নতি প্রয়োজন' : '1 / 5 — Needs Work'}</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-[#635647]">
-                    {bn ? 'অর্ডার আইডি (ঐচ্ছিক)' : 'Order ID (Optional)'}
-                  </label>
-                  <input
-                    type="text"
-                    value={revOrderNum}
-                    onChange={(e) => setRevOrderNum(e.target.value.toUpperCase())}
-                    placeholder={bn ? 'আপনার অর্ডার নম্বর' : 'Your Order ID'}
-                    className="mt-1 w-full rounded-xl border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3.5 py-2.5 font-mono text-base sm:text-sm shadow-xs focus:border-[#B47B2B] focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#635647]">
-                  {bn ? 'মন্তব্য *' : 'Your Review *'}
-                </label>
-                <textarea
-                  rows={3}
-                  required
-                  value={revComment}
-                  onChange={(e) => setRevComment(e.target.value)}
-                  placeholder={bn ? 'ঘিয়ের ঘ্রাণ, স্বাদ ও অভিজ্ঞতা বর্ণনা করুন...' : 'Describe aroma, taste, and experience...'}
-                  className="mt-1 w-full rounded-xl border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3.5 py-2.5 text-base sm:text-sm shadow-xs focus:border-[#B47B2B] focus:outline-none"
-                />
-              </div>
-
-              <label className="flex min-h-[46px] cursor-pointer items-center gap-2.5 rounded-xl border border-dashed border-[rgba(30,23,16,0.25)] bg-[#FFFDF9] px-4 py-2 text-xs text-[#635647] hover:border-[#B47B2B] transition-colors">
-                <Upload className="h-4 w-4 text-[#8A5A17]" />
-                <span>
-                  {revPhotoData
-                    ? bn
-                      ? 'ছবি সংযুক্ত হয়েছে ✓'
-                      : 'Photo attached ✓'
-                    : bn
-                      ? 'জারের ছবি যুক্ত করুন (ঐচ্ছিক)'
-                      : 'Attach jar photo (Optional)'}
-                </span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleReviewPhotoUpload}
-                  className="hidden"
-                />
-              </label>
-
-              {revStatusMsg && (
-                <p className="text-xs font-semibold text-[#8A5A17]">{revStatusMsg}</p>
-              )}
-
-              <button
-                type="submit"
-                disabled={revSubmitting}
-                className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-[#1A120B] px-6 py-3 text-sm font-semibold text-[#FAF7F2] hover:bg-[#332415] disabled:opacity-60 transition-colors shadow-xs"
+            {showReviewForm && (
+              <form
+                onSubmit={handleSubmitReview}
+                className="luxury-card space-y-4 rounded-[2rem] p-7 text-left sm:p-9"
               >
-                {revSubmitting && <Loader2 className="h-4 w-4 animate-spin text-[#D4AF37]" />}
-                <span>{bn ? 'রিভিউ জমা দিন' : 'Submit Review'}</span>
-              </button>
-            </form>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="font-display text-2xl text-[var(--c-ink)]">
+                      {bn ? 'আপনার অভিজ্ঞতা লিখুন' : 'Share your experience'}
+                    </h3>
+                    <p className="mt-1 text-xs text-[var(--c-muted)]">
+                      {bn
+                        ? 'আপনার প্রতিটি রিভিউ অন্যান্য ক্রেতাদের খাঁটি ঘি বেছে নিতে সাহায্য করবে।'
+                        : 'Your genuine feedback guides fellow patrons across Bangladesh.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowReviewForm(false)}
+                    aria-label={bn ? 'ফর্ম বন্ধ করুন' : 'Close form'}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[rgb(var(--c-tint)/0.2)] text-[var(--c-muted)] hover:text-[var(--c-ink)]"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="block text-xs font-semibold text-[var(--c-muted)]">
+                      {bn ? 'নাম *' : 'Your Name *'}
+                    </span>
+                    <input
+                      type="text"
+                      required
+                      value={revName}
+                      onChange={(e) => setRevName(e.target.value)}
+                      autoComplete="name"
+                      className="mt-1.5 w-full rounded-xl border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-bg)] px-4 py-3 text-base text-[var(--c-ink)] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs font-semibold text-[var(--c-muted)]">
+                      {bn ? 'জেলা / এলাকা *' : 'District / Area *'}
+                    </span>
+                    <input
+                      type="text"
+                      required
+                      value={revDistrict}
+                      onChange={(e) => setRevDistrict(e.target.value)}
+                      className="mt-1.5 w-full rounded-xl border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-bg)] px-4 py-3 text-base text-[var(--c-ink)] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs font-semibold text-[var(--c-muted)]">
+                      {bn ? 'রেটিং' : 'Rating'}
+                    </span>
+                    <select
+                      value={revRating}
+                      onChange={(e) => setRevRating(Number(e.target.value))}
+                      className="mt-1.5 w-full rounded-xl border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-bg)] px-4 py-3 text-base text-[var(--c-ink)] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
+                    >
+                      <option value={5}>{bn ? '৫ / ৫ — অসাধারণ' : '5 / 5 — Excellent'}</option>
+                      <option value={4}>{bn ? '৪ / ৫ — খুব ভালো' : '4 / 5 — Very Good'}</option>
+                      <option value={3}>{bn ? '৩ / ৫ — ভালো' : '3 / 5 — Good'}</option>
+                      <option value={2}>{bn ? '২ / ৫ — মোটামুটি' : '2 / 5 — Fair'}</option>
+                      <option value={1}>{bn ? '১ / ৫ — উন্নতি প্রয়োজন' : '1 / 5 — Needs Work'}</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs font-semibold text-[var(--c-muted)]">
+                      {bn ? 'অর্ডার আইডি (ঐচ্ছিক)' : 'Order ID (Optional)'}
+                    </span>
+                    <input
+                      type="text"
+                      value={revOrderNum}
+                      onChange={(e) => setRevOrderNum(e.target.value.toUpperCase())}
+                      placeholder={bn ? 'আপনার অর্ডার নম্বর' : 'Your Order ID'}
+                      className="mt-1.5 w-full rounded-xl border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-bg)] px-4 py-3 font-mono text-base text-[var(--c-ink)] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
+                    />
+                  </label>
+                </div>
+
+                <label className="block">
+                  <span className="block text-xs font-semibold text-[var(--c-muted)]">
+                    {bn ? 'মন্তব্য *' : 'Your Review *'}
+                  </span>
+                  <textarea
+                    rows={4}
+                    required
+                    value={revComment}
+                    onChange={(e) => setRevComment(e.target.value)}
+                    placeholder={bn ? 'ঘিয়ের ঘ্রাণ, স্বাদ ও অভিজ্ঞতা বর্ণনা করুন...' : 'Describe aroma, taste, and experience...'}
+                    className="mt-1.5 w-full rounded-xl border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-bg)] px-4 py-3 text-base text-[var(--c-ink)] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
+                  />
+                </label>
+
+                <label className="flex min-h-[50px] cursor-pointer items-center gap-3 rounded-xl border border-dashed border-[rgb(var(--c-tint)/0.28)] px-4 py-2 text-xs text-[var(--c-muted)] transition-colors hover:border-[#B47B2B]">
+                  <Upload className="h-4 w-4 text-[var(--c-gold-text)]" />
+                  <span>
+                    {revPhotoData
+                      ? bn
+                        ? 'ছবি সংযুক্ত হয়েছে ✓'
+                        : 'Photo attached ✓'
+                      : bn
+                        ? 'জারের ছবি যুক্ত করুন (ঐচ্ছিক)'
+                        : 'Attach jar photo (Optional)'}
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleReviewPhotoUpload}
+                    className="hidden"
+                  />
+                </label>
+
+                {revStatusMsg && (
+                  <p role="status" className="text-xs font-semibold text-[var(--c-gold-text)]">
+                    {revStatusMsg}
+                  </p>
+                )}
+
+                <button type="submit" disabled={revSubmitting} className="btn-gold w-full disabled:opacity-60">
+                  {revSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                  <span>{bn ? 'রিভিউ জমা দিন' : 'Submit Review'}</span>
+                </button>
+              </form>
+            )}
           </div>
         </section>
+
+        {/* Review photo lightbox */}
+        {lightbox && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={bn ? 'গ্রাহকের ছবি' : 'Customer photo'}
+            onClick={() => setLightbox(null)}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
+          >
+            <button
+              type="button"
+              onClick={() => setLightbox(null)}
+              aria-label={bn ? 'বন্ধ করুন' : 'Close'}
+              className="absolute right-4 top-4 flex h-12 w-12 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white transition-colors hover:bg-black/70"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <figure onClick={(e) => e.stopPropagation()} className="max-h-full max-w-3xl">
+              <img
+                src={lightbox.src}
+                alt={lightbox.alt}
+                className="max-h-[80dvh] w-auto max-w-full rounded-2xl object-contain shadow-2xl"
+              />
+              <figcaption className="mt-3 text-center text-sm text-white/80">{lightbox.name}</figcaption>
+            </figure>
+          </div>
+        )}
 
         {/* SECTION 10: BILINGUAL 12-QUESTION FAQ ACCORDION */}
         <section
           id="faq"
-          className="scroll-mt-16 sm:scroll-mt-20 border-t border-[rgba(30,23,16,0.08)] bg-[#F4EFE6]/40 py-16 lg:py-24"
+          className="scroll-mt-16 sm:scroll-mt-20 border-t border-[rgb(var(--c-tint)/0.08)] bg-[var(--c-band)]/40 py-16 lg:py-24"
         >
           <div className="mx-auto max-w-4xl px-4 sm:px-8">
             <div className="text-center">
-              <span className="font-mono text-xs font-semibold uppercase tracking-widest text-[#8A5A17]">
+              <span className="eyebrow is-centered">
                 {bn ? 'সাধারণ জিজ্ঞাসা' : 'Frequently Asked Questions'}
               </span>
-              <h2 className="font-display mt-2 text-3xl font-bold text-[#1E1710] sm:text-4xl">
+              <h2 className="section-title mt-4">
                 {bn ? 'দেশী ঘি সম্পর্কে প্রশ্নোত্তর' : 'Everything about Deshi Gee'}
               </h2>
             </div>
@@ -1827,7 +1992,7 @@ export function HomeStorefrontView() {
                 return (
                   <div
                     key={idx}
-                    className="overflow-hidden rounded-2xl border border-[rgba(30,23,16,0.10)] bg-[#FFFDF9] transition-all"
+                    className="overflow-hidden rounded-2xl border border-[rgb(var(--c-tint)/0.10)] bg-[var(--c-card)] transition-all"
                   >
                     <button
                       type="button"
@@ -1835,18 +2000,18 @@ export function HomeStorefrontView() {
                       onClick={() => setOpenFaqIdx(isOpen ? null : idx)}
                       className="flex min-h-[52px] w-full items-center justify-between gap-4 p-5 text-left font-medium"
                     >
-                      <span className="text-sm font-bold text-[#1E1710] sm:text-base">
+                      <span className="text-sm font-bold text-[var(--c-ink)] sm:text-base">
                         {idx + 1}. {bn ? item.qBn : item.qEn}
                       </span>
                       <ChevronDown
-                        className={`h-4 w-4 shrink-0 text-[#8A5A17] transition-transform duration-200 ${
+                        className={`h-4 w-4 shrink-0 text-[var(--c-gold-text)] transition-transform duration-200 ${
                           isOpen ? 'rotate-180' : ''
                         }`}
                       />
                     </button>
                     {isOpen && (
-                      <div className="border-t border-[rgba(30,23,16,0.06)] px-5 pb-5 pt-3">
-                        <p className="text-sm leading-relaxed text-[#635647]">
+                      <div className="border-t border-[rgb(var(--c-tint)/0.06)] px-5 pb-5 pt-3">
+                        <p className="text-sm leading-relaxed text-[var(--c-muted)]">
                           {bn ? item.aBn : item.aEn}
                         </p>
                       </div>
@@ -1860,13 +2025,13 @@ export function HomeStorefrontView() {
 
         {/* SECTION 11: NEWSLETTER & HARVEST UPDATES */}
         <section className="mx-auto max-w-3xl px-4 py-16 text-center sm:px-8 sm:py-20">
-          <span className="font-mono text-xs font-semibold uppercase tracking-widest text-[#8A5A17]">
+          <span className="eyebrow is-centered">
             {bn ? 'নতুন ব্যাচের খবর' : 'Harvest Notifications'}
           </span>
-          <h2 className="font-display mt-2 text-3xl font-bold text-[#1E1710] sm:text-4xl">
+          <h2 className="section-title mt-4">
             {bn ? 'পাবনা থেকে তাজা ব্যাচের খবর সবার আগে' : 'Fresh Harvest Alerts'}
           </h2>
-          <p className="mx-auto mt-2 max-w-lg text-sm text-[#635647]">
+          <p className="mx-auto mt-2 max-w-lg text-sm text-[var(--c-muted)]">
             {bn
               ? 'নতুন ব্যাচের ঘি প্রস্তুত হলে ইমেইলে নোটিফিকেশন পান। কোনো স্প্যাম পাঠানো হবে না।'
               : 'Direct alerts when a fresh morning-churn batch leaves Pabna.'}
@@ -1880,14 +2045,15 @@ export function HomeStorefrontView() {
               type="email"
               value={newsEmail}
               onChange={(e) => setNewsEmail(e.target.value)}
+              autoComplete="email"
               placeholder="you@example.com"
               aria-label="Email address for batch updates"
-              className="min-h-[48px] flex-1 rounded-xl border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-4 text-base text-[#1E1710] shadow-xs focus:border-[#B47B2B] focus:outline-none sm:text-sm"
+              className="min-h-[48px] flex-1 rounded-xl border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-4 text-base text-[var(--c-ink)] shadow-xs focus:border-[#B47B2B] focus:outline-none sm:text-sm"
             />
             <button
               type="submit"
               disabled={newsSubmitting}
-              className="min-h-[48px] rounded-xl bg-[#1A120B] px-7 text-sm font-semibold text-[#FAF7F2] hover:bg-[#332415] disabled:opacity-60 transition-colors shadow-xs"
+              className="min-h-[48px] rounded-xl bg-[var(--c-accent)] px-7 text-sm font-semibold text-[var(--c-on-accent)] hover:bg-[var(--c-accent-hover)] disabled:opacity-60 transition-colors shadow-xs"
             >
               {newsSubmitting ? '...' : bn ? 'যুক্ত হোন' : 'Subscribe'}
             </button>
@@ -1895,7 +2061,7 @@ export function HomeStorefrontView() {
           {newsFeedback && (
             <p
               className={`mt-3 text-xs font-semibold ${
-                newsFeedback.type === 'ok' ? 'text-[#2D6A4F]' : 'text-red-700'
+                newsFeedback.type === 'ok' ? 'text-[var(--c-green-text)]' : 'text-red-700'
               }`}
             >
               {newsFeedback.msg}
@@ -1906,14 +2072,14 @@ export function HomeStorefrontView() {
 
       {/* UNIFIED MOBILE BOTTOM BAR (AI ASSISTANT + WEIGHT/PRICE + BUY NOW) */}
       {!drawerOpen && (
-        <div className="no-print fixed inset-x-0 bottom-0 z-30 border-t border-[rgba(30,23,16,0.12)] bg-[#FAF7F2]/95 px-3 py-2 backdrop-blur-md pb-[max(0.5rem,env(safe-area-inset-bottom))] md:hidden shadow-[0_-8px_24px_rgba(30,23,16,0.08)]">
+        <div className="no-print fixed inset-x-0 bottom-0 z-30 border-t border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-bg)]/95 px-3 py-2 backdrop-blur-md pb-[max(0.5rem,env(safe-area-inset-bottom))] md:hidden shadow-[0_-8px_24px_rgba(30,23,16,0.08)]">
           <div className="flex items-center justify-between gap-2.5">
             {chatbotConfig.enabled && (
               <button
                 type="button"
                 onClick={openChatAssistant}
                 aria-label={bn ? 'দেশী ঘি এআই সহকারী খুলুন' : 'Open Deshi Gee AI Assistant'}
-                className="relative inline-flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-xl bg-[#1A120B] px-3 text-xs font-semibold text-[#FAF7F2] shadow-xs active:scale-95 transition-transform"
+                className="relative inline-flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-xl bg-[var(--c-accent)] px-3 text-xs font-semibold text-[var(--c-on-accent)] shadow-xs active:scale-95 transition-transform"
               >
                 <span className="relative flex h-4 w-4 items-center justify-center">
                   <MessageSquareText className="h-4 w-4 text-[#F5D692]" />
@@ -1926,19 +2092,19 @@ export function HomeStorefrontView() {
             <div className="min-w-0 flex-1 text-center">
               {orderingReady && activePrice > 0 ? (
                 <div className="flex items-baseline justify-center gap-1">
-                  <span className="font-mono text-sm font-bold tabular-nums text-[#1E1710]">
+                  <span className="font-mono text-sm font-bold tabular-nums text-[var(--c-ink)]">
                     {formatBdt(activePrice)}
                   </span>
-                  <span className="text-[11px] font-bold text-[#8A5A17]">
+                  <span className="text-[11px] font-bold text-[var(--c-gold-text)]">
                     ({bn ? selectedVariantMeta.labelBn : selectedWeight})
                   </span>
                 </div>
               ) : (
-                <p className="truncate text-xs font-semibold text-[#1E1710]">
+                <p className="truncate text-xs font-semibold text-[var(--c-ink)]">
                   {bn ? 'অর্ডার চালু হয়নি' : 'Ordering unavailable'}
                 </p>
               )}
-              <p className="truncate text-[10px] text-[#635647]">
+              <p className="truncate text-[10px] text-[var(--c-muted)]">
                 {bn ? 'পাবনার বিলোনা ঘি' : 'Pabna Bilona Ghee'}
               </p>
             </div>
@@ -1948,7 +2114,7 @@ export function HomeStorefrontView() {
                 type="button"
                 disabled={isOutOfStock}
                 onClick={() => handleAddToCart(true)}
-                className="min-h-[44px] shrink-0 rounded-xl bg-gradient-to-r from-[#B47B2B] to-[#96621B] px-4 text-xs font-bold text-[#FFFDF9] shadow-sm disabled:opacity-45 whitespace-nowrap active:scale-95 transition-transform"
+                className="min-h-[44px] shrink-0 rounded-xl bg-gradient-to-r from-[#B47B2B] to-[#96621B] px-4 text-xs font-bold text-[var(--c-on-gold)] shadow-sm disabled:opacity-45 whitespace-nowrap active:scale-95 transition-transform"
               >
                 {isOutOfStock
                   ? bn
@@ -1962,7 +2128,7 @@ export function HomeStorefrontView() {
               <button
                 type="button"
                 onClick={openCallbackRequest}
-                className="min-h-[44px] shrink-0 rounded-xl border border-[#1E1710]/20 bg-[#F2ECE1] px-3.5 text-xs font-semibold text-[#1E1710] whitespace-nowrap"
+                className="min-h-[44px] shrink-0 rounded-xl border border-[rgb(var(--c-tint)/0.3)]/20 bg-[var(--c-surface)] px-3.5 text-xs font-semibold text-[var(--c-ink)] whitespace-nowrap"
               >
                 {bn ? 'কলব্যাক' : 'Callback'}
               </button>

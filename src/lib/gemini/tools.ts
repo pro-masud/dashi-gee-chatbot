@@ -82,7 +82,7 @@ export const CHATBOT_FUNCTION_DECLARATIONS: FunctionDeclaration[] = [
   {
     name: 'get_current_price',
     description:
-      'Get live BDT (৳) prices for Deshi Gee 250g, 500g, and 1kg sealed glass jars.',
+      'Get live BDT (৳) prices for Deshi Gee 250g, 500g, and 1kg sealed jars.',
     parameters: {
       type: Type.OBJECT,
       properties: {

@@ -1,4 +1,4 @@
-// Interactive 3D Rotating Apothecary Glass Jar Wireframe & Aroma-Seal Silhouette
+// Interactive 3D Rotating Airtight Jar Wireframe & Aroma-Seal Silhouette
 export function initSpecsCanvas(canvas: HTMLCanvasElement | null): () => void {
   if (!canvas) return () => {};
   const ctx = canvas.getContext('2d');
@@ -63,8 +63,9 @@ export function initSpecsCanvas(canvas: HTMLCanvasElement | null): () => void {
     }
     ctx.clearRect(0, 0, w, h);
 
-    const strokeEspresso = 'rgba(30, 23, 16, 0.22)';
-    const strokeAmber = 'rgba(180, 123, 43, 0.85)';
+    const isLight = document.documentElement.getAttribute('data-sf-theme') === 'light';
+    const strokeEspresso = isLight ? 'rgba(30, 23, 16, 0.22)' : 'rgba(229, 198, 150, 0.22)';
+    const strokeAmber = isLight ? 'rgba(180, 123, 43, 0.85)' : 'rgba(229, 178, 93, 0.9)';
 
     const cx = w * 0.5;
     const cy = h * 0.5;

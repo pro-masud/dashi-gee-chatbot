@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   ),
   title: 'Deshi Gee — Pure Pabna Grass-Fed Bilona Cow Ghee',
   description:
-    'Authentic single-origin Pabna grass-fed Deshi Cow Ghee churned by traditional wooden bilona. Order 250g, 500g, or 1kg sealed glass jars across Bangladesh.',
+    'Authentic single-origin Pabna grass-fed Deshi Cow Ghee churned by traditional wooden bilona. Order 250g, 500g, or 1kg sealed jars across Bangladesh.',
   icons: {
     icon: '/favicon.svg',
   },
@@ -21,11 +21,11 @@ export const metadata: Metadata = {
     siteName: 'Deshi Gee',
     title: 'Deshi Gee — Pure Pabna Grass-Fed Bilona Cow Ghee',
     description:
-      'Authentic single-origin Pabna grass-fed Deshi Cow Ghee churned by traditional wooden bilona. Available in 250g, 500g, and 1kg sealed glass jars.',
+      'Authentic single-origin Pabna grass-fed Deshi Cow Ghee churned by traditional wooden bilona. Available in 250g, 500g, and 1kg sealed jars.',
     images: [
       {
         url: '/assets/images/hero_deshi_jar_1794893673264.jpg',
-        alt: 'Sealed apothecary glass jar of Pabna grass-fed Deshi Cow Ghee',
+        alt: 'Sealed jar of Pabna grass-fed Deshi Cow Ghee',
       },
     ],
   },
@@ -45,6 +45,12 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang="en" data-theme="light" suppressHydrationWarning>
       <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{var t=localStorage.getItem('dg-theme');document.documentElement.setAttribute('data-sf-theme',t==='light'?'light':'dark')}catch(e){document.documentElement.setAttribute('data-sf-theme','dark')}",
+          }}
+        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
           rel="preconnect"

@@ -456,9 +456,9 @@ export const CURATED_PRODUCT_KNOWLEDGE_PACK: CuratedStarterFaqEntry[] = [
     draftNotice: 'Draft starter pack – owner review required',
   },
   {
-    question: 'আপনারা কি কাঁচের জারে ঘি দেন?',
+    question: 'আপনারা কোন ধরনের জারে ঘি দেন?',
     answer:
-      'হ্যাঁ, আমাদের ২৫০ গ্রাম, ৫০০ গ্রাম এবং ১ কেজি—তিনটি সাইজই সিল করা কাঁচের বয়ামে প্যাকেজ করা হয়।',
+      'হ্যাঁ, আমাদের ২৫০ গ্রাম, ৫০০ গ্রাম এবং ১ কেজি—তিনটি সাইজই সিল করা বয়ামে প্যাকেজ করা হয়।',
     lang: 'bn',
     category: 'Packaging & Quality',
     active: false,

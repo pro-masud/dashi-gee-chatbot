@@ -689,20 +689,20 @@ export function TrackOrderView({
       <button
         type="button"
         onClick={onBackHome}
-        className="inline-flex min-h-[44px] items-center gap-2 text-sm font-medium text-[#635647] hover:text-[#1E1710]"
+        className="inline-flex min-h-[44px] items-center gap-2 text-sm font-medium text-[var(--c-muted)] hover:text-[var(--c-ink)]"
       >
         <ArrowLeft className="h-4 w-4" />
         <span>{bn ? 'স্টোরফ্রন্টে ফিরে যান' : 'Back to Deshi Gee'}</span>
       </button>
 
       <div className="mt-5 sm:mt-6">
-        <p className="text-xs font-medium uppercase tracking-widest text-[#8A5A17]">
+        <p className="text-xs font-medium uppercase tracking-widest text-[var(--c-gold-text)]">
           {bn ? 'লাইভ অর্ডার স্ট্যাটাস' : 'Order Tracking'}
         </p>
-        <h1 className="font-display mt-2 text-2xl font-semibold tracking-tight text-[#1E1710] sm:text-4xl">
+        <h1 className="font-display mt-2 text-2xl font-semibold tracking-tight text-[var(--c-ink)] sm:text-4xl">
           {bn ? 'আপনার দেশী ঘি অর্ডার ট্র্যাক করুন' : 'Track Your Deshi Gee Order'}
         </h1>
-        <p className="mt-2 text-sm text-[#635647]">
+        <p className="mt-2 text-sm text-[var(--c-muted)]">
           {bn
             ? 'অর্ডার নিশ্চিতকরণের সময় পাওয়া অর্ডার আইডি এবং আপনার মোবাইল নম্বর দিন।'
             : 'Enter your Order ID and verified checkout phone number to inspect live dispatch status.'}
@@ -711,10 +711,10 @@ export function TrackOrderView({
 
       <form
         onSubmit={handleSubmit}
-        className="mt-7 grid grid-cols-1 gap-4 rounded-3xl border border-[rgba(30,23,16,0.12)] bg-[#F4EFE6]/80 p-5 sm:mt-8 sm:grid-cols-12 sm:p-7 shadow-xs"
+        className="mt-7 grid grid-cols-1 gap-4 rounded-3xl border border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-band)]/80 p-5 sm:mt-8 sm:grid-cols-12 sm:p-7 shadow-xs"
       >
         <div className="sm:col-span-5">
-          <label htmlFor="trk-id" className="block text-xs font-semibold text-[#635647]">
+          <label htmlFor="trk-id" className="block text-xs font-semibold text-[var(--c-muted)]">
             {bn ? 'অর্ডার আইডি' : 'Order ID'}
           </label>
           <input
@@ -723,12 +723,12 @@ export function TrackOrderView({
             value={orderInput}
             onChange={(e) => setOrderInput(e.target.value.toUpperCase())}
             placeholder="DG-XXXXX"
-            className="mt-1.5 w-full rounded-xl border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-4 py-2.5 font-mono text-base uppercase text-[#1E1710] shadow-xs focus:border-[#B47B2B] focus:outline-none sm:text-sm"
+            className="mt-1.5 w-full rounded-xl border border-[rgb(var(--c-tint)/0.16)] bg-[var(--c-card)] px-4 py-2.5 font-mono text-base uppercase text-[var(--c-ink)] shadow-xs focus:border-[#B47B2B] focus:outline-none sm:text-sm"
           />
         </div>
 
         <div className="sm:col-span-4">
-          <label htmlFor="trk-phone" className="block text-xs font-semibold text-[#635647]">
+          <label htmlFor="trk-phone" className="block text-xs font-semibold text-[var(--c-muted)]">
             {bn ? 'মোবাইল নম্বর' : 'Mobile Number'}
           </label>
           <input
@@ -738,7 +738,7 @@ export function TrackOrderView({
             value={phoneInput}
             onChange={(e) => setPhoneInput(e.target.value)}
             placeholder="017XXXXXXXX"
-            className="mt-1.5 w-full rounded-xl border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-4 py-2.5 font-mono text-base text-[#1E1710] shadow-xs focus:border-[#B47B2B] focus:outline-none sm:text-sm"
+            className="mt-1.5 w-full rounded-xl border border-[rgb(var(--c-tint)/0.16)] bg-[var(--c-card)] px-4 py-2.5 font-mono text-base text-[var(--c-ink)] shadow-xs focus:border-[#B47B2B] focus:outline-none sm:text-sm"
           />
         </div>
 
@@ -746,7 +746,7 @@ export function TrackOrderView({
           <button
             type="submit"
             disabled={loading}
-            className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#B47B2B] to-[#96621B] px-5 py-2.5 text-sm font-bold text-[#FFFDF9] shadow-xs hover:scale-[1.01] disabled:opacity-60 transition-all"
+            className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#B47B2B] to-[#96621B] px-5 py-2.5 text-sm font-bold text-[var(--c-on-gold)] shadow-xs hover:scale-[1.01] disabled:opacity-60 transition-all"
           >
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin text-[#FFFDF9]" />
@@ -770,12 +770,12 @@ export function TrackOrderView({
 
       {/* Tracking Result or Empty State */}
       {searched && !loading && !errorMsg && !result && (
-        <div className="mt-8 flex flex-col items-center rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-10 text-center">
-          <PackageSearch className="h-10 w-10 text-[#8A5A17]" />
-          <h2 className="font-display mt-3 text-xl font-semibold text-[#1E1710]">
+        <div className="mt-8 flex flex-col items-center rounded-2xl border border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-card)] p-10 text-center">
+          <PackageSearch className="h-10 w-10 text-[var(--c-gold-text)]" />
+          <h2 className="font-display mt-3 text-xl font-semibold text-[var(--c-ink)]">
             {bn ? 'কোনো অর্ডার খুঁজে পাওয়া যায়নি' : 'No Matching Order Found'}
           </h2>
-          <p className="mt-1.5 max-w-md text-sm text-[#635647]">
+          <p className="mt-1.5 max-w-md text-sm text-[var(--c-muted)]">
             {bn
               ? 'দয়া করে আপনার অর্ডার আইডি এবং অর্ডারের সময় ব্যবহৃত মোবাইল নম্বর মিলিয়ে আবার চেষ্টা করুন।'
               : 'Double-check your Order ID and the exact 11-digit mobile number entered at checkout.'}
@@ -820,14 +820,14 @@ export function TrackOrderView({
       )}
 
       {result && (
-        <div className="mt-8 space-y-6 rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6 sm:p-8">
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[rgba(30,23,16,0.10)] pb-5">
+        <div className="mt-8 space-y-6 rounded-2xl border border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-card)] p-6 sm:p-8">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[rgb(var(--c-tint)/0.10)] pb-5">
             <div>
-              <p className="font-mono text-xs uppercase tracking-wider text-[#8A5A17] tabular-nums">
+              <p className="font-mono text-xs uppercase tracking-wider text-[var(--c-gold-text)] tabular-nums">
                 {result.orderNumber}
                 {result.district ? ` · ${result.district}` : ''}
               </p>
-              <h2 className="font-display mt-1 text-2xl font-semibold text-[#1E1710]">
+              <h2 className="font-display mt-1 text-2xl font-semibold text-[var(--c-ink)]">
                 {result.itemsSummary || `${result.weight} × ${result.qty}`} ·{' '}
                 <span className="font-mono tabular-nums">
                   {formatBdt(result.totalBdt)}
@@ -836,10 +836,10 @@ export function TrackOrderView({
             </div>
 
             <div className="text-left text-xs sm:text-right">
-              <p className="text-[#635647]">
+              <p className="text-[var(--c-muted)]">
                 {bn ? 'পেমেন্ট অবস্থা' : 'Payment Status'}
               </p>
-              <p className="mt-0.5 font-medium text-[#1E1710]">
+              <p className="mt-0.5 font-medium text-[var(--c-ink)]">
                 {result.paymentMethod.toUpperCase()} ·{' '}
                 {result.paymentStatus === 'verified'
                   ? bn
@@ -863,8 +863,8 @@ export function TrackOrderView({
           {result.status !== 'cancelled' &&
             result.paymentStatus !== 'verified' &&
             (onlineGateways.sslcommerz || onlineGateways.bkash) && (
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(180,123,43,0.3)] bg-[#FAF7F2] px-4 py-3 text-xs">
-                <span className="font-medium text-[#1E1710]">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(180,123,43,0.3)] bg-[var(--c-bg)] px-4 py-3 text-xs">
+                <span className="font-medium text-[var(--c-ink)]">
                   {bn
                     ? 'এখনই অনলাইনে নিরাপদ পেমেন্ট সম্পন্ন করুন:'
                     : 'Complete payment online securely:'}
@@ -875,7 +875,7 @@ export function TrackOrderView({
                       type="button"
                       disabled={Boolean(gatewayBusy)}
                       onClick={() => handlePayOrderOnline('sslcommerz')}
-                      className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-3.5 py-2 font-semibold text-[#FFFDF9] hover:bg-[#9D6820] disabled:opacity-55"
+                      className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-3.5 py-2 font-semibold text-[var(--c-on-gold)] hover:bg-[#9D6820] disabled:opacity-55"
                     >
                       {gatewayBusy === 'sslcommerz' ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -890,7 +890,7 @@ export function TrackOrderView({
                       type="button"
                       disabled={Boolean(gatewayBusy)}
                       onClick={() => handlePayOrderOnline('bkash')}
-                      className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-[#B47B2B] bg-[#FFFDF9] px-3.5 py-2 font-semibold text-[#8A5A17] hover:bg-[#F2ECE1] disabled:opacity-55"
+                      className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-[#B47B2B] bg-[var(--c-card)] px-3.5 py-2 font-semibold text-[var(--c-gold-text)] hover:bg-[var(--c-surface)] disabled:opacity-55"
                     >
                       {gatewayBusy === 'bkash' ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -925,21 +925,21 @@ export function TrackOrderView({
                     key={step.key}
                     className={`rounded-xl border p-3.5 transition-colors ${
                       completed
-                        ? 'border-[#B47B2B] bg-[#F2ECE1]'
-                        : 'border-[rgba(30,23,16,0.10)] bg-[#FAF7F2]/60 opacity-65'
+                        ? 'border-[#B47B2B] bg-[var(--c-surface)]'
+                        : 'border-[rgb(var(--c-tint)/0.10)] bg-[var(--c-bg)]/60 opacity-65'
                     }`}
                   >
                     <div className="flex items-center gap-2">
                       <CheckCircle2
                         className={`h-4 w-4 shrink-0 ${
-                          completed ? 'text-[#8A5A17]' : 'text-[#635647]/40'
+                          completed ? 'text-[var(--c-gold-text)]' : 'text-[var(--c-muted)]/40'
                         }`}
                       />
-                      <span className="font-mono text-[11px] tabular-nums text-[#635647]">
+                      <span className="font-mono text-[11px] tabular-nums text-[var(--c-muted)]">
                         0{idx + 1}
                       </span>
                     </div>
-                    <p className="mt-2 text-xs font-semibold text-[#1E1710]">
+                    <p className="mt-2 text-xs font-semibold text-[var(--c-ink)]">
                       {bn ? step.bn : step.en}
                     </p>
                   </div>
@@ -948,28 +948,28 @@ export function TrackOrderView({
             </div>
           )}
 
-          <p className="text-xs text-[#635647]">
+          <p className="text-xs text-[var(--c-muted)]">
             {bn ? 'সম্ভাব্য ডেলিভারি সময়:' : 'Estimated Delivery Window:'}{' '}
-            <span className="font-medium text-[#1E1710]">
+            <span className="font-medium text-[var(--c-ink)]">
               {result.estimatedDelivery}
             </span>
           </p>
 
           {(result.courierPartner || result.consignmentId || result.courierTrackingUrl) && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] px-4 py-3 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-bg)] px-4 py-3 text-xs">
               <div className="space-y-0.5">
-                <p className="font-medium text-[#1E1710]">
-                  <Truck className="mr-1.5 inline h-3.5 w-3.5 text-[#8A5A17]" />
+                <p className="font-medium text-[var(--c-ink)]">
+                  <Truck className="mr-1.5 inline h-3.5 w-3.5 text-[var(--c-gold-text)]" />
                   {bn ? 'কুরিয়ার কনসাইনমেন্ট:' : 'Courier Dispatch:'}{' '}
                   <span className="font-mono uppercase">
                     {result.courierPartner || 'courier'}
                   </span>
                   {result.consignmentId ? (
-                    <span className="font-mono text-[#8A5A17]"> · {result.consignmentId}</span>
+                    <span className="font-mono text-[var(--c-gold-text)]"> · {result.consignmentId}</span>
                   ) : null}
                 </p>
                 {result.dispatchedAtIso && (
-                  <p className="font-mono text-[11px] tabular-nums text-[#635647]">
+                  <p className="font-mono text-[11px] tabular-nums text-[var(--c-muted)]">
                     {bn ? 'পাঠানোর সময়:' : 'Dispatched:'}{' '}
                     {new Date(result.dispatchedAtIso).toLocaleString()}
                   </p>
@@ -981,7 +981,7 @@ export function TrackOrderView({
                     href={result.courierTrackingUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-lg bg-[#1E1710] px-3.5 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E]"
+                    className="inline-flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-lg bg-[var(--c-accent)] px-3.5 py-2 text-xs font-medium text-[var(--c-on-accent)] hover:bg-[var(--c-accent-hover)]"
                   >
                     <span>{bn ? 'কুরিয়ার ট্র্যাক করুন' : 'Track on Courier'}</span>
                     <ExternalLink className="h-3.5 w-3.5" />
@@ -995,7 +995,7 @@ export function TrackOrderView({
               role="status"
               className={`rounded-xl border px-4 py-3 text-xs font-medium ${
                 manageFeedback.type === 'ok'
-                  ? 'border-[#B47B2B]/40 bg-[#F2ECE1] text-[#1E1710]'
+                  ? 'border-[#B47B2B]/40 bg-[var(--c-surface)] text-[#1E1710]'
                   : 'border-red-300 bg-red-50 text-red-800'
               }`}
             >
@@ -1005,9 +1005,9 @@ export function TrackOrderView({
 
           {/* Pre-Dispatch Self-Serve Management */}
           {canSelfServeModify ? (
-            <div className="space-y-4 border-t border-[rgba(30,23,16,0.10)] pt-5">
+            <div className="space-y-4 border-t border-[rgb(var(--c-tint)/0.10)] pt-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-medium text-[#635647]">
+                <p className="text-xs font-medium text-[var(--c-muted)]">
                   {bn
                     ? 'ডেলিভারি পাঠানোর আগে আপনি ঠিকানা পরিবর্তন বা অর্ডার বাতিল করতে পারেন।'
                     : 'Before dispatch, you can update your delivery address or cancel this order.'}
@@ -1019,9 +1019,9 @@ export function TrackOrderView({
                       setShowEditForm((v) => !v);
                       setShowCancelConfirm(false);
                     }}
-                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-3.5 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-[rgb(var(--c-tint)/0.2)] bg-[var(--c-bg)] px-3.5 py-2 text-xs font-medium text-[var(--c-ink)] hover:bg-[var(--c-surface)]"
                   >
-                    <Edit3 className="h-3.5 w-3.5 text-[#8A5A17]" />
+                    <Edit3 className="h-3.5 w-3.5 text-[var(--c-gold-text)]" />
                     <span>{bn ? 'ঠিকানা পরিবর্তন' : 'Edit Delivery Address'}</span>
                   </button>
                   <button
@@ -1041,17 +1041,17 @@ export function TrackOrderView({
               {showEditForm && (
                 <form
                   onSubmit={handleSaveAddressChange}
-                  className="space-y-3 rounded-xl border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] p-4"
+                  className="space-y-3 rounded-xl border border-[rgb(var(--c-tint)/0.14)] bg-[var(--c-bg)] p-4"
                 >
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
-                      <label className="block text-xs font-medium text-[#635647]">
+                      <label className="block text-xs font-medium text-[var(--c-muted)]">
                         {bn ? 'নতুন জেলা *' : 'New District *'}
                       </label>
                       <select
                         value={editDistrict}
                         onChange={(e) => setEditDistrict(e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base text-[#1E1710] sm:text-sm"
+                        className="mt-1 w-full rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3 py-2 text-base text-[var(--c-ink)] sm:text-sm"
                       >
                         {BANGLADESH_DISTRICTS.map((d) => (
                           <option key={d} value={d}>
@@ -1061,7 +1061,7 @@ export function TrackOrderView({
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-[#635647]">
+                      <label className="block text-xs font-medium text-[var(--c-muted)]">
                         {bn ? 'এলাকা / থানা *' : 'Area / Thana *'}
                       </label>
                       <input
@@ -1070,12 +1070,12 @@ export function TrackOrderView({
                         value={editArea}
                         onChange={(e) => setEditArea(e.target.value)}
                         placeholder={bn ? 'যেমন: সাভার / উত্তরা' : 'e.g. Savar / Uttara'}
-                        className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base text-[#1E1710] sm:text-sm"
+                        className="mt-1 w-full rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3 py-2 text-base text-[var(--c-ink)] sm:text-sm"
                       />
                     </div>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-[#635647]">
+                    <label className="block text-xs font-medium text-[var(--c-muted)]">
                       {bn ? 'সম্পূর্ণ সড়ক ও বাড়ির ঠিকানা *' : 'Complete Street Address *'}
                     </label>
                     <input
@@ -1084,14 +1084,14 @@ export function TrackOrderView({
                       value={editAddress}
                       onChange={(e) => setEditAddress(e.target.value)}
                       placeholder={bn ? 'বাড়ি ১২, রোড ৪, সেক্টর ১০' : 'House 12, Road 4, Sector 10'}
-                      className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base text-[#1E1710] sm:text-sm"
+                      className="mt-1 w-full rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3 py-2 text-base text-[var(--c-ink)] sm:text-sm"
                     />
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="submit"
                       disabled={manageLoading}
-                      className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-4 py-2 text-xs font-semibold text-[#FFFDF9] disabled:opacity-60"
+                      className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-4 py-2 text-xs font-semibold text-[var(--c-on-gold)] disabled:opacity-60"
                     >
                       {manageLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                       <span>
@@ -1101,7 +1101,7 @@ export function TrackOrderView({
                     <button
                       type="button"
                       onClick={() => setShowEditForm(false)}
-                      className="min-h-[44px] rounded-lg border border-[rgba(30,23,16,0.18)] px-4 py-2 text-xs font-medium text-[#635647]"
+                      className="min-h-[44px] rounded-lg border border-[rgb(var(--c-tint)/0.18)] px-4 py-2 text-xs font-medium text-[var(--c-muted)]"
                     >
                       {bn ? 'বন্ধ করুন' : 'Dismiss'}
                     </button>
@@ -1123,7 +1123,7 @@ export function TrackOrderView({
                     placeholder={
                       bn ? 'বাতিলের কারণ (ঐচ্ছিক)' : 'Reason for cancellation (optional)'
                     }
-                    className="w-full rounded-lg border border-red-200 bg-[#FFFDF9] px-3 py-2 text-base text-[#1E1710] sm:text-xs"
+                    className="w-full rounded-lg border border-red-200 bg-[var(--c-card)] px-3 py-2 text-base text-[var(--c-ink)] sm:text-xs"
                   />
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -1138,7 +1138,7 @@ export function TrackOrderView({
                     <button
                       type="button"
                       onClick={() => setShowCancelConfirm(false)}
-                      className="min-h-[44px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FFFDF9] px-4 py-2 text-xs font-medium text-[#1E1710]"
+                      className="min-h-[44px] rounded-lg border border-[rgb(var(--c-tint)/0.2)] bg-[var(--c-card)] px-4 py-2 text-xs font-medium text-[var(--c-ink)]"
                     >
                       {bn ? 'ফিরে যান' : 'Keep Order'}
                     </button>
@@ -1147,7 +1147,7 @@ export function TrackOrderView({
               )}
             </div>
           ) : result.status !== 'cancelled' ? (
-            <div className="border-t border-[rgba(30,23,16,0.10)] pt-4 text-xs text-[#635647]">
+            <div className="border-t border-[rgb(var(--c-tint)/0.10)] pt-4 text-xs text-[var(--c-muted)]">
               {bn
                 ? 'এই অর্ডারটি ইতিমধ্যে প্যাকেজিং বা কুরিয়ার পর্যায়ে চলে যাওয়ায় অনলাইনে পরিবর্তন বন্ধ রয়েছে। জরুরি প্রয়োজনে নিচের সাপোর্ট অপশন ব্যবহার করুন।'
                 : 'This order is already being processed/shipped, so online edits or cancellation are locked. Use the support option below if urgent.'}
@@ -1172,7 +1172,7 @@ export function TrackOrderView({
                       setTicketCategory('payment_dispute');
                       setShowSupportPanel(true);
                     }}
-                    className="min-h-[44px] rounded-lg border border-amber-400 bg-[#FFFDF9] px-3.5 py-2 text-xs font-semibold text-[#1E1710] hover:bg-[#F2ECE1]"
+                    className="min-h-[44px] rounded-lg border border-amber-400 bg-[var(--c-card)] px-3.5 py-2 text-xs font-semibold text-[var(--c-ink)] hover:bg-[var(--c-surface)]"
                   >
                     {bn ? 'পেমেন্ট ডিসপিউট টিকিট দিন' : 'Dispute Payment Verification'}
                   </button>
@@ -1184,10 +1184,10 @@ export function TrackOrderView({
 
           {/* Delivery Delay Diagnostic */}
           {delayDiagnostic && result.status !== 'delivered' && result.status !== 'cancelled' && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] p-4 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-bg)] p-4 text-xs">
               <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                <Clock className="mt-0.5 h-4 w-4 shrink-0 text-[#8A5A17]" />
-                <p className="text-[#635647]">
+                <Clock className="mt-0.5 h-4 w-4 shrink-0 text-[var(--c-gold-text)]" />
+                <p className="text-[var(--c-muted)]">
                   {bn ? delayDiagnostic.statusNoteBn : delayDiagnostic.statusNoteEn}
                 </p>
               </div>
@@ -1198,7 +1198,7 @@ export function TrackOrderView({
                     setTicketCategory('late_delivery');
                     setShowSupportPanel(true);
                   }}
-                  className="min-h-[44px] shrink-0 rounded-lg border border-[rgba(180,123,43,0.45)] bg-[#FFFDF9] px-3.5 py-2 text-xs font-semibold text-[#1E1710] hover:bg-[#F2ECE1]"
+                  className="min-h-[44px] shrink-0 rounded-lg border border-[rgba(180,123,43,0.45)] bg-[var(--c-card)] px-3.5 py-2 text-xs font-semibold text-[var(--c-ink)] hover:bg-[var(--c-surface)]"
                 >
                   {bn ? 'জরুরি ডেলিভারি ফলো-আপ' : 'Report Delay (Urgent)'}
                 </button>
@@ -1207,18 +1207,18 @@ export function TrackOrderView({
           )}
 
           {/* Report Issue / Upload Private Evidence / Open Support Ticket */}
-          <div className="border-t border-[rgba(30,23,16,0.10)] pt-5">
+          <div className="border-t border-[rgb(var(--c-tint)/0.10)] pt-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h3 className="flex items-center gap-2 text-sm font-semibold text-[#1E1710]">
-                  <Headset className="h-4 w-4 text-[#8A5A17]" />
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--c-ink)]">
+                  <Headset className="h-4 w-4 text-[var(--c-gold-text)]" />
                   <span>
                     {bn
                       ? 'ক্ষতিগ্রস্ত জার, পেমেন্ট বা ডেলিভারি সহায়তা'
                       : 'Need Help? Report Issue or Upload Photo'}
                   </span>
                 </h3>
-                <p className="mt-0.5 text-xs text-[#635647]">
+                <p className="mt-0.5 text-xs text-[var(--c-muted)]">
                   {bn
                     ? 'ডেলিভারির ২৪ ঘণ্টার মধ্যে ভাঙা জারের ছবি বা পেমেন্ট স্ক্রিনশট দিয়ে সরাসরি টিকিট খুলুন।'
                     : 'Upload a delivery-day jar photo (within 24h) or payment screenshot to open an escalated ticket.'}
@@ -1227,7 +1227,7 @@ export function TrackOrderView({
               <button
                 type="button"
                 onClick={() => setShowSupportPanel((v) => !v)}
-                className="min-h-[44px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-4 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+                className="min-h-[44px] rounded-lg border border-[rgb(var(--c-tint)/0.2)] bg-[var(--c-bg)] px-4 py-2 text-xs font-medium text-[var(--c-ink)] hover:bg-[var(--c-surface)]"
               >
                 {showSupportPanel
                   ? bn
@@ -1254,17 +1254,17 @@ export function TrackOrderView({
             {showSupportPanel && (
               <form
                 onSubmit={handleSubmitSupportTicket}
-                className="mt-4 space-y-3 rounded-xl border border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] p-4 text-xs"
+                className="mt-4 space-y-3 rounded-xl border border-[rgb(var(--c-tint)/0.14)] bg-[var(--c-bg)] p-4 text-xs"
               >
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
-                    <label className="block text-[#635647]">
+                    <label className="block text-[var(--c-muted)]">
                       {bn ? 'সমস্যার ধরন *' : 'Issue Category *'}
                     </label>
                     <select
                       value={ticketCategory}
                       onChange={(e) => setTicketCategory(e.target.value as SupportCategory)}
-                      className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base sm:text-xs"
+                      className="mt-1 w-full rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3 py-2 text-base sm:text-xs"
                     >
                       <option value="damaged_jar">
                         {bn ? 'ভাঙা বা লিক হওয়া জার (Urgent)' : 'Damaged / Leaking Jar (Urgent)'}
@@ -1284,7 +1284,7 @@ export function TrackOrderView({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-[#635647]">
+                    <label className="block text-[var(--c-muted)]">
                       {bn ? 'আপনার নাম *' : 'Your Name *'}
                     </label>
                     <input
@@ -1293,13 +1293,13 @@ export function TrackOrderView({
                       value={ticketName}
                       onChange={(e) => setTicketName(e.target.value)}
                       placeholder={bn ? 'যেমন: রাকিব হাসান' : 'Full Name'}
-                      className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base sm:text-xs"
+                      className="mt-1 w-full rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3 py-2 text-base sm:text-xs"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-[#635647]">
+                  <label className="block text-[var(--c-muted)]">
                     {bn ? 'সমস্যার বিবরণ *' : 'Describe the Issue *'}
                   </label>
                   <textarea
@@ -1312,16 +1312,16 @@ export function TrackOrderView({
                         ? 'দয়া করে আপনার সমস্যাটি সংক্ষেপে লিখুন...'
                         : 'Briefly explain the jar condition, payment TxnID, or delivery concern...'
                     }
-                    className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base sm:text-xs"
+                    className="mt-1 w-full rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3 py-2 text-base sm:text-xs"
                   />
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
-                  <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border border-[rgba(180,123,43,0.4)] bg-[#FFFDF9] px-3.5 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]">
+                  <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border border-[rgba(180,123,43,0.4)] bg-[var(--c-card)] px-3.5 py-2 text-xs font-medium text-[var(--c-ink)] hover:bg-[var(--c-surface)]">
                     {evidenceBusy ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin text-[#B47B2B]" />
                     ) : (
-                      <ImagePlus className="h-3.5 w-3.5 text-[#8A5A17]" />
+                      <ImagePlus className="h-3.5 w-3.5 text-[var(--c-gold-text)]" />
                     )}
                     <span>
                       {evidenceBusy
@@ -1352,7 +1352,7 @@ export function TrackOrderView({
                   ))}
                 </div>
 
-                <label className="flex items-start gap-2 text-[11px] text-[#635647]">
+                <label className="flex items-start gap-2 text-[11px] text-[var(--c-muted)]">
                   <input
                     type="checkbox"
                     checked={ticketConsent}
@@ -1369,7 +1369,7 @@ export function TrackOrderView({
                 <button
                   type="submit"
                   disabled={ticketBusy}
-                  className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-[#B47B2B] px-4 py-2 text-xs font-semibold text-[#FFFDF9] hover:bg-[#9D6820] disabled:opacity-60"
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-[#B47B2B] px-4 py-2 text-xs font-semibold text-[var(--c-on-gold)] hover:bg-[#9D6820] disabled:opacity-60"
                 >
                   {ticketBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                   <span>{bn ? 'সাপোর্ট টিকিট জমা দিন' : 'Submit Support Ticket'}</span>
@@ -1380,15 +1380,15 @@ export function TrackOrderView({
 
           {/* T3.3 After-Delivery Retention Features (Delivered Orders Only) */}
           {result.status === 'delivered' && (
-            <div className="space-y-5 border-t border-[rgba(30,23,16,0.10)] pt-5">
+            <div className="space-y-5 border-t border-[rgb(var(--c-tint)/0.10)] pt-5">
               {/* 1. One-Click Reorder */}
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(180,123,43,0.35)] bg-[#F2ECE1]/70 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[rgba(180,123,43,0.35)] bg-[var(--c-surface)]/70 p-4">
                 <div>
-                  <h3 className="flex items-center gap-2 text-sm font-semibold text-[#1E1710]">
-                    <RotateCw className="h-4 w-4 text-[#8A5A17]" />
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--c-ink)]">
+                    <RotateCw className="h-4 w-4 text-[var(--c-gold-text)]" />
                     <span>{bn ? 'আগের মতোই আবার অর্ডার করুন' : 'Enjoyed Deshi Gee? Order Again'}</span>
                   </h3>
-                  <p className="mt-0.5 text-xs text-[#635647]">
+                  <p className="mt-0.5 text-xs text-[var(--c-muted)]">
                     {bn
                       ? 'বর্তমান লাইভ স্টক ও মূল্য যাচাই করে এক ক্লিকেই কার্ট সাজিয়ে নিন।'
                       : 'Pre-fill your cart in one click using live jar stock and current BDT pricing.'}
@@ -1399,7 +1399,7 @@ export function TrackOrderView({
                   type="button"
                   disabled={reorderBusy}
                   onClick={handleOneClickReorder}
-                  className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[#1E1710] px-4 py-2 text-xs font-semibold text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-60"
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[var(--c-accent)] px-4 py-2 text-xs font-semibold text-[var(--c-on-accent)] hover:bg-[var(--c-accent-hover)] disabled:opacity-60"
                 >
                   {reorderBusy ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1414,9 +1414,9 @@ export function TrackOrderView({
                 {/* 2. Verified Review Prompt */}
                 <form
                   onSubmit={handleSubmitVerifiedReview}
-                  className="space-y-3 rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] p-4 text-xs"
+                  className="space-y-3 rounded-xl border border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-bg)] p-4 text-xs"
                 >
-                  <h4 className="flex items-center gap-1.5 font-semibold text-[#1E1710]">
+                  <h4 className="flex items-center gap-1.5 font-semibold text-[var(--c-ink)]">
                     <Star className="h-4 w-4 text-[#B47B2B]" />
                     <span>
                       {bn ? 'যাচাইকৃত ক্রেতা রিভিউ দিন' : 'Share Your Verified Review'}
@@ -1429,7 +1429,7 @@ export function TrackOrderView({
                         type="button"
                         onClick={() => setReviewRating(star)}
                         aria-label={`${star} stars`}
-                        className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-[#F2ECE1]"
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-[var(--c-surface)]"
                       >
                         <Star
                           className={`h-5 w-5 ${
@@ -1447,7 +1447,7 @@ export function TrackOrderView({
                     value={reviewName}
                     onChange={(e) => setReviewName(e.target.value)}
                     placeholder={bn ? 'আপনার নাম' : 'Your name'}
-                    className="w-full rounded-lg border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3 py-2 text-base sm:text-xs"
+                    className="w-full rounded-lg border border-[rgb(var(--c-tint)/0.16)] bg-[var(--c-card)] px-3 py-2 text-base sm:text-xs"
                   />
                   <textarea
                     rows={2}
@@ -1459,7 +1459,7 @@ export function TrackOrderView({
                         ? 'ঘিয়ের স্বাদ, দানা ও প্যাকেজিং কেমন লেগেছে লিখুন...'
                         : 'Tell us how the aroma, danadar texture, and jar arrived...'
                     }
-                    className="w-full rounded-lg border border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] px-3 py-2 text-base sm:text-xs"
+                    className="w-full rounded-lg border border-[rgb(var(--c-tint)/0.16)] bg-[var(--c-card)] px-3 py-2 text-base sm:text-xs"
                   />
                   {reviewStatus && (
                     <p
@@ -1473,7 +1473,7 @@ export function TrackOrderView({
                   <button
                     type="submit"
                     disabled={reviewBusy}
-                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-4 py-2 text-xs font-semibold text-[#FFFDF9] disabled:opacity-60"
+                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-4 py-2 text-xs font-semibold text-[var(--c-on-gold)] disabled:opacity-60"
                   >
                     {reviewBusy && <Loader2 className="h-3 w-3 animate-spin" />}
                     <span>{bn ? 'রিভিউ জমা দিন' : 'Submit Verified Review'}</span>
@@ -1481,12 +1481,12 @@ export function TrackOrderView({
                 </form>
 
                 {/* 3. Opt-in Refill Reminder */}
-                <div className="space-y-3 rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FAF7F2] p-4 text-xs">
-                  <h4 className="flex items-center gap-1.5 font-semibold text-[#1E1710]">
-                    <BellRing className="h-4 w-4 text-[#8A5A17]" />
+                <div className="space-y-3 rounded-xl border border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-bg)] p-4 text-xs">
+                  <h4 className="flex items-center gap-1.5 font-semibold text-[var(--c-ink)]">
+                    <BellRing className="h-4 w-4 text-[var(--c-gold-text)]" />
                     <span>{bn ? 'রিফিল রিমাইন্ডার (ঐচ্ছিক)' : 'Opt-in Refill Reminder'}</span>
                   </h4>
-                  <p className="text-[11px] text-[#635647]">
+                  <p className="text-[11px] text-[var(--c-muted)]">
                     {bn
                       ? 'আপনি চাইলে নির্দিষ্ট দিন পর ঘি রিফিলের স্মরণবার্তা সেট করে রাখতে পারেন (যেকোনো সময় বন্ধ করা যাবে)।'
                       : 'Choose an optional refill interval reminder tailored to your kitchen pace. Pause or opt out anytime.'}
@@ -1499,15 +1499,15 @@ export function TrackOrderView({
                         onClick={() => setReminderInterval(days)}
                         className={`min-h-[44px] rounded-lg border font-mono text-xs font-semibold ${
                           reminderInterval === days
-                            ? 'border-[#B47B2B] bg-[#B47B2B] text-[#FFFDF9]'
-                            : 'border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] text-[#1E1710]'
+                            ? 'border-[#B47B2B] bg-[#B47B2B] text-[var(--c-on-gold)]'
+                            : 'border-[rgb(var(--c-tint)/0.16)] bg-[var(--c-card)] text-[var(--c-ink)]'
                         }`}
                       >
                         {days}d
                       </button>
                     ))}
                   </div>
-                  <label className="flex items-start gap-2 text-[11px] text-[#635647]">
+                  <label className="flex items-start gap-2 text-[11px] text-[var(--c-muted)]">
                     <input
                       type="checkbox"
                       checked={reminderConsent}
@@ -1521,19 +1521,19 @@ export function TrackOrderView({
                     </span>
                   </label>
                   {savedReminder && (
-                    <p className="font-mono text-[10.5px] text-[#8A5A17]">
+                    <p className="font-mono text-[10.5px] text-[var(--c-gold-text)]">
                       Status: {savedReminder.status} · {savedReminder.intervalDays} days
                     </p>
                   )}
                   {reminderFeedback && (
-                    <p className="text-[11px] font-medium text-[#1E1710]">{reminderFeedback}</p>
+                    <p className="text-[11px] font-medium text-[var(--c-ink)]">{reminderFeedback}</p>
                   )}
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       disabled={reminderBusy || !reminderConsent}
                       onClick={() => handleSaveRefillReminder('active')}
-                      className="min-h-[44px] rounded-lg bg-[#1E1710] px-4 py-2 text-xs font-semibold text-[#FAF7F2] disabled:opacity-50"
+                      className="min-h-[44px] rounded-lg bg-[var(--c-accent)] px-4 py-2 text-xs font-semibold text-[var(--c-on-accent)] disabled:opacity-50"
                     >
                       {bn ? 'রিমাইন্ডার চালু করুন' : 'Save Reminder'}
                     </button>
@@ -1542,7 +1542,7 @@ export function TrackOrderView({
                         type="button"
                         disabled={reminderBusy}
                         onClick={() => handleSaveRefillReminder('opted_out')}
-                        className="min-h-[44px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FFFDF9] px-3.5 py-2 text-xs font-medium text-[#635647]"
+                        className="min-h-[44px] rounded-lg border border-[rgb(var(--c-tint)/0.2)] bg-[var(--c-card)] px-3.5 py-2 text-xs font-medium text-[var(--c-muted)]"
                       >
                         {bn ? 'বন্ধ করুন' : 'Opt Out'}
                       </button>

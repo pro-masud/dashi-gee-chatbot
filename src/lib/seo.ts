@@ -35,21 +35,21 @@ export function buildStorefrontStructuredData(params: {
       confirmed: boolean;
     }> = [
       {
-        name: 'Deshi Gee 250g Sealed Glass Jar',
+        name: 'Deshi Gee 250g Sealed Jar',
         sku: 'DG-250G',
         price: Math.round(settings.price250g),
         stock: Math.round(settings.stock250g),
         confirmed: isStoreFieldConfirmed(settings, 'price250g'),
       },
       {
-        name: 'Deshi Gee 500g Sealed Glass Jar',
+        name: 'Deshi Gee 500g Sealed Jar',
         sku: 'DG-500G',
         price: Math.round(settings.price500g),
         stock: Math.round(settings.stock500g),
         confirmed: isStoreFieldConfirmed(settings, 'price500g'),
       },
       {
-        name: 'Deshi Gee 1kg Sealed Glass Jar',
+        name: 'Deshi Gee 1kg Sealed Jar',
         sku: 'DG-1KG',
         price: Math.round(settings.price1kg),
         stock: Math.round(settings.stock1kg),
@@ -100,7 +100,7 @@ export function buildStorefrontStructuredData(params: {
             name: 'Is this authentic Deshi Ghee?',
             acceptedAnswer: {
               '@type': 'Answer',
-              text: 'Yes. Each batch is prepared exclusively from cultured whole cow milk sourced in Pabna, churned by wooden bilona, and sealed in glass jars with batch traceability.',
+              text: 'Yes. Each batch is prepared exclusively from cultured whole cow milk sourced in Pabna, churned by wooden bilona, and sealed in jars with batch traceability.',
             },
           },
           {
@@ -108,7 +108,7 @@ export function buildStorefrontStructuredData(params: {
             name: 'What weight options are available?',
             acceptedAnswer: {
               '@type': 'Answer',
-              text: 'Deshi Gee is offered in 250g, 500g, and 1kg sealed apothecary glass jars.',
+              text: 'Deshi Gee is offered in 250g, 500g, and 1kg sealed jars.',
             },
           },
         ],

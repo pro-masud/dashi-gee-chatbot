@@ -41,7 +41,7 @@ function renderInlineBold(line: string) {
   return parts.map((part, idx) => {
     if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
       return (
-        <strong key={idx} className="font-semibold text-[#1E1710]">
+        <strong key={idx} className="font-semibold text-[var(--c-ink)]">
           {part.slice(2, -2)}
         </strong>
       );
@@ -226,13 +226,13 @@ export function ChatMessageBubble({
               ? 'rounded-bl-sm border border-red-300 bg-red-50/90 text-[#1E1710]'
               : msg.isAgentReply
                 ? 'rounded-bl-sm border border-emerald-300 bg-emerald-50/75 text-[#1E1710]'
-                : 'rounded-bl-sm border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] text-[#1E1710]'
+                : 'rounded-bl-sm border border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-card)] text-[#1E1710]'
         }`}
       >
         {!isUser && (
           <div
             className={`mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider ${
-              msg.isAgentReply ? 'text-emerald-800' : 'text-[#8A5A17]'
+              msg.isAgentReply ? 'text-emerald-800' : 'text-[var(--c-gold-text)]'
             }`}
           >
             {msg.isAgentReply ? (
@@ -261,28 +261,28 @@ export function ChatMessageBubble({
                 key={`${card.weight || 'card'}_${idx}`}
                 className={`rounded-xl border p-2.5 text-xs transition-colors ${
                   card.recommended
-                    ? 'border-[rgba(180,123,43,0.55)] bg-[#F2ECE1]/70'
-                    : 'border-[rgba(30,23,16,0.12)] bg-[#FAF7F2]/80'
+                    ? 'border-[rgba(180,123,43,0.55)] bg-[var(--c-surface)]/70'
+                    : 'border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-bg)]/80'
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="font-semibold text-[#1E1710]">
+                      <span className="font-semibold text-[var(--c-ink)]">
                         {bn ? card.labelBn : card.labelEn}
                       </span>
                       {card.recommended && (
-                        <span className="font-mono text-[10px] font-semibold uppercase tracking-wide text-[#8A5A17]">
+                        <span className="font-mono text-[10px] font-semibold uppercase tracking-wide text-[var(--c-gold-text)]">
                           · {bn ? 'প্রস্তাবিত' : 'Recommended'}
                         </span>
                       )}
                     </div>
                     {(bn ? card.reasonBn : card.reasonEn) && (
-                      <p className="mt-0.5 text-[11px] text-[#635647]">
+                      <p className="mt-0.5 text-[11px] text-[var(--c-muted)]">
                         {bn ? card.reasonBn : card.reasonEn}
                       </p>
                     )}
-                    <p className="mt-1 font-mono text-[10.5px] text-[#635647]">
+                    <p className="mt-1 font-mono text-[10.5px] text-[var(--c-muted)]">
                       {card.inStock
                         ? bn
                           ? `স্টক: ${card.stockJars}টি জার`
@@ -293,7 +293,7 @@ export function ChatMessageBubble({
                     </p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="font-mono text-sm font-semibold tabular-nums text-[#8A5A17]">
+                    <p className="font-mono text-sm font-semibold tabular-nums text-[var(--c-gold-text)]">
                       {formatBdt(card.priceBdt)}
                     </p>
                   </div>
@@ -302,7 +302,7 @@ export function ChatMessageBubble({
                   <button
                     type="button"
                     onClick={() => onSelectProductVariant(card.weight)}
-                    className="mt-2 inline-flex min-h-[40px] w-full items-center justify-center rounded-lg border border-[rgba(180,123,43,0.45)] bg-[#FFFDF9] px-3 py-1.5 text-[11px] font-semibold text-[#1E1710] transition-colors hover:bg-[#B47B2B] hover:text-[#FFFDF9]"
+                    className="mt-2 inline-flex min-h-[40px] w-full items-center justify-center rounded-lg border border-[rgba(180,123,43,0.45)] bg-[var(--c-card)] px-3 py-1.5 text-[11px] font-semibold text-[var(--c-ink)] transition-colors hover:bg-[#B47B2B] hover:text-[var(--c-on-gold)]"
                   >
                     {bn ? `${card.weight} জার অর্ডার করুন` : `Order ${card.weight} Jar`}
                   </button>
@@ -314,38 +314,38 @@ export function ChatMessageBubble({
 
         {/* Order Tracking Timeline Card */}
         {!isUser && msg.trackingCard && (
-          <div className="mt-3 rounded-xl border border-[rgba(180,123,43,0.35)] bg-[#F2ECE1]/70 p-3 text-xs text-[#1E1710]">
-            <div className="flex items-center justify-between gap-2 border-b border-[rgba(30,23,16,0.1)] pb-1.5">
-              <span className="font-mono text-[11.5px] font-semibold text-[#1E1710]">
+          <div className="mt-3 rounded-xl border border-[rgba(180,123,43,0.35)] bg-[var(--c-surface)]/70 p-3 text-xs text-[var(--c-ink)]">
+            <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--c-tint)/0.1)] pb-1.5">
+              <span className="font-mono text-[11.5px] font-semibold text-[var(--c-ink)]">
                 {msg.trackingCard.orderNumber}
               </span>
-              <span className="font-mono text-[11px] font-semibold tabular-nums text-[#8A5A17]">
+              <span className="font-mono text-[11px] font-semibold tabular-nums text-[var(--c-gold-text)]">
                 {formatBdt(msg.trackingCard.totalBdt)}
               </span>
             </div>
-            <div className="mt-2 space-y-1 text-[11px] text-[#635647]">
+            <div className="mt-2 space-y-1 text-[11px] text-[var(--c-muted)]">
               <p>
-                <strong className="text-[#1E1710]">{bn ? 'পণ্য:' : 'Items:'}</strong>{' '}
+                <strong className="text-[var(--c-ink)]">{bn ? 'পণ্য:' : 'Items:'}</strong>{' '}
                 {msg.trackingCard.itemsSummary}
               </p>
               <p>
-                <strong className="text-[#1E1710]">{bn ? 'পেমেন্ট:' : 'Payment:'}</strong>{' '}
+                <strong className="text-[var(--c-ink)]">{bn ? 'পেমেন্ট:' : 'Payment:'}</strong>{' '}
                 {msg.trackingCard.paymentMethod} · {msg.trackingCard.paymentStatus}
               </p>
               <p>
-                <strong className="text-[#1E1710]">{bn ? 'সম্ভাব্য ডেলিভারি:' : 'ETA:'}</strong>{' '}
+                <strong className="text-[var(--c-ink)]">{bn ? 'সম্ভাব্য ডেলিভারি:' : 'ETA:'}</strong>{' '}
                 {msg.trackingCard.estimatedDelivery}
               </p>
               {(msg.trackingCard.courierPartner || msg.trackingCard.consignmentId) && (
                 <p>
-                  <strong className="text-[#1E1710]">{bn ? 'কুরিয়ার:' : 'Courier:'}</strong>{' '}
-                  <span className="font-mono uppercase text-[#1E1710]">
+                  <strong className="text-[var(--c-ink)]">{bn ? 'কুরিয়ার:' : 'Courier:'}</strong>{' '}
+                  <span className="font-mono uppercase text-[var(--c-ink)]">
                     {msg.trackingCard.courierPartner || 'courier'}
                   </span>
                   {msg.trackingCard.consignmentId && (
                     <>
                       {' · '}
-                      <span className="font-mono text-[#1E1710]">
+                      <span className="font-mono text-[var(--c-ink)]">
                         {msg.trackingCard.consignmentId}
                       </span>
                     </>
@@ -359,7 +359,7 @@ export function ChatMessageBubble({
                       href={msg.trackingCard.courierTrackingUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 font-medium text-[#8A5A17] underline underline-offset-2 hover:text-[#1E1710]"
+                      className="inline-flex items-center gap-1 font-medium text-[var(--c-gold-text)] underline underline-offset-2 hover:text-[var(--c-ink)]"
                     >
                       <Truck className="h-3 w-3" />
                       <span>{bn ? 'কুরিয়ার ট্র্যাকিং দেখুন' : 'Track on Courier'}</span>
@@ -377,15 +377,15 @@ export function ChatMessageBubble({
                     <div
                       className={`flex h-6 w-6 items-center justify-center rounded-md border ${
                         done
-                          ? 'border-[#B47B2B] bg-[#B47B2B] text-[#FFFDF9]'
-                          : 'border-[rgba(30,23,16,0.15)] bg-[#FFFDF9] text-[#8A7867]'
+                          ? 'border-[#B47B2B] bg-[#B47B2B] text-[var(--c-on-gold)]'
+                          : 'border-[rgb(var(--c-tint)/0.15)] bg-[var(--c-card)] text-[var(--c-subtle)]'
                       }`}
                     >
                       <Icon className="h-3 w-3" />
                     </div>
                     <span
                       className={`mt-1 text-[9.5px] leading-tight ${
-                        done ? 'font-semibold text-[#1E1710]' : 'text-[#8A7867]'
+                        done ? 'font-semibold text-[var(--c-ink)]' : 'text-[var(--c-subtle)]'
                       }`}
                     >
                       {bn ? step.labelBn : step.labelEn}
@@ -399,8 +399,8 @@ export function ChatMessageBubble({
 
         {/* Structured Deshi Gee Order Summary & Explicit Confirmation Card */}
         {!isUser && summary && (
-          <div className="mt-3 rounded-xl border border-[rgba(180,123,43,0.35)] bg-[#F2ECE1]/75 p-3 text-xs text-[#1E1710]">
-            <div className="flex items-center justify-between gap-2 border-b border-[rgba(30,23,16,0.1)] pb-1.5">
+          <div className="mt-3 rounded-xl border border-[rgba(180,123,43,0.35)] bg-[var(--c-surface)]/75 p-3 text-xs text-[var(--c-ink)]">
+            <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--c-tint)/0.1)] pb-1.5">
               <span className="font-semibold">
                 {summary.orderNumber
                   ? bn
@@ -413,7 +413,7 @@ export function ChatMessageBubble({
                   ? ` (v${summary.priceQuoteVersion})`
                   : ''}
               </span>
-              <span className="font-mono text-[11px] font-semibold tabular-nums text-[#8A5A17]">
+              <span className="font-mono text-[11px] font-semibold tabular-nums text-[var(--c-gold-text)]">
                 {summary.variantLines && summary.variantLines.length > 0
                   ? summary.variantLines.map((v) => `${v.weight}×${v.qty}`).join(' + ')
                   : `${summary.weight} × ${summary.qty}`}
@@ -433,7 +433,7 @@ export function ChatMessageBubble({
             )}
 
             {remainingMs !== null && (
-              <div className="mt-1.5 flex items-center justify-between text-[10.5px] text-[#635647]">
+              <div className="mt-1.5 flex items-center justify-between text-[10.5px] text-[var(--c-muted)]">
                 <span>
                   {isQuoteExpired
                     ? bn
@@ -445,7 +445,7 @@ export function ChatMessageBubble({
                 </span>
                 <span
                   className={`font-mono font-semibold tabular-nums ${
-                    isQuoteExpired ? 'text-red-700' : 'text-[#8A5A17]'
+                    isQuoteExpired ? 'text-red-700' : 'text-[var(--c-gold-text)]'
                   }`}
                 >
                   {formatCountdown(remainingMs)}
@@ -453,10 +453,10 @@ export function ChatMessageBubble({
               </div>
             )}
 
-            <div className="mt-2 space-y-1 text-[11px] text-[#635647]">
+            <div className="mt-2 space-y-1 text-[11px] text-[var(--c-muted)]">
               <div className="flex justify-between gap-2">
                 <span>{bn ? 'পণ্য' : 'Product'}</span>
-                <span className="text-right font-medium text-[#1E1710]">
+                <span className="text-right font-medium text-[var(--c-ink)]">
                   {summary.productName}
                 </span>
               </div>
@@ -466,7 +466,7 @@ export function ChatMessageBubble({
                     <span>
                       {line.weight} × {line.qty} ({formatBdt(line.unitPriceBdt)})
                     </span>
-                    <span className="font-mono tabular-nums text-[#1E1710]">
+                    <span className="font-mono tabular-nums text-[var(--c-ink)]">
                       {formatBdt(line.lineSubtotalBdt)}
                     </span>
                   </div>
@@ -474,14 +474,14 @@ export function ChatMessageBubble({
               ) : (
                 <div className="flex justify-between gap-2">
                   <span>{bn ? 'একক দাম' : 'Unit Price'}</span>
-                  <span className="font-mono font-medium tabular-nums text-[#1E1710]">
+                  <span className="font-mono font-medium tabular-nums text-[var(--c-ink)]">
                     {formatBdt(summary.unitPriceBdt)}
                   </span>
                 </div>
               )}
               <div className="flex justify-between gap-2">
                 <span>{bn ? 'সাবটোটাল' : 'Subtotal'}</span>
-                <span className="font-mono font-medium tabular-nums text-[#1E1710]">
+                <span className="font-mono font-medium tabular-nums text-[var(--c-ink)]">
                   {formatBdt(summary.subtotalBdt)}
                 </span>
               </div>
@@ -490,7 +490,7 @@ export function ChatMessageBubble({
                   {bn ? 'ডেলিভারি চার্জ' : 'Delivery'}
                   {summary.deliveryZone ? ` (${summary.deliveryZone})` : ''}
                 </span>
-                <span className="font-mono font-medium tabular-nums text-[#1E1710]">
+                <span className="font-mono font-medium tabular-nums text-[var(--c-ink)]">
                   {summary.deliveryFeeBdt === 0
                     ? bn
                       ? 'ফ্রি'
@@ -501,7 +501,7 @@ export function ChatMessageBubble({
               {summary.estimatedDelivery && (
                 <div className="flex justify-between gap-2">
                   <span>{bn ? 'সম্ভাব্য ডেলিভারি' : 'Est. Delivery'}</span>
-                  <span className="text-right font-medium text-[#1E1710]">
+                  <span className="text-right font-medium text-[var(--c-ink)]">
                     {summary.estimatedDelivery}
                   </span>
                 </div>
@@ -514,23 +514,23 @@ export function ChatMessageBubble({
                   </span>
                 </div>
               )}
-              <div className="flex justify-between border-t border-[rgba(30,23,16,0.1)] pt-1 text-xs font-semibold text-[#1E1710]">
+              <div className="flex justify-between border-t border-[rgb(var(--c-tint)/0.1)] pt-1 text-xs font-semibold text-[var(--c-ink)]">
                 <span>{bn ? 'সর্বমোট' : 'Final Total'}</span>
-                <span className="font-mono tabular-nums text-[#8A5A17]">
+                <span className="font-mono tabular-nums text-[var(--c-gold-text)]">
                   {formatBdt(summary.totalBdt)}
                 </span>
               </div>
               {summary.dispatchCutoffNote && (
-                <p className="pt-0.5 text-[10px] text-[#635647]">
+                <p className="pt-0.5 text-[10px] text-[var(--c-muted)]">
                   {summary.dispatchCutoffNote}
                 </p>
               )}
 
               {(summary.customerName || summary.phone || summary.address) && (
-                <div className="mt-1.5 space-y-0.5 border-t border-[rgba(30,23,16,0.08)] pt-1.5 text-[11px]">
+                <div className="mt-1.5 space-y-0.5 border-t border-[rgb(var(--c-tint)/0.08)] pt-1.5 text-[11px]">
                   {summary.customerName && (
                     <p>
-                      <strong className="text-[#1E1710]">
+                      <strong className="text-[var(--c-ink)]">
                         {bn ? 'নাম:' : 'Name:'}
                       </strong>{' '}
                       {summary.customerName}
@@ -538,7 +538,7 @@ export function ChatMessageBubble({
                   )}
                   {summary.phone && (
                     <p>
-                      <strong className="text-[#1E1710]">
+                      <strong className="text-[var(--c-ink)]">
                         {bn ? 'ফোন:' : 'Phone:'}
                       </strong>{' '}
                       <span className="font-mono tabular-nums">{summary.phone}</span>
@@ -546,7 +546,7 @@ export function ChatMessageBubble({
                   )}
                   {(summary.district || summary.deliveryArea) && (
                     <p>
-                      <strong className="text-[#1E1710]">
+                      <strong className="text-[var(--c-ink)]">
                         {bn ? 'এলাকা:' : 'Area:'}
                       </strong>{' '}
                       {summary.area ? `${summary.area}, ${summary.district}` : summary.deliveryArea}
@@ -554,7 +554,7 @@ export function ChatMessageBubble({
                   )}
                   {summary.address && (
                     <p>
-                      <strong className="text-[#1E1710]">
+                      <strong className="text-[var(--c-ink)]">
                         {bn ? 'ঠিকানা:' : 'Address:'}
                       </strong>{' '}
                       {summary.address}
@@ -562,7 +562,7 @@ export function ChatMessageBubble({
                   )}
                   {summary.paymentMethod && (
                     <p>
-                      <strong className="text-[#1E1710]">
+                      <strong className="text-[var(--c-ink)]">
                         {bn ? 'পেমেন্ট:' : 'Payment:'}
                       </strong>{' '}
                       <span className="uppercase">{summary.paymentMethod}</span>
@@ -571,7 +571,7 @@ export function ChatMessageBubble({
                   )}
                   {summary.note && (
                     <p>
-                      <strong className="text-[#1E1710]">
+                      <strong className="text-[var(--c-ink)]">
                         {bn ? 'নোট:' : 'Note:'}
                       </strong>{' '}
                       {summary.note}
@@ -595,7 +595,7 @@ export function ChatMessageBubble({
                     type="button"
                     disabled={Boolean(confirmingOrderMsgId) || isQuoteExpired}
                     onClick={() => onConfirmOrder?.(msg.id, summary)}
-                    className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#B47B2B] px-3 py-2 text-[11px] font-semibold text-[#FFFDF9] transition-colors hover:bg-[#9D6820] disabled:cursor-not-allowed disabled:opacity-55"
+                    className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#B47B2B] px-3 py-2 text-[11px] font-semibold text-[var(--c-on-gold)] transition-colors hover:bg-[#9D6820] disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     {isConfirmingThis ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -609,7 +609,7 @@ export function ChatMessageBubble({
                       type="button"
                       disabled={Boolean(confirmingOrderMsgId)}
                       onClick={() => onEditOrder(msg.id, summary)}
-                      className="inline-flex min-h-[44px] items-center justify-center gap-1 rounded-xl border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-3 py-2 text-[11px] font-medium text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-50"
+                      className="inline-flex min-h-[44px] items-center justify-center gap-1 rounded-xl border border-[rgb(var(--c-tint)/0.2)] bg-[var(--c-bg)] px-3 py-2 text-[11px] font-medium text-[var(--c-ink)] hover:bg-[var(--c-surface)] disabled:opacity-50"
                     >
                       <Edit3 className="h-3.5 w-3.5" />
                       <span>{bn ? 'পরিবর্তন করুন' : 'Edit'}</span>
@@ -620,7 +620,7 @@ export function ChatMessageBubble({
             )}
 
             {summary.confirmed && !summary.orderNumber && (
-              <p className="mt-2 text-[10.5px] font-medium text-[#635647]">
+              <p className="mt-2 text-[10.5px] font-medium text-[var(--c-muted)]">
                 {bn
                   ? 'এই সারাংশটি আপডেট বা বাতিল করা হয়েছে।'
                   : 'Summary superseded or updated.'}
@@ -636,8 +636,8 @@ export function ChatMessageBubble({
           const isExpired = Boolean(proposal.expiresAt && nowMs > proposal.expiresAt);
           const isBusy = confirmingManageMsgId === msg.id;
           return (
-            <div className="mt-3 rounded-xl border border-[rgba(180,123,43,0.45)] bg-[#F2ECE1]/80 p-3 text-xs text-[#1E1710]">
-              <div className="flex items-center justify-between gap-2 border-b border-[rgba(30,23,16,0.1)] pb-1.5">
+            <div className="mt-3 rounded-xl border border-[rgba(180,123,43,0.45)] bg-[var(--c-surface)]/80 p-3 text-xs text-[var(--c-ink)]">
+              <div className="flex items-center justify-between gap-2 border-b border-[rgb(var(--c-tint)/0.1)] pb-1.5">
                 <span className="font-semibold">
                   {proposal.action === 'cancel'
                     ? bn
@@ -647,26 +647,26 @@ export function ChatMessageBubble({
                       ? `ঠিকানা পরিবর্তন নিশ্চিত করুন · ${proposal.orderNumber}`
                       : `Confirm Address Update · ${proposal.orderNumber}`}
                 </span>
-                <span className="font-mono text-[10.5px] uppercase text-[#8A5A17]">
+                <span className="font-mono text-[10.5px] uppercase text-[var(--c-gold-text)]">
                   {proposal.currentStatus}
                 </span>
               </div>
 
-              <div className="mt-2 space-y-1 text-[11px] text-[#635647]">
+              <div className="mt-2 space-y-1 text-[11px] text-[var(--c-muted)]">
                 <p>
-                  <strong className="text-[#1E1710]">{bn ? 'ফোন:' : 'Phone:'}</strong>{' '}
+                  <strong className="text-[var(--c-ink)]">{bn ? 'ফোন:' : 'Phone:'}</strong>{' '}
                   <span className="font-mono">{proposal.phoneMasked}</span>
                 </p>
                 {proposal.action === 'cancel' ? (
                   <p>
-                    <strong className="text-[#1E1710]">{bn ? 'কারণ:' : 'Reason:'}</strong>{' '}
+                    <strong className="text-[var(--c-ink)]">{bn ? 'কারণ:' : 'Reason:'}</strong>{' '}
                     {proposal.reason || (bn ? 'কাস্টমারের অনুরোধ' : 'Customer requested cancellation')}
                   </p>
                 ) : (
                   <>
                     {proposal.proposedAddress && (
                       <p>
-                        <strong className="text-[#1E1710]">
+                        <strong className="text-[var(--c-ink)]">
                           {bn ? 'নতুন ঠিকানা:' : 'New Address:'}
                         </strong>{' '}
                         {proposal.proposedAddress}
@@ -674,7 +674,7 @@ export function ChatMessageBubble({
                     )}
                     {proposal.proposedDistrict && (
                       <p>
-                        <strong className="text-[#1E1710]">
+                        <strong className="text-[var(--c-ink)]">
                           {bn ? 'জেলা / এলাকা:' : 'District / Area:'}
                         </strong>{' '}
                         {proposal.proposedArea
@@ -685,10 +685,10 @@ export function ChatMessageBubble({
                     )}
                     {typeof proposal.newDeliveryFeeBdt === 'number' && (
                       <p>
-                        <strong className="text-[#1E1710]">
+                        <strong className="text-[var(--c-ink)]">
                           {bn ? 'নতুন ডেলিভারি চার্জ:' : 'Updated Delivery Fee:'}
                         </strong>{' '}
-                        <span className="font-mono text-[#1E1710]">
+                        <span className="font-mono text-[var(--c-ink)]">
                           {proposal.newDeliveryFeeBdt === 0
                             ? bn
                               ? 'ফ্রি'
@@ -699,10 +699,10 @@ export function ChatMessageBubble({
                     )}
                     {typeof proposal.newTotalBdt === 'number' && (
                       <p>
-                        <strong className="text-[#1E1710]">
+                        <strong className="text-[var(--c-ink)]">
                           {bn ? 'নতুন সর্বমোট:' : 'Updated Total:'}
                         </strong>{' '}
-                        <span className="font-mono font-semibold text-[#8A5A17]">
+                        <span className="font-mono font-semibold text-[var(--c-gold-text)]">
                           {formatBdt(proposal.newTotalBdt)}
                         </span>
                       </p>
@@ -725,7 +725,7 @@ export function ChatMessageBubble({
                       type="button"
                       disabled={Boolean(confirmingManageMsgId) || isExpired}
                       onClick={() => onConfirmOrderManage(msg.id, proposal)}
-                      className={`inline-flex min-h-[42px] flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-[11px] font-semibold text-[#FFFDF9] transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
+                      className={`inline-flex min-h-[42px] flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-[11px] font-semibold text-[var(--c-on-gold)] transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
                         proposal.action === 'cancel'
                           ? 'bg-red-700 hover:bg-red-800'
                           : 'bg-[#B47B2B] hover:bg-[#9D6820]'
@@ -751,7 +751,7 @@ export function ChatMessageBubble({
                         type="button"
                         disabled={Boolean(confirmingManageMsgId)}
                         onClick={() => onDismissOrderManage(msg.id)}
-                        className="inline-flex min-h-[42px] items-center justify-center rounded-xl border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-3 py-2 text-[11px] font-medium text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-50"
+                        className="inline-flex min-h-[42px] items-center justify-center rounded-xl border border-[rgb(var(--c-tint)/0.2)] bg-[var(--c-bg)] px-3 py-2 text-[11px] font-medium text-[var(--c-ink)] hover:bg-[var(--c-surface)] disabled:opacity-50"
                       >
                         {bn ? 'থাক, বদলাব না' : 'Keep As Is'}
                       </button>
@@ -767,7 +767,7 @@ export function ChatMessageBubble({
                 </p>
               )}
               {proposal.status === 'dismissed' && (
-                <p className="mt-2 text-[11px] font-medium text-[#635647]">
+                <p className="mt-2 text-[11px] font-medium text-[var(--c-muted)]">
                   {bn ? 'কোনো পরিবর্তন করা হয়নি।' : 'Dismissed — no changes made.'}
                 </p>
               )}
@@ -791,7 +791,7 @@ export function ChatMessageBubble({
                     key={`${action.type}_${idx}`}
                     type="button"
                     onClick={() => handleCopyText('phone', action.value)}
-                    className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-2.5 py-1 text-[11px] font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+                    className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--c-ink)] hover:bg-[var(--c-surface)]"
                   >
                     {renderActionIcon(action.type)}
                     <span>
@@ -815,7 +815,7 @@ export function ChatMessageBubble({
                     key={`${action.type}_${idx}`}
                     type="button"
                     onClick={() => onNavigateTrack(action.value)}
-                    className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-3 py-1 text-[11px] font-medium text-[#FFFDF9] hover:bg-[#9D6820]"
+                    className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-[#B47B2B] px-3 py-1 text-[11px] font-medium text-[var(--c-on-gold)] hover:bg-[#9D6820]"
                   >
                     {renderActionIcon(action.type)}
                     <span>{bn ? action.labelBn : action.labelEn}</span>
@@ -852,7 +852,7 @@ export function ChatMessageBubble({
                       ? undefined
                       : 'noopener noreferrer'
                   }
-                  className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FAF7F2] px-2.5 py-1 text-[11px] font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+                  className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--c-ink)] hover:bg-[var(--c-surface)]"
                 >
                   {renderActionIcon(action.type)}
                   <span>{bn ? action.labelBn : action.labelEn}</span>
@@ -869,11 +869,11 @@ export function ChatMessageBubble({
 
         {/* Verified RAG Sources Disclosure */}
         {!isUser && msg.sources && msg.sources.length > 0 && (
-          <div className="mt-2.5 border-t border-[rgba(30,23,16,0.08)] pt-2 text-[10.5px] text-[#635647]">
+          <div className="mt-2.5 border-t border-[rgb(var(--c-tint)/0.08)] pt-2 text-[10.5px] text-[var(--c-muted)]">
             <button
               type="button"
               onClick={() => setShowSources((v) => !v)}
-              className="inline-flex items-center gap-1 font-medium text-[#8A5A17] hover:underline"
+              className="inline-flex items-center gap-1 font-medium text-[var(--c-gold-text)] hover:underline"
             >
               <span>
                 {bn
@@ -898,7 +898,7 @@ export function ChatMessageBubble({
 
         {/* Admin Playground Diagnostics Strip */}
         {!isUser && showDiagnostics && msg.diagnostics && (
-          <div className="mt-2.5 border-t border-[rgba(30,23,16,0.12)] pt-2 font-mono text-[10px] leading-relaxed text-[#635647]">
+          <div className="mt-2.5 border-t border-[rgb(var(--c-tint)/0.12)] pt-2 font-mono text-[10px] leading-relaxed text-[var(--c-muted)]">
             model={msg.diagnostics.model} · path={msg.diagnostics.path} · intent=
             {msg.diagnostics.intent} ({typeof msg.diagnostics.confidence === 'number' ? msg.diagnostics.confidence.toFixed(2) : '0.00'}) · tools=
             {msg.diagnostics.toolsUsed?.join(',') || 'none'} · ragTop=
@@ -914,8 +914,8 @@ export function ChatMessageBubble({
 
       {/* Inline Negative Feedback Reason Selector */}
       {!isUser && showReasonPicker && !msg.feedback && onSubmitFeedback && (
-        <div className="mt-1.5 flex max-w-[92%] flex-wrap gap-1.5 rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-2 text-[10.5px]">
-          <span className="w-full font-medium text-[#635647]">
+        <div className="mt-1.5 flex max-w-[92%] flex-wrap gap-1.5 rounded-xl border border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-card)] p-2 text-[10.5px]">
+          <span className="w-full font-medium text-[var(--c-muted)]">
             {bn ? 'কী সমস্যা ছিল জানাবেন?' : 'What went wrong?'}
           </span>
           {FEEDBACK_REASONS.map((r) => (
@@ -926,7 +926,7 @@ export function ChatMessageBubble({
                 setShowReasonPicker(false);
                 onSubmitFeedback(msg.id, 'down', r.id);
               }}
-              className="min-h-[40px] rounded-lg border border-[rgba(30,23,16,0.16)] bg-[#FAF7F2] px-3 py-1.5 text-[#1E1710] hover:border-[#B47B2B] hover:bg-[#F2ECE1] sm:min-h-[34px]"
+              className="min-h-[40px] rounded-lg border border-[rgb(var(--c-tint)/0.16)] bg-[var(--c-bg)] px-3 py-1.5 text-[var(--c-ink)] hover:border-[#B47B2B] hover:bg-[var(--c-surface)] sm:min-h-[34px]"
             >
               {bn ? r.labelBn : r.labelEn}
             </button>
@@ -946,7 +946,7 @@ export function ChatMessageBubble({
                 key={`${replyText}_${idx}`}
                 type="button"
                 onClick={() => onSuggestedReply(replyText)}
-                className="min-h-[44px] rounded-xl border border-[rgba(180,123,43,0.35)] bg-[#FFFDF9] px-3.5 py-2 text-left text-xs font-medium text-[#1E1710] transition-colors hover:border-[#B47B2B] hover:bg-[#F2ECE1]"
+                className="min-h-[44px] rounded-xl border border-[rgba(180,123,43,0.35)] bg-[var(--c-card)] px-3.5 py-2 text-left text-xs font-medium text-[var(--c-ink)] transition-colors hover:border-[#B47B2B] hover:bg-[var(--c-surface)]"
               >
                 {replyText}
               </button>
@@ -955,14 +955,14 @@ export function ChatMessageBubble({
         )}
 
       {/* Footer metadata & Copy / Retry / Feedback actions */}
-      <div className="mt-1 flex flex-wrap items-center gap-2 px-1 text-[11px] text-[#635647]">
+      <div className="mt-1 flex flex-wrap items-center gap-2 px-1 text-[11px] text-[var(--c-muted)]">
         <span>{msg.timestamp}</span>
         {!isUser && msg.text.length > 0 && (
           <>
             <button
               type="button"
               onClick={() => handleCopyText('msg', msg.text)}
-              className="inline-flex min-h-[40px] items-center gap-1 rounded-lg px-2 hover:bg-[#F2ECE1] hover:text-[#1E1710] sm:min-h-[32px]"
+              className="inline-flex min-h-[40px] items-center gap-1 rounded-lg px-2 hover:bg-[var(--c-surface)] hover:text-[var(--c-ink)] sm:min-h-[32px]"
               aria-label={bn ? 'উত্তর কপি করুন' : 'Copy reply'}
             >
               {copiedId === 'msg' ? (
@@ -982,8 +982,8 @@ export function ChatMessageBubble({
                 type="button"
                 onClick={() => onSpeakMessage(msg.id, msg.text, msg.ttsToken)}
                 disabled={loadingAudioMsgId === msg.id}
-                className={`inline-flex min-h-[40px] items-center gap-1 rounded-lg px-2 hover:bg-[#F2ECE1] hover:text-[#1E1710] disabled:opacity-60 sm:min-h-[32px] ${
-                  speakingMsgId === msg.id ? 'font-semibold text-[#8A5A17]' : ''
+                className={`inline-flex min-h-[40px] items-center gap-1 rounded-lg px-2 hover:bg-[var(--c-surface)] hover:text-[var(--c-ink)] disabled:opacity-60 sm:min-h-[32px] ${
+                  speakingMsgId === msg.id ? 'font-semibold text-[var(--c-gold-text)]' : ''
                 }`}
                 aria-label={
                   speakingMsgId === msg.id
@@ -1017,7 +1017,7 @@ export function ChatMessageBubble({
               <button
                 type="button"
                 onClick={() => onRetry(msg.retryPrompt!)}
-                className="inline-flex min-h-[40px] items-center gap-1 rounded-lg px-2 hover:bg-[#F2ECE1] hover:text-[#1E1710] sm:min-h-[32px]"
+                className="inline-flex min-h-[40px] items-center gap-1 rounded-lg px-2 hover:bg-[var(--c-surface)] hover:text-[var(--c-ink)] sm:min-h-[32px]"
                 aria-label={bn ? 'পুনরায় উত্তর নিন' : 'Regenerate response'}
               >
                 <RotateCcw className="h-3.5 w-3.5" />
@@ -1027,7 +1027,7 @@ export function ChatMessageBubble({
             {!msg.isError && onSubmitFeedback && (
               <div className="inline-flex items-center gap-1">
                 {msg.feedback ? (
-                  <span className="text-[11px] font-medium text-[#8A5A17]">
+                  <span className="text-[11px] font-medium text-[var(--c-gold-text)]">
                     {bn ? 'মতামতের জন্য ধন্যবাদ' : 'Thanks for your feedback'}
                   </span>
                 ) : (
@@ -1036,7 +1036,7 @@ export function ChatMessageBubble({
                       type="button"
                       onClick={() => onSubmitFeedback(msg.id, 'up')}
                       aria-label={bn ? 'উত্তর ভালো লেগেছে' : 'Helpful reply'}
-                      className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg hover:bg-[#F2ECE1] hover:text-emerald-800 sm:min-h-[32px] sm:min-w-[32px]"
+                      className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg hover:bg-[var(--c-surface)] hover:text-emerald-800 sm:min-h-[32px] sm:min-w-[32px]"
                     >
                       <ThumbsUp className="h-3.5 w-3.5" />
                     </button>
@@ -1044,7 +1044,7 @@ export function ChatMessageBubble({
                       type="button"
                       onClick={() => setShowReasonPicker((v) => !v)}
                       aria-label={bn ? 'উত্তর সহায়ক নয়' : 'Unhelpful reply'}
-                      className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg hover:bg-[#F2ECE1] hover:text-red-700 sm:min-h-[32px] sm:min-w-[32px]"
+                      className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg hover:bg-[var(--c-surface)] hover:text-red-700 sm:min-h-[32px] sm:min-w-[32px]"
                     >
                       <ThumbsDown className="h-3.5 w-3.5" />
                     </button>

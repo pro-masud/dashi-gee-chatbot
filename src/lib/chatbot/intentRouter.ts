@@ -331,7 +331,7 @@ export function classifyTurnIntent(
 
   // 13. Product Craft / Ingredients / Usage / Storage / Cooking (Tool-free explanation safe for guarded streaming!)
   if (
-    /(bilona|বিলোনা|pabna|পাবনা|curd|dahi|doi|দই|makkhan|মাখন|danadar|দানা|cooking|halua|polao|paratha|khichuri|bhaat|রান্না|সংরক্ষণ|store|storage|shelf|মেয়াদ|মেয়াদ|glass jar|কাঁচের|উপাদান|বানান|তৈরি)/i.test(
+    /(bilona|বিলোনা|pabna|পাবনা|curd|dahi|doi|দই|makkhan|মাখন|danadar|দানা|cooking|halua|polao|paratha|khichuri|bhaat|রান্না|সংরক্ষণ|store|storage|shelf|মেয়াদ|মেয়াদ|jar||উপাদান|বানান|তৈরি)/i.test(
       clean
     )
   ) {

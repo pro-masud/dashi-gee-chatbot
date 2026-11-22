@@ -242,11 +242,8 @@ export function BagCheckoutDrawer({
   const orderingReady = isStorefrontOrderingReady(settings);
   const bkashManualConfigured = hasValidRealPhone(settings.bkashNumber);
   const nagadManualConfigured = hasValidRealPhone(settings.nagadNumber);
-  const availableMethods: PaymentMethod[] = [
-    'cod',
-    ...(bkashManualConfigured ? (['bkash'] as PaymentMethod[]) : []),
-    ...(nagadManualConfigured ? (['nagad'] as PaymentMethod[]) : []),
-  ];
+  // The store currently accepts Cash on Delivery only.
+  const availableMethods: PaymentMethod[] = ['cod'];
 
   useEffect(() => {
     if (!availableMethods.includes(paymentMethod)) {
@@ -473,12 +470,8 @@ export function BagCheckoutDrawer({
       focusCheckoutField('co-phone');
       return;
     }
-    if (area.trim().length < 2) {
-      setFormError(bn ? 'আপনার এলাকার নাম লিখুন।' : 'Please enter your area or thana.');
-      focusCheckoutField('co-area');
-      return;
-    }
-    const addrValid = clientAssessAddressCompleteness(address, area, district);
+    const areaValue = area.trim() || district;
+    const addrValid = clientAssessAddressCompleteness(address, areaValue, district);
     if (!addrValid.complete) {
       setFormError(
         bn
@@ -533,7 +526,7 @@ export function BagCheckoutDrawer({
           customerName: customerName.trim(),
           phone: cleanPhone,
           district,
-          area: area.trim(),
+          area: area.trim() || district,
           address: address.trim(),
           note: combinedNote.slice(0, 240),
           deliveryZone,
@@ -618,7 +611,7 @@ export function BagCheckoutDrawer({
       <div
         hidden={!open}
         onClick={onClose}
-        className="fixed inset-0 z-40 bg-[#1E1710]/45 backdrop-blur-xs transition-opacity"
+        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs transition-opacity"
         aria-hidden="true"
       />
 
@@ -627,10 +620,10 @@ export function BagCheckoutDrawer({
         aria-modal="true"
         aria-label={bn ? 'শপিং ব্যাগ ও চেকআউট' : 'Shopping bag and checkout'}
         hidden={!open}
-        className="drawer-panel fixed inset-y-0 right-0 z-50 flex h-dvh max-h-dvh w-full max-w-md flex-col overscroll-contain border-l border-[rgba(30,23,16,0.14)] bg-[#FAF7F2] text-[#1E1710] shadow-2xl"
+        className="drawer-panel fixed inset-y-0 right-0 z-50 flex h-dvh max-h-dvh w-full max-w-md flex-col overscroll-contain border-l border-[rgb(var(--c-tint)/0.14)] bg-[var(--c-bg)] text-[var(--c-ink)] shadow-2xl"
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[rgba(30,23,16,0.10)] px-5 py-4 bg-[#F4EFE6]/60">
+        <div className="flex items-center justify-between border-b border-[rgb(var(--c-tint)/0.10)] px-5 py-4 bg-[var(--c-band)]/60">
           <div className="flex items-center gap-3">
             {step === 'checkout' && (
               <button
@@ -641,22 +634,22 @@ export function BagCheckoutDrawer({
                   setStep('bag');
                 }}
                 aria-label={bn ? 'ব্যাগে ফিরে যান' : 'Back to bag'}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[rgba(30,23,16,0.16)] bg-[#FAF7F2] text-[#1E1710] hover:bg-[#F2ECE1] transition-colors shadow-xs"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[rgb(var(--c-tint)/0.16)] bg-[var(--c-bg)] text-[var(--c-ink)] hover:bg-[var(--c-surface)] transition-colors shadow-xs"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
             )}
             <div>
-              <h2 className="font-display text-lg font-bold text-[#1E1710] sm:text-xl">
+              <h2 className="font-display text-lg font-bold text-[var(--c-ink)] sm:text-xl">
                 {step === 'bag' && (bn ? 'আপনার শপিং ব্যাগ' : 'Shopping Bag')}
-                {step === 'checkout' && (bn ? 'ঠিকানা ও পেমেন্ট' : 'Checkout & Payment')}
+                {step === 'checkout' && (bn ? 'ডেলিভারি তথ্য' : 'Delivery Details')}
                 {step === 'confirmed' && (bn ? 'অর্ডার সফলভাবে গৃহীত' : 'Order Recorded')}
               </h2>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className={`h-1.5 w-1.5 rounded-full ${step === 'bag' ? 'bg-[#B47B2B]' : 'bg-[#2D6A4F]'}`} />
-                <span className="font-mono text-[10px] uppercase tracking-wider text-[#8A5A17]">
+                <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--c-gold-text)]">
                   {step === 'bag' && (bn ? 'ধাপ ১: ব্যাগ পর্যালোচনা' : 'Step 1: Review Items')}
-                  {step === 'checkout' && (bn ? 'ধাপ ২: ডেলিভারি তথ্য' : 'Step 2: Shipping & Payment')}
+                  {step === 'checkout' && (bn ? 'ধাপ ২: নাম, ফোন ও ঠিকানা' : 'Step 2: Name, phone & address')}
                   {step === 'confirmed' && (bn ? 'ধাপ ৩: অর্ডার কনফার্মেশন' : 'Step 3: Confirmed')}
                 </span>
               </div>
@@ -667,7 +660,7 @@ export function BagCheckoutDrawer({
             type="button"
             onClick={onClose}
             aria-label={bn ? 'বন্ধ করুন' : 'Close drawer'}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[rgba(30,23,16,0.16)] bg-[#FAF7F2] text-[#1E1710] hover:bg-[#F2ECE1] transition-colors shadow-xs"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[rgb(var(--c-tint)/0.16)] bg-[var(--c-bg)] text-[var(--c-ink)] hover:bg-[var(--c-surface)] transition-colors shadow-xs"
           >
             <X className="h-4 w-4" />
           </button>
@@ -677,11 +670,11 @@ export function BagCheckoutDrawer({
         <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5">
           {step === 'confirmed' && lastConfirmedOrder ? (
             <div className="space-y-5">
-              <div className="rounded-xl border border-[#B47B2B]/35 bg-[#F2ECE1] p-5">
+              <div className="rounded-xl border border-[#B47B2B]/35 bg-[var(--c-surface)] p-5">
                 <div className="flex items-start gap-3">
-                  <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-[#8A5A17]" />
+                  <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-[var(--c-gold-text)]" />
                   <div>
-                    <p className="font-mono text-xs font-medium uppercase tracking-wide text-[#8A5A17] tabular-nums">
+                    <p className="font-mono text-xs font-medium uppercase tracking-wide text-[var(--c-gold-text)] tabular-nums">
                       {lastConfirmedOrder.orderNumber} ·{' '}
                       {lastConfirmedOrder.paymentStatus === 'pending_verification'
                         ? bn
@@ -691,10 +684,10 @@ export function BagCheckoutDrawer({
                           ? 'ক্যাশ অন ডেলিভারি'
                           : 'Cash on Delivery'}
                     </p>
-                    <h3 className="font-display mt-1 text-xl font-semibold text-[#1E1710]">
+                    <h3 className="font-display mt-1 text-xl font-semibold text-[var(--c-ink)]">
                       {bn ? 'আপনার অর্ডারটি গ্রহণ করা হয়েছে' : 'Order Recorded Successfully'}
                     </h3>
-                    <p className="mt-1.5 text-sm leading-relaxed text-[#635647]">
+                    <p className="mt-1.5 text-sm leading-relaxed text-[var(--c-muted)]">
                       {lastConfirmedOrder.paymentMethod === 'cod'
                         ? bn
                           ? 'আমাদের টিম শীঘ্রই কল করে ডেলিভারি নিশ্চিত করবে।'
@@ -712,34 +705,34 @@ export function BagCheckoutDrawer({
                 </div>
               </div>
 
-              <div className="space-y-3 rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-5 text-sm">
+              <div className="space-y-3 rounded-xl border border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-card)] p-5 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-[#635647]">{bn ? 'ক্রেতা' : 'Customer'}</span>
+                  <span className="text-[var(--c-muted)]">{bn ? 'ক্রেতা' : 'Customer'}</span>
                   <span className="font-medium">{lastConfirmedOrder.customerName}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[#635647]">{bn ? 'মোবাইল' : 'Phone'}</span>
+                  <span className="text-[var(--c-muted)]">{bn ? 'মোবাইল' : 'Phone'}</span>
                   <span className="font-mono tabular-nums">{lastConfirmedOrder.phone}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[#635647]">{bn ? 'পণ্য ও ওজন' : 'Variant & Qty'}</span>
+                  <span className="text-[var(--c-muted)]">{bn ? 'পণ্য ও ওজন' : 'Variant & Qty'}</span>
                   <span className="font-mono tabular-nums text-right">
                     {lastConfirmedOrder.itemsSummary ||
                       `${lastConfirmedOrder.weight} × ${lastConfirmedOrder.qty}`}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[#635647]">{bn ? 'ঠিকানা' : 'Address'}</span>
-                  <span className="max-w-[210px] text-right text-[#1E1710]">
+                  <span className="text-[var(--c-muted)]">{bn ? 'ঠিকানা' : 'Address'}</span>
+                  <span className="max-w-[210px] text-right text-[var(--c-ink)]">
                     {lastConfirmedOrder.address}, {lastConfirmedOrder.area},{' '}
                     {lastConfirmedOrder.district}
                   </span>
                 </div>
-                <div className="flex justify-between border-t border-[rgba(30,23,16,0.10)] pt-3">
-                  <span className="font-medium text-[#1E1710]">
+                <div className="flex justify-between border-t border-[rgb(var(--c-tint)/0.10)] pt-3">
+                  <span className="font-medium text-[var(--c-ink)]">
                     {bn ? 'সর্বমোট মূল্য' : 'Total Amount'}
                   </span>
-                  <span className="font-mono text-base font-semibold tabular-nums text-[#8A5A17]">
+                  <span className="font-mono text-base font-semibold tabular-nums text-[var(--c-gold-text)]">
                     {formatBdt(lastConfirmedOrder.totalBdt)}
                   </span>
                 </div>
@@ -748,8 +741,8 @@ export function BagCheckoutDrawer({
               <div className="space-y-2.5">
                 {lastConfirmedOrder.paymentStatus !== 'verified' &&
                   (onlineGateways.sslcommerz || onlineGateways.bkash) && (
-                    <div className="space-y-2 rounded-xl border border-[rgba(180,123,43,0.3)] bg-[#FAF7F2] p-3">
-                      <p className="text-xs font-semibold text-[#1E1710]">
+                    <div className="space-y-2 rounded-xl border border-[rgba(180,123,43,0.3)] bg-[var(--c-bg)] p-3">
+                      <p className="text-xs font-semibold text-[var(--c-ink)]">
                         {bn ? 'তাৎক্ষণিক অনলাইন পেমেন্ট করুন' : 'Pay Online Instantly'}
                       </p>
                       <div className="flex flex-wrap gap-2">
@@ -760,7 +753,7 @@ export function BagCheckoutDrawer({
                             onClick={() =>
                               handleStartOnlinePayment('sslcommerz', lastConfirmedOrder)
                             }
-                            className="inline-flex min-h-[42px] flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#B47B2B] px-3 py-2 text-xs font-semibold text-[#FFFDF9] hover:bg-[#9D6820] disabled:opacity-55"
+                            className="inline-flex min-h-[42px] flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#B47B2B] px-3 py-2 text-xs font-semibold text-[var(--c-on-gold)] hover:bg-[#9D6820] disabled:opacity-55"
                           >
                             {gatewayBusy === 'sslcommerz' ? (
                               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -775,7 +768,7 @@ export function BagCheckoutDrawer({
                             type="button"
                             disabled={Boolean(gatewayBusy)}
                             onClick={() => handleStartOnlinePayment('bkash', lastConfirmedOrder)}
-                            className="inline-flex min-h-[42px] flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#B47B2B] bg-[#FFFDF9] px-3 py-2 text-xs font-semibold text-[#8A5A17] hover:bg-[#F2ECE1] disabled:opacity-55"
+                            className="inline-flex min-h-[42px] flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#B47B2B] bg-[var(--c-card)] px-3 py-2 text-xs font-semibold text-[var(--c-gold-text)] hover:bg-[var(--c-surface)] disabled:opacity-55"
                           >
                             {gatewayBusy === 'bkash' ? (
                               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -795,7 +788,7 @@ export function BagCheckoutDrawer({
                   href={buildWhatsappSupportUrl(lastConfirmedOrder)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#1E1710] px-5 py-3.5 text-sm font-medium text-[#FAF7F2] hover:bg-[#35291E]"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--c-accent)] px-5 py-3.5 text-sm font-medium text-[var(--c-on-accent)] hover:bg-[var(--c-accent-hover)]"
                 >
                   <MessageCircle className="h-4 w-4 text-[#D89B2B]" />
                   <span>
@@ -812,7 +805,7 @@ export function BagCheckoutDrawer({
                       lastConfirmedOrder.phone
                     );
                   }}
-                  className="w-full rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#F2ECE1] px-5 py-3 text-sm font-medium text-[#1E1710] hover:bg-[#EAE1D2]"
+                  className="w-full rounded-lg border border-[rgb(var(--c-tint)/0.2)] bg-[var(--c-surface)] px-5 py-3 text-sm font-medium text-[var(--c-ink)] hover:bg-[var(--c-elev)]"
                 >
                   {bn ? 'লাইভ অর্ডার ট্র্যাক করুন' : 'Track This Order'}
                 </button>
@@ -820,14 +813,14 @@ export function BagCheckoutDrawer({
             </div>
           ) : cart.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-4 py-12 text-center">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#F2ECE1] text-[#8A5A17]">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--c-surface)] text-[var(--c-gold-text)]">
                 <ShoppingBag className="h-6 w-6" />
               </div>
               <div>
-                <p className="font-display text-lg font-medium text-[#1E1710]">
+                <p className="font-display text-lg font-medium text-[var(--c-ink)]">
                   {bn ? 'আপনার ব্যাগটি বর্তমানে খালি' : 'Your bag is empty'}
                 </p>
-                <p className="mt-1 max-w-[28ch] text-sm text-[#635647]">
+                <p className="mt-1 max-w-[28ch] text-sm text-[var(--c-muted)]">
                   {bn
                     ? 'অর্ডার করতে ২৫০ গ্রাম, ৫০০ গ্রাম বা ১ কেজি জার বেছে নিন।'
                     : 'Choose 250g, 500g, or 1kg Pabna Deshi Cow Ghee to get started.'}
@@ -837,7 +830,7 @@ export function BagCheckoutDrawer({
                 <button
                   type="button"
                   onClick={() => setStep('confirmed')}
-                  className="rounded-lg border border-[rgba(30,23,16,0.2)] px-4 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
+                  className="rounded-lg border border-[rgb(var(--c-tint)/0.2)] px-4 py-2 text-xs font-medium text-[var(--c-ink)] hover:bg-[var(--c-surface)]"
                 >
                   {bn
                     ? `সর্বশেষ অর্ডার দেখুন (${lastConfirmedOrder.orderNumber})`
@@ -847,19 +840,20 @@ export function BagCheckoutDrawer({
               <a
                 href="/#order"
                 onClick={onClose}
-                className="rounded-lg bg-[#B47B2B] px-5 py-3 text-sm font-medium text-[#FFFDF9] hover:bg-[#96621B]"
+                className="rounded-lg bg-[#B47B2B] px-5 py-3 text-sm font-medium text-[var(--c-on-gold)] hover:bg-[#96621B]"
               >
                 {bn ? 'ওজন নির্বাচন করুন' : 'Select Jar Weight'}
               </a>
             </div>
           ) : step === 'bag' ? (
             <div className="space-y-4">
-              {/* Free Delivery Milestone Progress */}
-              <div className="rounded-2xl border border-[rgba(180,123,43,0.22)] bg-[#F4EFE6] p-4 shadow-xs">
-                <div className="flex items-center gap-2.5 text-xs font-semibold text-[#1E1710]">
+              {/* Free Delivery Milestone Progress — only when the owner configured a threshold */}
+              {freeThresholdConfirmed && (
+              <div className="rounded-2xl border border-[rgba(180,123,43,0.22)] bg-[var(--c-band)] p-4 shadow-xs">
+                <div className="flex items-center gap-2.5 text-xs font-semibold text-[var(--c-ink)]">
                   <Truck className="h-4 w-4 shrink-0 text-[#B47B2B]" />
                   {qualifiesFree ? (
-                    <span className="text-[#2D6A4F] flex items-center gap-1 font-bold">
+                    <span className="text-[var(--c-green-text)] flex items-center gap-1 font-bold">
                       <CheckCircle2 className="h-3.5 w-3.5" />
                       {bn
                         ? 'অভিনন্দন! আপনার অর্ডারে ফ্রি ডেলিভারি আনলক হয়েছে।'
@@ -873,13 +867,14 @@ export function BagCheckoutDrawer({
                     </span>
                   )}
                 </div>
-                <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-[#EAE1D2]">
+                <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-[var(--c-elev)]">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-[#B47B2B] to-[#D4AF37] transition-all duration-300"
                     style={{ width: `${freeProgressPct}%` }}
                   />
                 </div>
               </div>
+              )}
 
               {/* Cart Items */}
               <div className="space-y-3">
@@ -888,11 +883,11 @@ export function BagCheckoutDrawer({
                   const stockAvail = getStockForWeight(item.weight);
                   const awaitingConfirm = confirmRemoveWeight === item.weight;
                   return (
-                    <div key={item.weight} className="flex items-start gap-3.5 p-3.5 rounded-2xl border border-[rgba(30,23,16,0.08)] bg-[#FFFDF9] shadow-xs">
-                      <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-[rgba(30,23,16,0.10)] bg-[#F2ECE1]">
+                    <div key={item.weight} className="flex items-start gap-3.5 p-3.5 rounded-2xl border border-[rgb(var(--c-tint)/0.08)] bg-[var(--c-card)] shadow-xs">
+                      <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-[rgb(var(--c-tint)/0.10)] bg-[var(--c-surface)]">
                         <ResilientImage
                           src={IMAGES.heroFront}
-                          alt="Deshi Gee glass jar"
+                          alt="Deshi Gee jar"
                           fallbackTitle={item.weight}
                           className="h-full w-full object-cover"
                         />
@@ -901,10 +896,10 @@ export function BagCheckoutDrawer({
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <h3 className="font-display text-sm font-bold text-[#1E1710] sm:text-base">
+                            <h3 className="font-display text-sm font-bold text-[var(--c-ink)] sm:text-base">
                               {bn ? settings.productNameBn : settings.productNameEn}
                             </h3>
-                            <p className="mt-0.5 font-mono text-xs font-semibold text-[#8A5A17] tabular-nums">
+                            <p className="mt-0.5 font-mono text-xs font-semibold text-[var(--c-gold-text)] tabular-nums">
                               {item.weight} · {formatBdt(unitPrice)}
                             </p>
                           </div>
@@ -924,7 +919,7 @@ export function BagCheckoutDrawer({
                               <button
                                 type="button"
                                 onClick={() => setConfirmRemoveWeight(null)}
-                                className="min-h-[40px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FAF7F2] px-3 py-1.5 text-xs"
+                                className="min-h-[40px] rounded-lg border border-[rgb(var(--c-tint)/0.2)] bg-[var(--c-bg)] px-3 py-1.5 text-xs"
                               >
                                 {bn ? 'বাতিল' : 'Cancel'}
                               </button>
@@ -942,16 +937,16 @@ export function BagCheckoutDrawer({
                         </div>
 
                         <div className="mt-3 flex items-center justify-between">
-                          <div className="inline-flex items-center rounded-xl border border-[rgba(30,23,16,0.16)] bg-[#FAF7F2]">
+                          <div className="inline-flex items-center rounded-xl border border-[rgb(var(--c-tint)/0.16)] bg-[var(--c-bg)]">
                             <button
                               type="button"
                               onClick={() => onUpdateQty(item.weight, -1)}
                               aria-label="Decrease quantity"
-                              className="flex h-11 w-11 items-center justify-center text-[#1E1710] hover:bg-[#F2ECE1] transition-colors"
+                              className="flex h-11 w-11 items-center justify-center text-[var(--c-ink)] hover:bg-[var(--c-surface)] transition-colors"
                             >
                               <Minus className="h-3.5 w-3.5" />
                             </button>
-                            <span className="w-8 text-center font-mono text-sm font-bold tabular-nums text-[#1E1710]">
+                            <span className="w-8 text-center font-mono text-sm font-bold tabular-nums text-[var(--c-ink)]">
                               {bn ? toBengaliDigits(item.qty) : item.qty}
                             </span>
                             <button
@@ -959,13 +954,13 @@ export function BagCheckoutDrawer({
                               disabled={item.qty >= stockAvail}
                               onClick={() => onUpdateQty(item.weight, 1)}
                               aria-label="Increase quantity"
-                              className="flex h-11 w-11 items-center justify-center text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                              className="flex h-11 w-11 items-center justify-center text-[var(--c-ink)] hover:bg-[var(--c-surface)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                             >
                               <Plus className="h-3.5 w-3.5" />
                             </button>
                           </div>
 
-                          <span className="font-mono text-sm font-bold tabular-nums text-[#1E1710]">
+                          <span className="font-mono text-sm font-bold tabular-nums text-[var(--c-ink)]">
                             {formatBdt(unitPrice * item.qty)}
                           </span>
                         </div>
@@ -976,12 +971,12 @@ export function BagCheckoutDrawer({
               </div>
 
               {/* Coupon Input */}
-              <div className="space-y-2 border-t border-[rgba(30,23,16,0.10)] pt-4">
+              <div className="space-y-2 border-t border-[rgb(var(--c-tint)/0.10)] pt-4">
                 <label
                   htmlFor="bag-coupon"
-                  className="flex items-center gap-1.5 text-xs font-medium text-[#635647]"
+                  className="flex items-center gap-1.5 text-xs font-medium text-[var(--c-muted)]"
                 >
-                  <Tag className="h-3.5 w-3.5 text-[#8A5A17]" />
+                  <Tag className="h-3.5 w-3.5 text-[var(--c-gold-text)]" />
                   <span>{bn ? 'প্রোমো কোড (ঐচ্ছিক)' : 'Coupon Code (Optional)'}</span>
                 </label>
                 <div className="flex gap-2">
@@ -991,19 +986,19 @@ export function BagCheckoutDrawer({
                     value={couponInput}
                     onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
                     placeholder={bn ? 'কুপন কোড লিখুন' : 'Enter promo code'}
-                    className="min-h-[44px] flex-1 rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 font-mono text-base uppercase text-[#1E1710] focus:border-[#B47B2B] focus:outline-none sm:text-xs"
+                    className="min-h-[44px] flex-1 rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3 py-2 font-mono text-base uppercase text-[var(--c-ink)] focus:border-[#B47B2B] focus:outline-none sm:text-xs"
                   />
                   <button
                     type="button"
                     disabled={couponLoading}
                     onClick={handleApplyCoupon}
-                    className="min-h-[44px] rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#F2ECE1] px-4 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#EAE1D2] disabled:opacity-50"
+                    className="min-h-[44px] rounded-lg border border-[rgb(var(--c-tint)/0.2)] bg-[var(--c-surface)] px-4 py-2 text-xs font-medium text-[var(--c-ink)] hover:bg-[var(--c-elev)] disabled:opacity-50"
                   >
                     {couponLoading ? '...' : bn ? 'প্রয়োগ' : 'Apply'}
                   </button>
                 </div>
                 {couponFeedback && (
-                  <p className="text-xs text-[#8A5A17]">{couponFeedback}</p>
+                  <p className="text-xs text-[var(--c-gold-text)]">{couponFeedback}</p>
                 )}
               </div>
 
@@ -1011,7 +1006,7 @@ export function BagCheckoutDrawer({
               <div className="space-y-2">
                 <label
                   htmlFor="bag-district-preview"
-                  className="block text-xs font-medium text-[#635647]"
+                  className="block text-xs font-medium text-[var(--c-muted)]"
                 >
                   {bn ? 'ডেলিভারি জেলা নির্বাচন করুন' : 'Select Delivery District'}
                 </label>
@@ -1019,7 +1014,7 @@ export function BagCheckoutDrawer({
                   id="bag-district-preview"
                   value={district}
                   onChange={(e) => setDistrict(e.target.value)}
-                  className="min-h-[44px] w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2.5 text-base text-[#1E1710] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
+                  className="min-h-[44px] w-full rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3 py-2.5 text-base text-[var(--c-ink)] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
                 >
                   {BANGLADESH_DISTRICTS.map((d) => (
                     <option key={d} value={d}>
@@ -1028,7 +1023,7 @@ export function BagCheckoutDrawer({
                   ))}
                 </select>
                 {(estimatedDeliveryWindow || cutoffNotice) && (
-                  <p className="text-xs text-[#635647]">
+                  <p className="text-xs text-[var(--c-muted)]">
                     {[estimatedDeliveryWindow, cutoffNotice].filter(Boolean).join(' · ')}
                   </p>
                 )}
@@ -1057,14 +1052,14 @@ export function BagCheckoutDrawer({
                         <button
                           type="button"
                           onClick={() => setOrderingUnavailable('')}
-                          className="inline-flex min-h-[36px] items-center justify-center rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-xs font-semibold text-amber-950 hover:bg-amber-100"
+                          className="inline-flex min-h-[36px] items-center justify-center rounded-lg border border-amber-400 bg-[var(--c-card)] px-3 py-1.5 text-xs font-semibold text-amber-950 hover:bg-amber-100"
                         >
                           {bn ? 'আবার চেষ্টা করুন' : 'Try Again'}
                         </button>
                         {hasValidRealPhone(settings.supportPhone) && (
                           <a
                             href={`tel:${settings.supportPhone.replace(/[^+\d]/g, '')}`}
-                            className="inline-flex min-h-[36px] items-center justify-center rounded-lg bg-[#1A120B] px-3 py-1.5 text-xs font-semibold text-[#FAF7F2] hover:bg-[#332415]"
+                            className="inline-flex min-h-[36px] items-center justify-center rounded-lg bg-[var(--c-accent)] px-3 py-1.5 text-xs font-semibold text-[var(--c-on-accent)] hover:bg-[var(--c-accent-hover)]"
                           >
                             {bn ? 'সাপোর্টে কল করুন' : 'Call Support'}
                           </a>
@@ -1086,7 +1081,7 @@ export function BagCheckoutDrawer({
               )}
 
               <div>
-                <label htmlFor="co-name" className="block text-xs font-medium text-[#635647]">
+                <label htmlFor="co-name" className="block text-xs font-medium text-[var(--c-muted)]">
                   {bn ? 'পূর্ণ নাম *' : 'Full Name *'}
                 </label>
                 <input
@@ -1095,13 +1090,14 @@ export function BagCheckoutDrawer({
                   required
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
+                    autoComplete="name"
                   placeholder={bn ? 'যেমন: তারিকুল ইসলাম' : 'e.g. Tariqul Islam'}
-                  className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3.5 py-2.5 text-base text-[#1E1710] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
+                  className="mt-1 w-full rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3.5 py-2.5 text-base text-[var(--c-ink)] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
                 />
               </div>
 
               <div>
-                <label htmlFor="co-phone" className="block text-xs font-medium text-[#635647]">
+                <label htmlFor="co-phone" className="block text-xs font-medium text-[var(--c-muted)]">
                   {bn ? 'মোবাইল নম্বর (বাংলাদেশ) *' : 'Bangladesh Mobile Number *'}
                 </label>
                 <input
@@ -1111,64 +1107,46 @@ export function BagCheckoutDrawer({
                   required
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
+                    autoComplete="tel"
                   placeholder="017XXXXXXXX"
-                  className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3.5 py-2.5 font-mono text-base text-[#1E1710] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
+                  className="mt-1 w-full rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3.5 py-2.5 font-mono text-base text-[var(--c-ink)] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
                 />
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label
-                    htmlFor="co-district"
-                    className="block text-xs font-medium text-[#635647]"
-                  >
-                    {bn ? 'জেলা *' : 'District *'}
-                  </label>
-                  <select
-                    id="co-district"
-                    value={district}
-                    onChange={(e) => setDistrict(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2.5 text-base text-[#1E1710] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
-                  >
-                    {BANGLADESH_DISTRICTS.map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label htmlFor="co-area" className="block text-xs font-medium text-[#635647]">
-                    {bn ? 'এলাকা / থানা *' : 'City / Area *'}
-                  </label>
-                  <input
-                    id="co-area"
-                    type="text"
-                    required
-                    value={area}
-                    onChange={(e) => setArea(e.target.value)}
-                    placeholder={bn ? 'যেমন: ধানমন্ডি' : 'e.g. Dhanmondi'}
-                    className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3.5 py-2.5 text-base text-[#1E1710] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
-                  />
-                </div>
+              <div>
+                <label htmlFor="co-district" className="block text-xs font-medium text-[var(--c-muted)]">
+                  {bn ? 'জেলা *' : 'District *'}
+                </label>
+                <select
+                  id="co-district"
+                  value={district}
+                  onChange={(e) => setDistrict(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3 py-2.5 text-base text-[var(--c-ink)] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
+                >
+                  {BANGLADESH_DISTRICTS.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
-                <label htmlFor="co-address" className="block text-xs font-medium text-[#635647]">
+                <label htmlFor="co-address" className="block text-xs font-medium text-[var(--c-muted)]">
                   {bn ? 'সম্পূর্ণ ঠিকানা *' : 'Complete Delivery Address *'}
                 </label>
                 <textarea
                   id="co-address"
-                  rows={2}
+                  rows={3}
                   required
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  placeholder={bn ? 'বাড়ি, সড়ক, ফ্ল্যাট নম্বর' : 'House, Road, Floor / Flat'}
-                  className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3.5 py-2.5 text-base text-[#1E1710] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
+                    autoComplete="street-address"
+                  placeholder={bn ? 'বাসা, রোড, এলাকা/থানা (যেমন: বাসা ১২, রোড ৫, মিরপুর-১০)' : 'House, road, area / thana (e.g. House 12, Road 5, Mirpur-10)'}
+                  className="mt-1 w-full rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3.5 py-2.5 text-base text-[var(--c-ink)] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
                 />
                 {!addressCheck.complete && (
-                  <p className="mt-1 text-[11px] text-[#8A5A17]">
+                  <p className="mt-1 text-[11px] text-[var(--c-gold-text)]">
                     {bn
                       ? 'দয়া করে বাড়ি, সড়ক বা ফ্ল্যাট নম্বরসহ বিস্তারিত ঠিকানা লিখুন।'
                       : 'Add house, road, or floor details for accurate courier delivery.'}
@@ -1177,7 +1155,7 @@ export function BagCheckoutDrawer({
               </div>
 
               <div>
-                <label htmlFor="co-note" className="block text-xs font-medium text-[#635647]">
+                <label htmlFor="co-note" className="block text-xs font-medium text-[var(--c-muted)]">
                   {bn ? 'অতিরিক্ত নির্দেশনা (ঐচ্ছিক)' : 'Order Note (Optional)'}
                 </label>
                 <input
@@ -1186,121 +1164,25 @@ export function BagCheckoutDrawer({
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   placeholder={bn ? 'ডেলিভারির সময় বা নোট' : 'Preferred time or landmark'}
-                  className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3.5 py-2.5 text-base text-[#1E1710] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
+                  className="mt-1 w-full rounded-lg border border-[rgb(var(--c-tint)/0.18)] bg-[var(--c-card)] px-3.5 py-2.5 text-base text-[var(--c-ink)] focus:border-[#B47B2B] focus:outline-none sm:text-sm"
                 />
               </div>
 
-              {/* Payment Method Selector */}
-              <div className="space-y-2.5 pt-2">
-                <span className="block text-xs font-medium uppercase tracking-wider text-[#635647]">
-                  {bn ? 'পেমেন্ট মাধ্যম' : 'Payment Method'}
+              {/* Payment — Cash on Delivery only */}
+              <div className="flex items-start gap-3 rounded-xl border border-[#B47B2B]/35 bg-[#B47B2B]/10 p-4">
+                <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#B47B2B] text-[var(--c-on-gold)]">
+                  <Truck className="h-4 w-4" />
                 </span>
-                <div className="grid grid-cols-3 gap-2">
-                  {availableMethods.map((method) => {
-                    const active = paymentMethod === method;
-                    return (
-                      <button
-                        key={method}
-                        type="button"
-                        onClick={() => setPaymentMethod(method)}
-                        className={`min-h-[44px] rounded-lg border px-1.5 py-2 text-xs font-medium transition-colors whitespace-nowrap ${
-                          active
-                            ? 'border-[#B47B2B] bg-[#F2ECE1] text-[#1E1710]'
-                            : 'border-[rgba(30,23,16,0.16)] bg-[#FFFDF9] text-[#635647]'
-                        }`}
-                      >
-                        {method === 'cod' && (bn ? 'ক্যাশ (COD)' : 'Cash (COD)')}
-                        {method === 'bkash' && (bn ? 'বিকাশ' : 'bKash')}
-                        {method === 'nagad' && (bn ? 'নগদ' : 'Nagad')}
-                      </button>
-                    );
-                  })}
+                <div>
+                  <p className="text-sm font-semibold text-[var(--c-ink)]">
+                    {bn ? 'ক্যাশ অন ডেলিভারি' : 'Cash on Delivery'}
+                  </p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-[var(--c-muted)]">
+                    {bn
+                      ? 'এখন কোনো টাকা দিতে হবে না। ঘি হাতে পেয়ে ডেলিভারি ম্যানকে মূল্য পরিশোধ করুন।'
+                      : 'Nothing to pay now. Pay in cash to the delivery person when your ghee arrives.'}
+                  </p>
                 </div>
-
-                {(paymentMethod === 'bkash' || paymentMethod === 'nagad') && (
-                  <div className="space-y-3 rounded-xl border border-[#B47B2B]/30 bg-[#F2ECE1] p-4 text-xs">
-                    <p className="font-medium text-[#1E1710]">
-                      {paymentMethod === 'bkash' ? 'bKash' : 'Nagad'}{' '}
-                      {bn ? 'পেমেন্ট নির্দেশনা:' : 'Payment Instructions:'}
-                    </p>
-                    <p className="leading-relaxed text-[#635647]">
-                      {bn
-                        ? `নিচের নম্বরে "Send Money" বা "Payment" করে মোট ${formatBdt(grandTotal)} পাঠান এবং নিচে Transaction ID দিন। অ্যাডমিন যাচাইয়ের পর অর্ডারটি কনফার্ম করা হবে।`
-                        : `Send ${formatBdt(grandTotal)} to our ${paymentMethod === 'bkash' ? 'bKash' : 'Nagad'} number below, then submit your Transaction ID. Payment remains pending verification until confirmed by admin.`}
-                    </p>
-                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[#FFFDF9] px-3 py-2">
-                      <div>
-                        <span className="block text-[11px] text-[#635647]">
-                          {paymentMethod === 'bkash' ? 'bKash' : 'Nagad'} Number
-                        </span>
-                        <span className="font-mono text-sm font-semibold text-[#1E1710] tabular-nums">
-                          {paymentMethod === 'bkash'
-                            ? settings.bkashNumber
-                            : settings.nagadNumber}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleCopyMfsNumber(
-                            paymentMethod === 'bkash'
-                              ? settings.bkashNumber
-                              : settings.nagadNumber
-                          )
-                        }
-                        className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.16)] bg-[#FAF7F2] px-3 py-1.5 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1]"
-                      >
-                        {copiedMfs ? (
-                          <>
-                            <Check className="h-3.5 w-3.5 text-[#2D6A4F]" />
-                            <span className="text-[#2D6A4F]">{bn ? 'কপি হয়েছে' : 'Copied'}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="h-3.5 w-3.5 text-[#8A5A17]" />
-                            <span>{bn ? 'কপি' : 'Copy'}</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-
-                    <div>
-                      <label htmlFor="co-txnid" className="block font-medium text-[#1E1710]">
-                        {bn ? 'ট্রানজেকশন আইডি (TxnID) *' : 'Transaction ID (TxnID) *'}
-                      </label>
-                      <input
-                        id="co-txnid"
-                        type="text"
-                        required
-                        value={txnId}
-                        onChange={(e) => setTxnId(e.target.value)}
-                        placeholder="e.g. 9K4M7X2P10"
-                        className="mt-1 w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 font-mono text-base text-[#1E1710] focus:border-[#B47B2B] focus:outline-none sm:text-xs"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border border-dashed border-[rgba(30,23,16,0.28)] bg-[#FFFDF9] px-3 py-2 text-[#635647] hover:text-[#1E1710]">
-                        <Upload className="h-3.5 w-3.5 text-[#8A5A17]" />
-                        <span>
-                          {paymentProofData
-                            ? bn
-                              ? 'স্ক্রিনশট সংযুক্ত হয়েছে'
-                              : 'Screenshot attached'
-                            : bn
-                              ? 'পেমেন্ট স্ক্রিনশট যুক্ত করুন (ঐচ্ছিক)'
-                              : 'Attach payment screenshot (Optional)'}
-                        </span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={handleScreenshotUpload}
-                          className="hidden"
-                        />
-                      </label>
-                    </div>
-                  </div>
-                )}
               </div>
             </form>
           )}
@@ -1308,13 +1190,13 @@ export function BagCheckoutDrawer({
 
         {/* Footer Totals */}
         {cart.length > 0 && step !== 'confirmed' && (
-          <div className="border-t border-[rgba(30,23,16,0.12)] bg-[#F2ECE1]/85 px-4 py-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-4">
+          <div className="border-t border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-surface)]/85 px-4 py-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-4">
             <div className="space-y-1 text-xs sm:text-sm">
-              <div className="flex justify-between text-[#635647]">
+              <div className="flex justify-between text-[var(--c-muted)]">
                 <span>{bn ? 'সাবটোটাল' : 'Subtotal'}</span>
                 <span className="font-mono tabular-nums">{formatBdt(subtotal)}</span>
               </div>
-              <div className="flex justify-between text-[#635647]">
+              <div className="flex justify-between text-[var(--c-muted)]">
                 <span>
                   {bn ? 'ডেলিভারি' : 'Delivery'} ({district})
                 </span>
@@ -1323,16 +1205,16 @@ export function BagCheckoutDrawer({
                 </span>
               </div>
               {totalDiscount > 0 && (
-                <div className="flex justify-between text-[#8A5A17]">
+                <div className="flex justify-between text-[var(--c-gold-text)]">
                   <span>{bn ? 'ছাড়' : 'Discount'}</span>
                   <span className="font-mono tabular-nums">
                     -{formatBdt(totalDiscount)}
                   </span>
                 </div>
               )}
-              <div className="flex justify-between pt-1.5 text-base font-semibold text-[#1E1710]">
+              <div className="flex justify-between pt-1.5 text-base font-semibold text-[var(--c-ink)]">
                 <span>{bn ? 'সর্বমোট' : 'Final Payable'}</span>
-                <span className="font-mono tabular-nums text-[#8A5A17]">
+                <span className="font-mono tabular-nums text-[var(--c-gold-text)]">
                   {formatBdt(grandTotal)}
                 </span>
               </div>
@@ -1352,7 +1234,7 @@ export function BagCheckoutDrawer({
               <button
                 type="button"
                 onClick={handleProceedCheckout}
-                className="mt-3.5 min-h-[50px] w-full rounded-xl bg-gradient-to-r from-[#B47B2B] via-[#C98A2C] to-[#96621B] px-5 py-3 text-sm font-bold text-[#FFFDF9] shadow-[0_8px_20px_-4px_rgba(180,123,43,0.35)] hover:scale-[1.01] transition-all"
+                className="mt-3.5 min-h-[50px] w-full rounded-xl bg-gradient-to-r from-[#B47B2B] via-[#C98A2C] to-[#96621B] px-5 py-3 text-sm font-bold text-[var(--c-on-gold)] shadow-[0_8px_20px_-4px_rgba(180,123,43,0.35)] hover:scale-[1.01] transition-all"
               >
                 {bn ? 'চেকআউটে এগিয়ে যান' : 'Proceed to Checkout'} · {formatBdt(grandTotal)}
               </button>
@@ -1361,7 +1243,7 @@ export function BagCheckoutDrawer({
                 type="submit"
                 form="deshi-checkout-form"
                 disabled={submitting}
-                className="mt-3.5 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#B47B2B] via-[#C98A2C] to-[#96621B] px-5 py-3 text-sm font-bold text-[#FFFDF9] shadow-[0_8px_20px_-4px_rgba(180,123,43,0.35)] hover:scale-[1.01] disabled:opacity-60 transition-all"
+                className="mt-3.5 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#B47B2B] via-[#C98A2C] to-[#96621B] px-5 py-3 text-sm font-bold text-[var(--c-on-gold)] shadow-[0_8px_20px_-4px_rgba(180,123,43,0.35)] hover:scale-[1.01] disabled:opacity-60 transition-all"
               >
                 {submitting && <Loader2 className="h-4 w-4 animate-spin text-[#FFFDF9]" />}
                 <span>
