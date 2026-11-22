@@ -278,6 +278,8 @@ export interface OrderRecord {
   duplicateWarning?: string;
   codVerificationStatus?: 'not_required' | 'not_configured' | 'pending' | 'verified';
   sourceChannel?: ChannelSource;
+  /** Cost-of-goods snapshot (BDT) captured at order creation; powers the profit report. */
+  cogsBdt?: number;
   attributedSessionId?: string;
   trackingTokenHash?: string;
   paymentLifecycleStatus?:

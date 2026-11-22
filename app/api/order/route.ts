@@ -1,3 +1,5 @@
+import { computeOrderCogs } from '../../../src/lib/finance/profit';
+import { getFinanceSettingsBestEffort } from '../../../src/lib/server/financeRepository';
 import {
   getEffectiveMaxJarsPerOrder,
   isStorefrontOrderingReady,
@@ -472,6 +474,12 @@ export async function POST(request: Request) {
     { channel: 'email_api', url: process.env.EMAIL_WEBHOOK_URL },
   ].filter((t) => Boolean(t.url));
 
+  const financeSettings = await getFinanceSettingsBestEffort();
+  const cogsBdt = computeOrderCogs(
+    { qty250g: livePricing.qty250g, qty500g: livePricing.qty500g, qty1kg: livePricing.qty1kg },
+    financeSettings
+  );
+
   const orderDoc: Omit<OrderRecord, 'createdAt' | 'updatedAt'> = {
     orderNumber,
     customerName: payload.customerName,
@@ -510,6 +518,7 @@ export async function POST(request: Request) {
         ? 'not_configured'
         : 'not_required',
     sourceChannel,
+    ...(cogsBdt !== undefined ? { cogsBdt } : {}),
     attributedSessionId: sessionId.slice(0, 64),
   };
 

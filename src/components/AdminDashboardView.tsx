@@ -30,6 +30,7 @@ import {
   Ticket,
   Trash2,
   Truck,
+  Wallet,
   X,
 } from 'lucide-react';
 import {
@@ -67,6 +68,7 @@ import { formatBdt } from '../data/deshiGeeData';
 import { AdminChatbotPanel } from './AdminChatbotPanel';
 import { AdminEcosystemPanel } from './AdminEcosystemPanel';
 import { HelpInfoButton } from './admin/AdminHelpModal';
+import { ProfitExpensesPanel } from './admin/ProfitExpensesPanel';
 import { StorefrontImpactPreview } from './admin/StorefrontImpactPreview';
 import {
   Card,
@@ -87,7 +89,7 @@ interface AdminDashboardViewProps {
   onBackHome: () => void;
 }
 
-type AdminTab = 'overview' | 'orders' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
+type AdminTab = 'overview' | 'orders' | 'finance' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
 
 export function AdminDashboardView({
   settings,
@@ -719,6 +721,7 @@ export function AdminDashboardView({
       items: [
         { id: 'overview', label: 'Overview', icon: LayoutDashboard },
         { id: 'orders', label: 'Orders', icon: ShoppingBag, badge: metrics.pending },
+        { id: 'finance', label: 'Profit & Expenses', icon: Wallet },
       ],
     },
     {
@@ -1569,6 +1572,11 @@ export function AdminDashboardView({
             )}
           </div>
         </div>
+      )}
+
+      {/* TAB: PROFIT & EXPENSES */}
+      {tab === 'finance' && (
+        <ProfitExpensesPanel getIdToken={async () => (user ? user.getIdToken() : '')} />
       )}
 
       {/* TAB 3: STORE, STOCK, DELIVERY & CONTACT CONFIG */}

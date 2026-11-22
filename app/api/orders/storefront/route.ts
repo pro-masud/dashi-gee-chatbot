@@ -27,6 +27,8 @@ import {
   resolveConfiguredDistrictAndZone,
 } from '../../../../src/lib/chatbot/orderToken';
 import { extractClientIp, hashIdentifier } from '../../../../src/lib/chatbot/rateLimit';
+import { computeOrderCogs } from '../../../../src/lib/finance/profit';
+import { getFinanceSettingsBestEffort } from '../../../../src/lib/server/financeRepository';
 import { dispatchOrderNotificationsServerSide } from '../../../../src/lib/integrations/orderNotify';
 
 export const dynamic = 'force-dynamic';
@@ -299,6 +301,12 @@ export async function POST(request: Request) {
     codRiskThresholdScore: settings.codRiskThresholdScore,
   });
 
+  const financeSettings = await getFinanceSettingsBestEffort();
+  const cogsBdt = computeOrderCogs(
+    { qty250g: pricing.qty250g, qty500g: pricing.qty500g, qty1kg: pricing.qty1kg },
+    financeSettings
+  );
+
   const dispatchWindow = getDispatchWindowInfo(settings);
   const orderNumber = `DG-${Math.floor(10000 + Math.random() * 89999)}`;
   const paymentStatus = paymentMethod === 'cod' ? 'cod_due' : 'pending_verification';
@@ -341,6 +349,7 @@ export async function POST(request: Request) {
     codVerificationStatus:
       paymentMethod === 'cod' && settings.codConfirmEnabled ? 'not_configured' : 'not_required',
     sourceChannel: 'web',
+    ...(cogsBdt !== undefined ? { cogsBdt } : {}),
   };
 
   const tokenId = `sf_${randomUUID()}`;
