@@ -21,6 +21,7 @@ import {
   PhoneCall,
   LogOut,
   Menu,
+  LayoutTemplate,
   PackageOpen,
   Plug,
   Printer,
@@ -77,6 +78,7 @@ import { AdminEcosystemPanel } from './AdminEcosystemPanel';
 import { HelpInfoButton } from './admin/AdminHelpModal';
 import { ActivityLogPanel } from './admin/ActivityLogPanel';
 import { CodSettlementPanel } from './admin/CodSettlementPanel';
+import { CmsPanel } from './admin/CmsPanel';
 import { LeadsPanel } from './admin/LeadsPanel';
 import { OverviewAnalytics } from './admin/OverviewAnalytics';
 import { PackagesPanel } from './admin/PackagesPanel';
@@ -147,7 +149,7 @@ async function probeServerAdminAccess(u: User | null): Promise<boolean> {
   }
 }
 
-type AdminTab = 'overview' | 'orders' | 'packages' | 'finance' | 'cod' | 'leads' | 'staff' | 'activity' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
+type AdminTab = 'overview' | 'orders' | 'cms' | 'packages' | 'finance' | 'cod' | 'leads' | 'staff' | 'activity' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
 
 export function AdminDashboardView({
   settings,
@@ -975,6 +977,7 @@ export function AdminDashboardView({
     {
       group: 'Catalog & Store',
       items: [
+        { id: 'cms', label: 'Landing Page Editor', icon: LayoutTemplate, perm: 'cms.manage' },
         { id: 'packages', label: 'Product & Packages', icon: PackageOpen, perm: 'catalog.manage' },
         { id: 'store', label: 'Pricing, Stock & Delivery', icon: SlidersHorizontal, ownerOnly: true },
         { id: 'batches', label: 'Batches & Coupons', icon: Ticket, ownerOnly: true },
@@ -1932,6 +1935,10 @@ export function AdminDashboardView({
             )}
           </div>
         </div>
+      )}
+
+      {tab === 'cms' && (
+        <CmsPanel getIdToken={async () => (user ? user.getIdToken() : '')} />
       )}
 
       {tab === 'packages' && (

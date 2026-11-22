@@ -66,6 +66,7 @@ import {
 } from '../data/deshiGeeData';
 import { trackStoreEvent } from '../lib/analytics';
 import { ResilientImage } from './ResilientImage';
+import { visibleFaqs, visibleHighlights } from '../lib/cms/cms';
 import { useStorefront } from './StorefrontProvider';
 
 gsap.registerPlugin(ScrollTrigger);
@@ -85,6 +86,7 @@ export function HomeStorefrontView() {
     openChatAssistant,
     openCallbackRequest,
     packageMeta,
+    cms,
   } = useStorefront();
 
   const [selectedWeight, setSelectedWeight] = useState<WeightKey>('500g');
@@ -601,6 +603,18 @@ export function HomeStorefrontView() {
               </p>
 
               <h1 className="display-hero mt-7">
+                {(bn ? cms?.hero.titleBn : cms?.hero.titleEn) ? (
+                  <>
+                    {bn ? cms?.hero.titleBn : cms?.hero.titleEn}
+                    {(bn ? cms?.hero.accentBn : cms?.hero.accentEn) ? (
+                      <>
+                        {' '}
+                        <span className="gold-gradient-text italic">{bn ? cms?.hero.accentBn : cms?.hero.accentEn}</span>
+                      </>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
                 {bn ? (
                   <>
                     পাবনার চারণভূমির কাঁচা দুধে{' '}
@@ -612,10 +626,12 @@ export function HomeStorefrontView() {
                     <span className="gold-gradient-text italic">slow-churned</span> the old way.
                   </>
                 )}
+              </>
+                )}
               </h1>
 
               <p className="mt-7 max-w-[46ch] text-base leading-[1.8] text-[var(--c-muted)] sm:text-lg">
-                {bn
+                {(bn ? cms?.hero.subtitleBn : cms?.hero.subtitleEn) ? (bn ? cms?.hero.subtitleBn : cms?.hero.subtitleEn) : bn
                   ? 'সকালের সংগৃহীত দেশী গরুর সম্পূর্ণ দুধ থেকে পাতা দই, কাঠের বিলোনায় মন্থন আর মাটির মৃদু আঁচ—শেষে বয়ামে সিল করা খাঁটি দানাদার গাওয়া ঘি।'
                   : 'Whole-milk curd from Pabna pastures, hand-churned in a wooden bilona and sealed warm in an airtight jar. One product, made honestly.'}
               </p>
@@ -623,7 +639,7 @@ export function HomeStorefrontView() {
               <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center">
                 <a href="#order" className="btn-gold w-full sm:w-auto">
                   <ShoppingBag className="h-4 w-4" />
-                  <span>{bn ? 'এখনই অর্ডার করুন' : 'Order the Jar'}</span>
+                  <span>{(bn ? cms?.hero.ctaBn : cms?.hero.ctaEn) || (bn ? 'এখনই অর্ডার করুন' : 'Order the Jar')}</span>
                   <ArrowRight className="h-4 w-4" />
                 </a>
                 <a href="#craft" className="btn-ghost w-full sm:w-auto">
@@ -710,7 +726,9 @@ export function HomeStorefrontView() {
                 aria-hidden={dup === 1 ? 'true' : undefined}
                 className="flex shrink-0 items-center"
               >
-                {(bn
+                {(cms && visibleHighlights(cms.highlights, bn ? 'bn' : 'en').length > 0
+                  ? visibleHighlights(cms.highlights, bn ? 'bn' : 'en')
+                  : bn
                   ? [
                       'পাবনার একক উৎস',
                       'কাঠের বিলোনায় মন্থন',
@@ -2012,7 +2030,15 @@ export function HomeStorefrontView() {
             </div>
 
             <div className="mt-10 space-y-3">
-              {FAQ_ITEMS.map((item, idx) => {
+              {(cms && visibleFaqs(cms.faqs).length > 0
+                ? visibleFaqs(cms.faqs).map((f) => ({
+                    qEn: f.qEn || f.qBn,
+                    qBn: f.qBn || f.qEn,
+                    aEn: f.aEn || f.aBn,
+                    aBn: f.aBn || f.aEn,
+                  }))
+                : FAQ_ITEMS
+              ).map((item, idx) => {
                 const isOpen = openFaqIdx === idx;
                 return (
                   <div

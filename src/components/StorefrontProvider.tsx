@@ -42,6 +42,7 @@ import {
 } from '../lib/firebase';
 import { Lang, formatBdt, toBengaliDigits } from '../data/deshiGeeData';
 import type { PublicPackages } from '../lib/packages/packages';
+import { isAnnouncementActive, isAnnouncementHidden, isSafeLink, type CmsContent } from '../lib/cms/cms';
 import { trackStoreEvent } from '../lib/analytics';
 import {
   DEFAULT_CHATBOT_CONFIG,
@@ -83,6 +84,8 @@ interface StorefrontContextValue {
   openCallbackRequest: () => void;
   /** Customer-safe package display data (badges, regular vs selling price, enabled, default). */
   packageMeta: PublicPackages | null;
+  /** Published landing-page content (null = built-in defaults). */
+  cms: CmsContent | null;
 }
 
 const StorefrontContext = createContext<StorefrontContextValue | null>(null);
@@ -115,6 +118,24 @@ export function StorefrontProvider({
   const [hydratedStorage, setHydratedStorage] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [packageMeta, setPackageMeta] = useState<PublicPackages | null>(null);
+  const [cms, setCms] = useState<CmsContent | null>(null);
+  const announce = cms && isAnnouncementActive(cms.announcement) ? cms.announcement : null;
+  const hideAnnouncement = cms ? isAnnouncementHidden(cms.announcement) : false;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/cms/published')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d?.ok && d.content) setCms(d.content as CmsContent);
+      })
+      .catch(() => {
+        // the storefront works with built-in text when published content is unavailable
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -543,6 +564,7 @@ export function StorefrontProvider({
         openChatAssistant,
         openCallbackRequest,
         packageMeta,
+        cms,
       }}
     >
       {isAdminRoute ? (
@@ -553,43 +575,61 @@ export function StorefrontProvider({
       ) : (
         <div id="top" className="min-h-screen bg-[var(--c-bg)] text-[var(--c-ink)]">
           {/* PRESTIGE ANNOUNCEMENT TICKER */}
-          <div className="no-print relative z-40 border-b border-[#B47B2B]/20 bg-[#1A120B] px-4 py-1.5 text-xs font-medium tracking-wide text-[#FAF7F2]">
-            <div className="mx-auto flex max-w-[1320px] items-center justify-between gap-4">
-              <div className="flex items-center gap-2 overflow-hidden whitespace-nowrap">
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[#B47B2B]/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[#F5D692]">
-                  <Sparkles className="h-3 w-3 text-[#D4AF37]" />
-                  {bn ? 'সরাসরি পাবনা থেকে' : 'Fresh Harvest'}
-                </span>
-                <span className="hidden text-[#E8DFC5] sm:inline">
-                  {bn
-                    ? 'পাবনার চারণভূমির কাঁচা দুধে পাতা দইয়ের বিলোনা ঘি · দেশজুড়ে ক্যাশ অন ডেলিভারি'
-                    : 'Single-Origin Pabna Grass-Fed Bilona Cow Ghee · Cash on Delivery Nationwide'}
-                </span>
-                <span className="truncate text-[#E8DFC5] sm:hidden">
-                  {bn ? 'পাবনার খাঁটি বিলোনা গাওয়া ঘি' : 'Pabna Grass-Fed Bilona Cow Ghee'}
-                </span>
-              </div>
-
-              <div className="hidden shrink-0 items-center gap-4 text-[11px] text-[#C5B8A5] lg:flex">
-                {freeThresholdConfirmed && (
-                  <>
-                    <span className="tabular-nums">
-                      {bn
-                        ? `ফ্রি ডেলিভারি ${formatBdt(settings.freeDeliveryThreshold)}+ অর্ডারে`
-                        : `Free Delivery on Orders ${formatBdt(settings.freeDeliveryThreshold)}+`}
-                    </span>
-                    <span className="text-[#B47B2B]">·</span>
-                  </>
+          {!hideAnnouncement && (
+            <div
+              className="no-print relative z-40 border-b border-[#B47B2B]/20 bg-[#1A120B] px-4 py-1.5 text-xs font-medium tracking-wide text-[#FAF7F2]"
+              style={announce ? { background: announce.bgColor || undefined, color: announce.textColor || undefined } : undefined}
+            >
+              <div className="mx-auto flex max-w-[1320px] items-center justify-between gap-4">
+                {announce ? (
+                  <div className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap">
+                    {announce.linkUrl && isSafeLink(announce.linkUrl) ? (
+                      <a href={announce.linkUrl} className="truncate underline-offset-2 hover:underline" {...(announce.linkUrl.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
+                        {(bn ? announce.textBn : announce.textEn) || announce.textEn || announce.textBn}
+                      </a>
+                    ) : (
+                      <span className="truncate">{(bn ? announce.textBn : announce.textEn) || announce.textEn || announce.textBn}</span>
+                    )}
+                  </div>
+                ) : (
+                <div className="flex items-center gap-2 overflow-hidden whitespace-nowrap">
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[#B47B2B]/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[#F5D692]">
+                    <Sparkles className="h-3 w-3 text-[#D4AF37]" />
+                    {bn ? 'সরাসরি পাবনা থেকে' : 'Fresh Harvest'}
+                  </span>
+                  <span className="hidden text-[#E8DFC5] sm:inline">
+                    {bn
+                      ? 'পাবনার চারণভূমির কাঁচা দুধে পাতা দইয়ের বিলোনা ঘি · দেশজুড়ে ক্যাশ অন ডেলিভারি'
+                      : 'Single-Origin Pabna Grass-Fed Bilona Cow Ghee · Cash on Delivery Nationwide'}
+                  </span>
+                  <span className="truncate text-[#E8DFC5] sm:hidden">
+                    {bn ? 'পাবনার খাঁটি বিলোনা গাওয়া ঘি' : 'Pabna Grass-Fed Bilona Cow Ghee'}
+                  </span>
+                </div>
                 )}
-                <Link
-                  href="/track"
-                  className="text-[#E8DFC5] underline decoration-[#B47B2B]/40 underline-offset-2 transition-colors hover:text-[#FAF7F2]"
-                >
-                  {bn ? 'অর্ডার ট্র্যাক' : 'Track Order'}
-                </Link>
+                <div className="hidden shrink-0 items-center gap-4 text-[11px] text-[#C5B8A5] lg:flex">
+                  {freeThresholdConfirmed && (
+                    <>
+                      <span className="tabular-nums">
+                        {bn
+                          ? `ফ্রি ডেলিভারি ${formatBdt(settings.freeDeliveryThreshold)}+ অর্ডারে`
+                          : `Free Delivery on Orders ${formatBdt(settings.freeDeliveryThreshold)}+`}
+                      </span>
+                      <span className="text-[#B47B2B]">·</span>
+                    </>
+                  )}
+                  <Link
+                    href="/track"
+                    className="text-[#E8DFC5] underline decoration-[#B47B2B]/40 underline-offset-2 transition-colors hover:text-[#FAF7F2]"
+                  >
+                    {bn ? 'অর্ডার ট্র্যাক' : 'Track Order'}
+                  </Link>
+                </div>
               </div>
             </div>
-          </div>
+
+
+          )}
 
           {/* GLOBAL HEADER */}
           <header
