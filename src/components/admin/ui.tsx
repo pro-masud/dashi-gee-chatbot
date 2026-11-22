@@ -104,7 +104,7 @@ export function Card({
   bodyClassName = '',
 }: {
   title?: string;
-  description?: string;
+  description?: ReactNode;
   action?: ReactNode;
   children: ReactNode;
   className?: string;

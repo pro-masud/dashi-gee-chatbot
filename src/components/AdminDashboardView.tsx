@@ -1,6 +1,6 @@
 'use client';
 
-import { ComponentType, FormEvent, useEffect, useMemo, useState } from 'react';
+import { ComponentType, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { User } from 'firebase/auth';
 import {
   AlertTriangle,
@@ -35,6 +35,8 @@ import {
   Trash2,
   Truck,
   UserCog,
+  Volume2,
+  VolumeX,
   Wallet,
   X,
 } from 'lucide-react';
@@ -76,6 +78,7 @@ import { HelpInfoButton } from './admin/AdminHelpModal';
 import { ActivityLogPanel } from './admin/ActivityLogPanel';
 import { CodSettlementPanel } from './admin/CodSettlementPanel';
 import { LeadsPanel } from './admin/LeadsPanel';
+import { OverviewAnalytics } from './admin/OverviewAnalytics';
 import { PackagesPanel } from './admin/PackagesPanel';
 import { StaffRolesPanel } from './admin/StaffRolesPanel';
 import type { Permission } from '../lib/auth/permissions';
@@ -173,6 +176,9 @@ export function AdminDashboardView({
   const [orderSearch, setOrderSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<OrderFilterKey>('all');
   const [myPerms, setMyPerms] = useState<Permission[] | null>(null);
+  const [soundOn, setSoundOn] = useState(false);
+  const [newOrderToast, setNewOrderToast] = useState<{ orderNumber: string; customerName: string; count: number } | null>(null);
+  const orderBaselineRef = useRef<number | null>(null);
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [pipelineMsg, setPipelineMsg] = useState('');
   const [partialAmount, setPartialAmount] = useState('');
@@ -343,6 +349,85 @@ export function AdminDashboardView({
       cancelled = true;
     };
   }, [isAdmin, user]);
+
+  // Optional sound preference (only ever turned on by a click, so browsers allow audio).
+  useEffect(() => {
+    try {
+      setSoundOn(window.localStorage.getItem('dg-admin-sound') === '1');
+    } catch {
+      // storage unavailable
+    }
+  }, []);
+
+  const playOrderBeep = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.setValueAtTime(1175, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.45);
+      osc.onended = () => void ctx.close();
+    } catch {
+      // audio blocked or unsupported — the visual alert still shows
+    }
+  };
+
+  const toggleSound = () => {
+    const next = !soundOn;
+    setSoundOn(next);
+    try {
+      window.localStorage.setItem('dg-admin-sound', next ? '1' : '0');
+    } catch {
+      // ignore
+    }
+    if (next) playOrderBeep(); // confirms audio works (this click is the required user gesture)
+  };
+
+  // New-order alerts: poll a tiny counter every minute while the tab is visible.
+  useEffect(() => {
+    if (!isAdmin || !user) return;
+    if (myPerms && !myPerms.includes('orders.view')) return;
+    let stopped = false;
+    const poll = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch('/api/admin/signal', { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json().catch(() => ({}));
+        if (stopped || !res.ok || !data.ok) return;
+        const sig = data.signal as { orderCount: number; latestOrderNumber: string; latestCustomerName: string };
+        const baseline = orderBaselineRef.current;
+        orderBaselineRef.current = sig.orderCount;
+        if (baseline !== null && sig.orderCount > baseline) {
+          setNewOrderToast({
+            orderNumber: sig.latestOrderNumber,
+            customerName: sig.latestCustomerName,
+            count: sig.orderCount - baseline,
+          });
+          if (window.localStorage.getItem('dg-admin-sound') === '1') playOrderBeep();
+          void loadAdminWorkspace();
+        }
+      } catch {
+        // alerts are best-effort
+      }
+    };
+    void poll();
+    const id = window.setInterval(poll, 60_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, user, myPerms]);
 
   const handleGoogleSignIn = async () => {
     setAuthError('');
@@ -1058,6 +1143,37 @@ export function AdminDashboardView({
       )}
 
       <div className="lg:pl-64">
+        {newOrderToast && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="no-print fixed right-4 top-20 z-50 flex max-w-sm items-start gap-3 rounded-xl border border-[#B47B2B]/40 bg-white p-4 shadow-xl"
+          >
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-[#1E1710]">
+                {newOrderToast.count > 1 ? `${newOrderToast.count} new orders` : 'New order received'}
+              </p>
+              <p className="mt-0.5 truncate text-xs text-[#635647]">
+                {newOrderToast.orderNumber}
+                {newOrderToast.customerName ? ` · ${newOrderToast.customerName}` : ''}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setTab('orders');
+                  setNewOrderToast(null);
+                }}
+                className="mt-2 rounded-lg bg-[#1E1710] px-3 py-1.5 text-xs font-medium text-[#FAF7F2]"
+              >
+                View orders
+              </button>
+            </div>
+            <button type="button" onClick={() => setNewOrderToast(null)} aria-label="Dismiss" className="text-[#8A7867] hover:text-[#1E1710]">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
         {/* Top bar */}
         <header className="no-print sticky top-0 z-20 border-b border-[rgba(30,23,16,0.08)] bg-[#F6F2EA]/90 backdrop-blur">
           <div className="mx-auto flex h-16 max-w-[1280px] items-center justify-between gap-3 px-4 sm:px-8">
@@ -1085,6 +1201,16 @@ export function AdminDashboardView({
                   Syncing…
                 </span>
               )}
+              <button
+                type="button"
+                onClick={toggleSound}
+                aria-pressed={soundOn}
+                aria-label={soundOn ? 'Turn order alert sound off' : 'Turn order alert sound on'}
+                title={soundOn ? 'Order alert sound: on' : 'Order alert sound: off'}
+                className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.14)] bg-white px-3 text-xs font-medium text-[#1E1710] hover:bg-[#F4EFE6]"
+              >
+                {soundOn ? <Volume2 className="h-3.5 w-3.5 text-[#8A5A17]" /> : <VolumeX className="h-3.5 w-3.5 text-[#8A7867]" />}
+              </button>
               <button
                 type="button"
                 onClick={() => loadAdminWorkspace()}
@@ -1160,38 +1286,13 @@ export function AdminDashboardView({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            {(myPerms === null || myPerms.includes('finance.view')) && (
-              <KpiCard
-                label="Total sales"
-                value={formatBdt(metrics.totalSales)}
-                hint="Excludes cancelled orders"
-                icon={Banknote}
-                tone="green"
-              />
-            )}
-            <KpiCard
-              label="Total orders"
-              value={metrics.total}
-              hint={`${metrics.delivered} delivered`}
-              icon={ShoppingBag}
-              tone="blue"
-            />
-            <KpiCard
-              label="Pending"
-              value={metrics.pending}
-              hint="Waiting for confirmation"
-              icon={Clock}
-              tone="amber"
-            />
-            <KpiCard
-              label="Confirmed"
-              value={metrics.confirmed}
-              hint="Ready to dispatch"
-              icon={CheckCircle2}
-              tone="violet"
-            />
-          </div>
+          <OverviewAnalytics
+            orders={orders}
+            canSeeMoney={myPerms === null || myPerms.includes('finance.view')}
+            canSeeLeads={myPerms === null || myPerms.includes('leads.manage')}
+            getIdToken={async () => (user ? user.getIdToken() : '')}
+            onNavigate={(target) => setTab(target)}
+          />
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <Card
