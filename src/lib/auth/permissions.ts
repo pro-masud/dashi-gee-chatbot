@@ -13,6 +13,7 @@
 export const PERMISSIONS = [
   'orders.view',
   'orders.update',
+  'leads.manage',
   'cod.manage',
   'finance.view',
   'finance.manage',
@@ -32,7 +33,7 @@ export const ROLE_LABELS: Record<Role, { label: string; description: string }> =
   owner: { label: 'Owner', description: 'Full access to everything.' },
   call_agent: {
     label: 'Call agent',
-    description: 'View orders and move them through the pipeline. Cannot see profit, expenses or COD money.',
+    description: 'View orders, work incomplete-order leads and move orders through the pipeline. Cannot see profit, expenses or COD money.',
   },
   delivery_manager: {
     label: 'Delivery manager',
@@ -46,7 +47,7 @@ export const ROLE_LABELS: Record<Role, { label: string; description: string }> =
 
 const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   owner: PERMISSIONS,
-  call_agent: ['orders.view', 'orders.update'],
+  call_agent: ['orders.view', 'orders.update', 'leads.manage'],
   delivery_manager: ['orders.view', 'orders.update', 'cod.manage'],
   accountant: ['orders.view', 'finance.view', 'finance.manage', 'cod.manage', 'logs.view'],
 };

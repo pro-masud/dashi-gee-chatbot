@@ -1,3 +1,4 @@
+import { markLeadConvertedByPhone } from '../../../src/lib/server/leadsRepository';
 import { computeOrderCogs } from '../../../src/lib/finance/profit';
 import { getFinanceSettingsBestEffort } from '../../../src/lib/server/financeRepository';
 import {
@@ -610,6 +611,9 @@ export async function POST(request: Request) {
       500
     );
   }
+
+  // Close the matching incomplete-order lead (best effort, never blocks the order).
+  await markLeadConvertedByPhone(orderDoc.phone, orderDoc.orderNumber);
 
   // 8. Dispatch Owner Notification AFTER successful DB save (3 retries + exponential backoff)
   let notificationStatus: 'delivered' | 'failed' | 'not_configured' = 'not_configured';

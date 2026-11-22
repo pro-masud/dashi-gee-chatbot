@@ -27,6 +27,7 @@ import {
   resolveConfiguredDistrictAndZone,
 } from '../../../../src/lib/chatbot/orderToken';
 import { extractClientIp, hashIdentifier } from '../../../../src/lib/chatbot/rateLimit';
+import { markLeadConvertedByPhone } from '../../../../src/lib/server/leadsRepository';
 import { computeOrderCogs } from '../../../../src/lib/finance/profit';
 import { getFinanceSettingsBestEffort } from '../../../../src/lib/server/financeRepository';
 import { dispatchOrderNotificationsServerSide } from '../../../../src/lib/integrations/orderNotify';
@@ -410,6 +411,9 @@ export async function POST(request: Request) {
       500
     );
   }
+
+  // Close the matching incomplete-order lead (best effort, never blocks the order).
+  await markLeadConvertedByPhone(orderDoc.phone, orderDoc.orderNumber);
 
   // S0-05: Trigger owner notifications directly on the server after atomic persistence.
   const notifyResult = await dispatchOrderNotificationsServerSide({

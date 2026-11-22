@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   Check,
@@ -167,6 +167,50 @@ export function BagCheckoutDrawer({
       // Ignore quota / privacy mode errors
     }
   }, [draftHydrated, customerName, phone, district, area, address, note, paymentMethod]);
+
+  // Incomplete-order lead capture: starts only once the visitor has a valid phone number and the
+  // privacy notice shown above the form is on screen. Debounced; identical data is never re-sent.
+  const lastLeadSignatureRef = useRef('');
+  useEffect(() => {
+    if (!open || step !== 'checkout' || cart.length === 0) return;
+    const cleanPhone = phone.replace(/[\s-]/g, '');
+    if (!/^01[3-9]\d{8}$/.test(cleanPhone)) return;
+
+    const qty250g = cart.filter((c) => c.weight === '250g').reduce((s, c) => s + c.qty, 0);
+    const qty500g = cart.filter((c) => c.weight === '500g').reduce((s, c) => s + c.qty, 0);
+    const qty1kg = cart.filter((c) => c.weight === '1kg').reduce((s, c) => s + c.qty, 0);
+    const signature = [cleanPhone, customerName.trim(), district, qty250g, qty500g, qty1kg].join('|');
+    if (signature === lastLeadSignatureRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      lastLeadSignatureRef.current = signature;
+      const params = new URLSearchParams(window.location.search);
+      void fetch('/api/leads', {
+        method: 'POST',
+        keepalive: true,
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'DeshiGeeStorefront' },
+        body: JSON.stringify({
+          consent: true,
+          phone: cleanPhone,
+          name: customerName.trim(),
+          district,
+          qty250g,
+          qty500g,
+          qty1kg,
+          source: {
+            path: window.location.pathname,
+            utmSource: params.get('utm_source') || '',
+            utmCampaign: params.get('utm_campaign') || '',
+            utmMedium: params.get('utm_medium') || '',
+            fbclid: params.has('fbclid'),
+          },
+        }),
+      }).catch(() => {
+        // lead capture must never interrupt checkout
+      });
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [open, step, cart, phone, customerName, district]);
 
   useEffect(() => {
     if (!open) return;
@@ -1079,6 +1123,12 @@ export function BagCheckoutDrawer({
                   <span>{formError}</span>
                 </div>
               )}
+
+              <p className="rounded-lg bg-[rgb(var(--c-tint)/0.06)] px-3 py-2 text-[11px] leading-relaxed text-[var(--c-muted)]">
+                {bn
+                  ? 'অর্ডার সম্পন্ন না হলেও যেন আমরা প্রয়োজনে ফোনে সাহায্য করতে পারি, তাই আপনার মোবাইল নম্বর ও নির্বাচিত পরিমাণ সাময়িকভাবে সংরক্ষিত হতে পারে। এটি শুধু আপনার অর্ডারের ফলো-আপে ব্যবহার হবে।'
+                  : 'So we can help if you do not finish, your mobile number and selected jars may be saved temporarily. This is used only to follow up on your order.'}
+              </p>
 
               <div>
                 <label htmlFor="co-name" className="block text-xs font-medium text-[var(--c-muted)]">

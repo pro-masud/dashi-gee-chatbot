@@ -18,6 +18,7 @@ import {
   LayoutDashboard,
   Landmark,
   Loader2,
+  PhoneCall,
   LogOut,
   Menu,
   Plug,
@@ -73,6 +74,7 @@ import { AdminEcosystemPanel } from './AdminEcosystemPanel';
 import { HelpInfoButton } from './admin/AdminHelpModal';
 import { ActivityLogPanel } from './admin/ActivityLogPanel';
 import { CodSettlementPanel } from './admin/CodSettlementPanel';
+import { LeadsPanel } from './admin/LeadsPanel';
 import { StaffRolesPanel } from './admin/StaffRolesPanel';
 import type { Permission } from '../lib/auth/permissions';
 import { ProfitExpensesPanel } from './admin/ProfitExpensesPanel';
@@ -127,7 +129,7 @@ const ORDER_FILTER_GROUPS: Record<Exclude<OrderFilterKey, 'all' | 'manual_review
   cancelled: ['cancelled'],
 };
 
-type AdminTab = 'overview' | 'orders' | 'finance' | 'cod' | 'staff' | 'activity' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
+type AdminTab = 'overview' | 'orders' | 'finance' | 'cod' | 'leads' | 'staff' | 'activity' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
 
 export function AdminDashboardView({
   settings,
@@ -835,6 +837,7 @@ export function AdminDashboardView({
       items: [
         { id: 'overview', label: 'Overview', icon: LayoutDashboard },
         { id: 'orders', label: 'Orders', icon: ShoppingBag, badge: metrics.pending },
+        { id: 'leads', label: 'Incomplete Leads', icon: PhoneCall, perm: 'leads.manage' },
         { id: 'finance', label: 'Profit & Expenses', icon: Wallet, perm: 'finance.view' },
         { id: 'cod', label: 'COD & Settlements', icon: Landmark, perm: 'cod.manage' },
       ],
@@ -1776,6 +1779,10 @@ export function AdminDashboardView({
             )}
           </div>
         </div>
+      )}
+
+      {tab === 'leads' && (
+        <LeadsPanel getIdToken={async () => (user ? user.getIdToken() : '')} />
       )}
 
       {tab === 'staff' && (

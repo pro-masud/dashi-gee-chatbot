@@ -230,7 +230,7 @@ Rule: everything is **additive** inside the existing site. Nothing that already 
 | 3 | COD collection & courier settlement records | **Done** (unique payout reference, discrepancy → disputed, 8 tests) |
 | 4a | Roles (owner / call agent / delivery manager / accountant) enforced on every new admin API, staff management, activity log viewer | **Done** (10 tests) |
 | 4b | Move remaining admin reads/writes (orders list, products, coupons) behind server APIs so staff can log in without client-SDK access | Planned |
-| 5 | Incomplete-lead capture (with privacy notice) + lead list & conversion | Planned |
+| 5 | Incomplete-lead capture (with privacy notice) + lead list & conversion | **Done** (consent-gated capture, one lead per phone, auto-convert on order, admin list/notes/follow-up/CSV, 12 tests) |
 | 6 | Package manager (data-driven packages, offer price, COGS, badges) with dual-read migration | Planned |
 | 7 | Dashboard v2: date filters, charts, funnel, low-stock alerts, new-order polling alert | Planned |
 | 8 | Landing-page CMS **lite** (hero, benefits, FAQ, reviews order, announcement bar; draft/publish/restore) | Planned |
