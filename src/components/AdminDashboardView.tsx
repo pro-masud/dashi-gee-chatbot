@@ -22,6 +22,7 @@ import {
   LogOut,
   Menu,
   LayoutTemplate,
+  Megaphone,
   PackageOpen,
   Plug,
   Printer,
@@ -80,6 +81,7 @@ import { ActivityLogPanel } from './admin/ActivityLogPanel';
 import { CodSettlementPanel } from './admin/CodSettlementPanel';
 import { CmsPanel } from './admin/CmsPanel';
 import { LeadsPanel } from './admin/LeadsPanel';
+import { MarketingPanel } from './admin/MarketingPanel';
 import { OverviewAnalytics } from './admin/OverviewAnalytics';
 import { PackagesPanel } from './admin/PackagesPanel';
 import { StaffRolesPanel } from './admin/StaffRolesPanel';
@@ -149,7 +151,7 @@ async function probeServerAdminAccess(u: User | null): Promise<boolean> {
   }
 }
 
-type AdminTab = 'overview' | 'orders' | 'cms' | 'packages' | 'finance' | 'cod' | 'leads' | 'staff' | 'activity' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
+type AdminTab = 'overview' | 'orders' | 'marketing' | 'cms' | 'packages' | 'finance' | 'cod' | 'leads' | 'staff' | 'activity' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
 
 export function AdminDashboardView({
   settings,
@@ -989,6 +991,7 @@ export function AdminDashboardView({
       items: [
         { id: 'chatbot', label: 'AI Chatbot', icon: Bot, ownerOnly: true },
         { id: 'ecosystem', label: 'Integrations & Alerts', icon: Plug, ownerOnly: true },
+        { id: 'marketing', label: 'Ads & Tracking', icon: Megaphone, perm: 'marketing.manage' },
       ],
     },
     {
@@ -1935,6 +1938,10 @@ export function AdminDashboardView({
             )}
           </div>
         </div>
+      )}
+
+      {tab === 'marketing' && (
+        <MarketingPanel getIdToken={async () => (user ? user.getIdToken() : '')} />
       )}
 
       {tab === 'cms' && (

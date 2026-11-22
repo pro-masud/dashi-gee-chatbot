@@ -42,6 +42,7 @@ import {
 } from '../lib/firebase';
 import { Lang, formatBdt, toBengaliDigits } from '../data/deshiGeeData';
 import type { PublicPackages } from '../lib/packages/packages';
+import { loadTrackers } from '../lib/marketing/loadTrackers';
 import { isAnnouncementActive, isAnnouncementHidden, isSafeLink, type CmsContent } from '../lib/cms/cms';
 import { trackStoreEvent } from '../lib/analytics';
 import {
@@ -119,6 +120,23 @@ export function StorefrontProvider({
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [packageMeta, setPackageMeta] = useState<PublicPackages | null>(null);
   const [cms, setCms] = useState<CmsContent | null>(null);
+
+  // Owner-configured tracking (Pixel / GA4 / GTM / Google Ads). Public ids only; storefront pages only.
+  useEffect(() => {
+    if (pathname.startsWith('/admin')) return;
+    let cancelled = false;
+    fetch('/api/tracking/config')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d?.ok && d.tracking) loadTrackers(d.tracking);
+      })
+      .catch(() => {
+        // tracking is optional; the storefront never depends on it
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
   const announce = cms && isAnnouncementActive(cms.announcement) ? cms.announcement : null;
   const hideAnnouncement = cms ? isAnnouncementHidden(cms.announcement) : false;
 

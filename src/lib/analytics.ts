@@ -27,7 +27,15 @@ export function trackStoreEvent(
       window.dataLayer.push({ event: eventName, ...params });
     }
     if (typeof window.fbq === 'function') {
-      window.fbq('track', eventName, params);
+      // Same event id the server uses for the Conversions API → Meta de-duplicates browser + server.
+      const eventId =
+        typeof params.event_id === 'string' && params.event_id
+          ? params.event_id
+          : eventName === 'Purchase' && params.transaction_id
+            ? `purchase_${String(params.transaction_id)}`
+            : '';
+      if (eventId) window.fbq('track', eventName, params, { eventID: eventId });
+      else window.fbq('track', eventName, params);
     }
   } catch {
     // never block storefront interaction on analytics errors

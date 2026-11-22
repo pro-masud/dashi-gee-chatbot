@@ -16,6 +16,7 @@ export const PERMISSIONS = [
   'leads.manage',
   'catalog.manage',
   'cms.manage',
+  'marketing.manage',
   'cod.manage',
   'finance.view',
   'finance.manage',

@@ -1,5 +1,6 @@
 import { disabledSlotsInOrder } from '../../../src/lib/packages/packages';
 import { getEnabledSlotsBestEffort } from '../../../src/lib/server/packagesRepository';
+import { reportOrderEvent } from '../../../src/lib/server/metaCapi';
 import { markLeadConvertedByPhone } from '../../../src/lib/server/leadsRepository';
 import { computeOrderCogs } from '../../../src/lib/finance/profit';
 import { getFinanceSettingsBestEffort } from '../../../src/lib/server/financeRepository';
@@ -633,6 +634,16 @@ export async function POST(request: Request) {
 
   // Close the matching incomplete-order lead (best effort, never blocks the order).
   await markLeadConvertedByPhone(orderDoc.phone, orderDoc.orderNumber);
+
+  // Meta Conversions API (server side, same event id as the browser Purchase). Bounded wait, never fails the order.
+  await Promise.race([
+    reportOrderEvent(
+      'Purchase',
+      { orderNumber: orderDoc.orderNumber, phone: orderDoc.phone, customerName: orderDoc.customerName, totalBdt: orderDoc.totalBdt, jarCount: orderDoc.qty },
+      request
+    ),
+    new Promise((resolve) => setTimeout(resolve, 2500)),
+  ]);
 
   // 8. Dispatch Owner Notification AFTER successful DB save (3 retries + exponential backoff)
   let notificationStatus: 'delivered' | 'failed' | 'not_configured' = 'not_configured';

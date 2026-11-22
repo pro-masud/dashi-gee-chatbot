@@ -6,6 +6,7 @@ import {
   type PipelineUpdateInput,
 } from '../../../../../src/lib/orders/pipeline';
 import { handleAdminError, jsonError, jsonOk, requireAdmin } from '../../../../../src/lib/server/adminApi';
+import { reportOrderEvent } from '../../../../../src/lib/server/metaCapi';
 import { updateOrderPipeline } from '../../../../../src/lib/server/orderPipelineRepository';
 import type { CollectionStatus, OrderStatus, SettlementStatus } from '../../../../../src/lib/storeTypes';
 
@@ -61,6 +62,18 @@ export async function POST(request: Request) {
   try {
     const result = await updateOrderPipeline(orderNumber, input, auth.actor);
     if (!result.ok) return jsonError(result.error, result.status);
+    // Tell Meta separately when an order is confirmed or delivered (COD is not cash until collected).
+    const ev = result.eventInfo;
+    if (ev.statusChanged && (result.order.status === 'confirmed' || result.order.status === 'delivered')) {
+      await Promise.race([
+        reportOrderEvent(
+          result.order.status === 'confirmed' ? 'OrderConfirmed' : 'OrderDelivered',
+          { orderNumber, phone: ev.phone, customerName: ev.customerName, totalBdt: ev.totalBdt, jarCount: ev.jarCount },
+          null
+        ),
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ]);
+    }
     return jsonOk({ order: result.order, stockRestored: result.stockRestored });
   } catch (err) {
     return handleAdminError(err);

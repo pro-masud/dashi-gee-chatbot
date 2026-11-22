@@ -30,6 +30,13 @@ export type PipelineUpdateResult =
         statusUpdatedAtIso: string;
       };
       stockRestored: boolean;
+      eventInfo: {
+        statusChanged: boolean;
+        phone: string;
+        customerName: string;
+        totalBdt: number;
+        jarCount: number;
+      };
     }
   | { ok: false; status: 400 | 404 | 409; error: string };
 
@@ -159,6 +166,13 @@ export async function updateOrderPipeline(
       return {
         ok: true,
         stockRestored: restoreStock,
+        eventInfo: {
+          statusChanged,
+          phone,
+          customerName: String(order.customerName || ''),
+          totalBdt,
+          jarCount: Number(order.qty) || 0,
+        },
         order: {
           orderNumber,
           status: nextStatus,
