@@ -244,18 +244,12 @@ Rule: everything is **additive** inside the existing site. Nothing that already 
 
 ## 10. Final status (all curated steps built)
 
-**Tests:**  (tsc) clean, Unknown command: "test"
-
-
-Did you mean this?
-  npm test # Test a package
-To see a list of supported npm commands, run:
-  npm help 320 / 320 passing (mock/static). Nothing below was run against real Firestore, Meta, couriers, SMS or WhatsApp.
+**Tests:** `npm run lint` (tsc) is clean and `npm test` passes 320 / 320 (mock/static). Nothing below was run against real Firestore, Meta, couriers, SMS or WhatsApp.
 
 ### Needs you (cannot be done in code)
-1. Server credentials: Firebase Admin SDK (ADC) + . Without it every new admin page shows "Server database access is unavailable" and checkout returns 503.
-2. Set  (32+ random characters) before saving a Meta token.
-3. Deploy the locked Firestore rules only after the emulator tests pass (). New collections are server-only by design (the default rule denies browsers).
+1. Server credentials: Firebase Admin SDK (ADC) with `roles/datastore.user`. Without it every new admin page shows "Server database access is unavailable" and checkout returns 503.
+2. Set `INTEGRATION_SECRET_KEY` (32+ random characters) before saving a Meta token.
+3. Deploy the locked Firestore rules only after the emulator tests pass (`docs/rules-proposals/firestore-final-admin-sdk.rules`). New collections are server-only by design (the default rule denies browsers).
 4. Real credentials for couriers, SMS and WhatsApp, then run a live test of each.
 5. Enter business facts in the admin: prices, costs, delivery fees, contacts.
 
