@@ -226,9 +226,10 @@ Rule: everything is **additive** inside the existing site. Nothing that already 
 | Step | Deliverable | Status |
 |---|---|---|
 | 1 | Daily Profit & Expenses: COGS snapshot on orders, expense manager, daily profit report, audit log | **Done** (server APIs + admin page + 10 tests) |
-| 2 | Order pipeline v2: new statuses (packaging, ready-to-ship, out-for-delivery, failed, returned) + separate COD collection / settlement status | Next |
-| 3 | COD collection & courier settlement records | Planned |
-| 4 | Server-side admin APIs for orders/products (move off browser Firestore writes) + simple roles (owner / call agent / accountant) + activity log viewer | Planned |
+| 2 | Order pipeline v2: new statuses (packaging, ready-to-ship, out-for-delivery, failed, returned) + separate COD collection / settlement status | **Done** (server API, transitions, stock restore on cancel, 12 tests) |
+| 3 | COD collection & courier settlement records | **Done** (unique payout reference, discrepancy → disputed, 8 tests) |
+| 4a | Roles (owner / call agent / delivery manager / accountant) enforced on every new admin API, staff management, activity log viewer | **Done** (10 tests) |
+| 4b | Move remaining admin reads/writes (orders list, products, coupons) behind server APIs so staff can log in without client-SDK access | Planned |
 | 5 | Incomplete-lead capture (with privacy notice) + lead list & conversion | Planned |
 | 6 | Package manager (data-driven packages, offer price, COGS, badges) with dual-read migration | Planned |
 | 7 | Dashboard v2: date filters, charts, funnel, low-stock alerts, new-order polling alert | Planned |

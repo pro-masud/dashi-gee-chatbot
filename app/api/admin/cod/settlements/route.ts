@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 /** POST /api/admin/cod/settlements — record a courier payout against selected collected orders. */
 export async function POST(request: Request) {
-  const auth = await requireAdmin(request, { mutation: true });
+  const auth = await requireAdmin(request, { mutation: true, permission: 'cod.manage' });
   if ('response' in auth) return auth.response;
 
   const body = await request.json().catch(() => null);

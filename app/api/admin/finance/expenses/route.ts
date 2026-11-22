@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 /** POST /api/admin/finance/expenses — create one expense entry. */
 export async function POST(request: Request) {
-  const auth = await requireAdmin(request, { mutation: true });
+  const auth = await requireAdmin(request, { mutation: true, permission: 'finance.manage' });
   if ('response' in auth) return auth.response;
 
   const body = await request.json().catch(() => null);
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
 
 /** DELETE /api/admin/finance/expenses?id=<expenseId> — delete one entry (audit-logged). */
 export async function DELETE(request: Request) {
-  const auth = await requireAdmin(request, { mutation: true });
+  const auth = await requireAdmin(request, { mutation: true, permission: 'finance.manage' });
   if ('response' in auth) return auth.response;
 
   const id = String(new URL(request.url).searchParams.get('id') || '').trim();

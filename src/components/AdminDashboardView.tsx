@@ -10,6 +10,7 @@ import {
   Bot,
   Check,
   CheckCircle2,
+  ClipboardList,
   ChevronRight,
   Clock,
   Download,
@@ -31,6 +32,7 @@ import {
   Ticket,
   Trash2,
   Truck,
+  UserCog,
   Wallet,
   X,
 } from 'lucide-react';
@@ -69,7 +71,10 @@ import { formatBdt } from '../data/deshiGeeData';
 import { AdminChatbotPanel } from './AdminChatbotPanel';
 import { AdminEcosystemPanel } from './AdminEcosystemPanel';
 import { HelpInfoButton } from './admin/AdminHelpModal';
+import { ActivityLogPanel } from './admin/ActivityLogPanel';
 import { CodSettlementPanel } from './admin/CodSettlementPanel';
+import { StaffRolesPanel } from './admin/StaffRolesPanel';
+import type { Permission } from '../lib/auth/permissions';
 import { ProfitExpensesPanel } from './admin/ProfitExpensesPanel';
 import {
   COLLECTION_LABELS,
@@ -122,7 +127,7 @@ const ORDER_FILTER_GROUPS: Record<Exclude<OrderFilterKey, 'all' | 'manual_review
   cancelled: ['cancelled'],
 };
 
-type AdminTab = 'overview' | 'orders' | 'finance' | 'cod' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
+type AdminTab = 'overview' | 'orders' | 'finance' | 'cod' | 'staff' | 'activity' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
 
 export function AdminDashboardView({
   settings,
@@ -150,6 +155,7 @@ export function AdminDashboardView({
 
   const [orderSearch, setOrderSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<OrderFilterKey>('all');
+  const [myPerms, setMyPerms] = useState<Permission[] | null>(null);
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [pipelineMsg, setPipelineMsg] = useState('');
   const [partialAmount, setPartialAmount] = useState('');
@@ -271,6 +277,25 @@ export function AdminDashboardView({
     if (isAdmin && user) {
       loadAdminWorkspace();
     }
+  }, [isAdmin, user]);
+
+  // Which sections may this person use? (Convenience only — every server API enforces it again.)
+  useEffect(() => {
+    if (!isAdmin || !user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch('/api/admin/me', { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && res.ok && data.ok && Array.isArray(data.permissions)) setMyPerms(data.permissions);
+      } catch {
+        // keep the default (menu shown); the server still enforces permissions
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [isAdmin, user]);
 
   const handleGoogleSignIn = async () => {
@@ -797,17 +822,21 @@ export function AdminDashboardView({
     ] as [string, number][]
   ).filter(([, stock]) => Number(stock) <= 10);
 
-  const adminNav: {
-    group: string;
-    items: { id: AdminTab; label: string; icon: ComponentType<{ className?: string }>; badge?: number }[];
-  }[] = [
+  type NavItem = {
+    id: AdminTab;
+    label: string;
+    icon: ComponentType<{ className?: string }>;
+    badge?: number;
+    perm?: Permission;
+  };
+  const allNavGroups: { group: string; items: NavItem[] }[] = [
     {
       group: 'Operations',
       items: [
         { id: 'overview', label: 'Overview', icon: LayoutDashboard },
         { id: 'orders', label: 'Orders', icon: ShoppingBag, badge: metrics.pending },
-        { id: 'finance', label: 'Profit & Expenses', icon: Wallet },
-        { id: 'cod', label: 'COD & Settlements', icon: Landmark },
+        { id: 'finance', label: 'Profit & Expenses', icon: Wallet, perm: 'finance.view' },
+        { id: 'cod', label: 'COD & Settlements', icon: Landmark, perm: 'cod.manage' },
       ],
     },
     {
@@ -825,7 +854,20 @@ export function AdminDashboardView({
         { id: 'ecosystem', label: 'Integrations & Alerts', icon: Plug },
       ],
     },
+    {
+      group: 'System',
+      items: [
+        { id: 'staff', label: 'Staff & Roles', icon: UserCog, perm: 'staff.manage' },
+        { id: 'activity', label: 'Activity Log', icon: ClipboardList, perm: 'logs.view' },
+      ],
+    },
   ];
+  const adminNav = allNavGroups
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((i) => !i.perm || myPerms === null || myPerms.includes(i.perm)),
+    }))
+    .filter((g) => g.items.length > 0);
   const activeTabLabel =
     adminNav.flatMap((g) => g.items).find((t) => t.id === tab)?.label || 'Overview';
 
@@ -1734,6 +1776,14 @@ export function AdminDashboardView({
             )}
           </div>
         </div>
+      )}
+
+      {tab === 'staff' && (
+        <StaffRolesPanel getIdToken={async () => (user ? user.getIdToken() : '')} />
+      )}
+
+      {tab === 'activity' && (
+        <ActivityLogPanel getIdToken={async () => (user ? user.getIdToken() : '')} />
       )}
 
       {/* TAB: COD COLLECTION & SETTLEMENTS */}

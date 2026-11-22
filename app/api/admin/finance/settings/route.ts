@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
  * New orders snapshot these costs; existing orders are never rewritten.
  */
 export async function PUT(request: Request) {
-  const auth = await requireAdmin(request, { mutation: true });
+  const auth = await requireAdmin(request, { mutation: true, permission: 'finance.manage' });
   if ('response' in auth) return auth.response;
 
   const body = await request.json().catch(() => null);

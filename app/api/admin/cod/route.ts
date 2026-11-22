@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
  * plus the orders eligible for a new settlement and the settlement history.
  */
 export async function GET(request: Request) {
-  const auth = await requireAdmin(request);
+  const auth = await requireAdmin(request, { permission: 'cod.manage' });
   if ('response' in auth) return auth.response;
 
   try {

@@ -1,3 +1,4 @@
+import { roleHasPermission } from '../../../../../src/lib/auth/permissions';
 import {
   COLLECTION_STATUSES,
   SETTLEMENT_STATUSES,
@@ -16,7 +17,7 @@ export const dynamic = 'force-dynamic';
  * Validates the transition server-side, then updates order + tracking + history + audit in one transaction.
  */
 export async function POST(request: Request) {
-  const auth = await requireAdmin(request, { mutation: true });
+  const auth = await requireAdmin(request, { mutation: true, permission: 'orders.update' });
   if ('response' in auth) return auth.response;
 
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
@@ -48,6 +49,10 @@ export async function POST(request: Request) {
     input.settlementStatus = body.settlementStatus as SettlementStatus;
   }
   if (typeof body.note === 'string') input.note = body.note.trim().slice(0, 200);
+
+  if ((input.collectionStatus || input.settlementStatus || input.collectedAmountBdt !== undefined) && !roleHasPermission(auth.actor.role, 'cod.manage')) {
+    return jsonError('Your role cannot change COD collection or settlement.', 403, 'forbidden');
+  }
 
   if (!input.status && !input.collectionStatus && !input.settlementStatus) {
     return jsonError('Nothing to update.', 400);
