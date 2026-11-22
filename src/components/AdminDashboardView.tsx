@@ -1,19 +1,33 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { ComponentType, FormEvent, useEffect, useMemo, useState } from 'react';
 import { User } from 'firebase/auth';
 import {
+  AlertTriangle,
   ArrowLeft,
+  Banknote,
   BellRing,
+  Bot,
   Check,
+  CheckCircle2,
+  ChevronRight,
+  Clock,
   Download,
   ExternalLink,
+  LayoutDashboard,
   Loader2,
   LogOut,
   Menu,
+  Plug,
   Printer,
+  RefreshCw,
+  Search,
   Send,
   ShieldCheck,
+  ShoppingBag,
+  SlidersHorizontal,
+  Star,
+  Ticket,
   Trash2,
   Truck,
   X,
@@ -54,6 +68,17 @@ import { AdminChatbotPanel } from './AdminChatbotPanel';
 import { AdminEcosystemPanel } from './AdminEcosystemPanel';
 import { HelpInfoButton } from './admin/AdminHelpModal';
 import { StorefrontImpactPreview } from './admin/StorefrontImpactPreview';
+import {
+  Card,
+  EmptyState,
+  FilterChip,
+  KpiCard,
+  NumberField,
+  PageHeader,
+  StatusBadge,
+  TextField,
+  ToggleField,
+} from './admin/ui';
 import { useStorefront } from './StorefrontProvider';
 
 interface AdminDashboardViewProps {
@@ -675,69 +700,144 @@ export function AdminDashboardView({
     );
   }
 
-  const adminTabs: { id: AdminTab; label: string }[] = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'orders', label: `Orders (${orders.length})` },
-    { id: 'store', label: 'Product, Stock & Delivery' },
-    { id: 'batches', label: 'Batches & Coupons' },
-    { id: 'reviews', label: `Reviews (${reviews.length}) & Subscribers` },
-    { id: 'chatbot', label: 'AI Chatbot' },
-    { id: 'ecosystem', label: 'Integrations & Alerts' },
+  const settingsDirty = JSON.stringify(draftSettings) !== JSON.stringify(settings);
+  const pendingReviewCount = reviews.filter((r) => r.status === 'pending').length;
+  const lowStockVariants = (
+    [
+      ['250g', settings.stock250g],
+      ['500g', settings.stock500g],
+      ['1kg', settings.stock1kg],
+    ] as [string, number][]
+  ).filter(([, stock]) => Number(stock) <= 10);
+
+  const adminNav: {
+    group: string;
+    items: { id: AdminTab; label: string; icon: ComponentType<{ className?: string }>; badge?: number }[];
+  }[] = [
+    {
+      group: 'Operations',
+      items: [
+        { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+        { id: 'orders', label: 'Orders', icon: ShoppingBag, badge: metrics.pending },
+      ],
+    },
+    {
+      group: 'Catalog & Store',
+      items: [
+        { id: 'store', label: 'Pricing, Stock & Delivery', icon: SlidersHorizontal },
+        { id: 'batches', label: 'Batches & Coupons', icon: Ticket },
+        { id: 'reviews', label: 'Reviews & Subscribers', icon: Star, badge: pendingReviewCount },
+      ],
+    },
+    {
+      group: 'Automation',
+      items: [
+        { id: 'chatbot', label: 'AI Chatbot', icon: Bot },
+        { id: 'ecosystem', label: 'Integrations & Alerts', icon: Plug },
+      ],
+    },
   ];
-  const activeTabLabel = adminTabs.find((t) => t.id === tab)?.label || 'Overview';
+  const activeTabLabel =
+    adminNav.flatMap((g) => g.items).find((t) => t.id === tab)?.label || 'Overview';
 
-  return (
-    <div className="min-h-dvh bg-[#FAF7F2] text-[#1E1710]">
-      {/* Dedicated Compact Admin Header Bar */}
-      <header className="no-print sticky top-0 z-30 border-b border-[rgba(250,247,242,0.12)] bg-[#1A120B] text-[#FAF7F2]">
-        <div className="mx-auto flex h-16 max-w-[1320px] items-center justify-between gap-3 px-4 sm:px-8">
-          <div className="flex min-w-0 items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setMobileNavOpen(true)}
-              aria-label="Open admin menu"
-              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-[#FAF7F2]/20 bg-[#FAF7F2]/5 text-[#FAF7F2] hover:bg-[#FAF7F2]/10 lg:hidden"
-            >
-              <Menu className="h-5 w-5" />
-            </button>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-2 shrink-0 rounded-full bg-[#D4AF37]" />
-                <h1 className="font-display truncate text-base font-semibold tracking-tight text-[#FAF7F2] sm:text-xl">
-                  Deshi Gee Operations
-                </h1>
-              </div>
-              <p className="truncate text-[11px] text-[#E5B25D] lg:hidden">
-                {activeTabLabel}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-            <button
-              type="button"
-              onClick={onBackHome}
-              className="hidden min-h-[44px] items-center gap-1.5 rounded-lg border border-[#FAF7F2]/20 px-3.5 py-2 text-xs font-medium text-[#FAF7F2]/90 hover:bg-[#FAF7F2]/10 sm:inline-flex"
-            >
-              <ArrowLeft className="h-3.5 w-3.5 text-[#E5B25D]" />
-              <span>Storefront</span>
-            </button>
-            <span className="hidden max-w-[200px] truncate text-xs text-[#E8DFC5]/75 md:inline">
-              {user.email}
-            </span>
-            <button
-              type="button"
-              onClick={() => signOutAdmin()}
-              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-[#FAF7F2]/20 bg-[#FAF7F2]/5 px-3 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#FAF7F2]/15"
-            >
-              <LogOut className="h-3.5 w-3.5 text-[#E5B25D]" />
-              <span className="hidden sm:inline">Sign Out</span>
-            </button>
+  const renderNav = (onNavigate?: () => void) => (
+    <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4" aria-label="Admin sections">
+      {adminNav.map((group) => (
+        <div key={group.group}>
+          <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#E8DFC5]/45">
+            {group.group}
+          </p>
+          <div className="space-y-0.5">
+            {group.items.map(({ id, label, icon: Icon, badge }) => {
+              const active = tab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setTab(id);
+                    onNavigate?.();
+                  }}
+                  aria-current={active ? 'page' : undefined}
+                  className={`group flex min-h-[40px] w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors ${
+                    active
+                      ? 'bg-[#B47B2B] text-[#FFFDF9] shadow-sm'
+                      : 'text-[#E8DFC5]/80 hover:bg-[#FAF7F2]/10 hover:text-[#FAF7F2]'
+                  }`}
+                >
+                  <Icon className={`h-4 w-4 shrink-0 ${active ? '' : 'text-[#E5B25D]/80'}`} />
+                  <span className="min-w-0 flex-1 truncate">{label}</span>
+                  {typeof badge === 'number' && badge > 0 && (
+                    <span
+                      className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
+                        active ? 'bg-white/25 text-white' : 'bg-[#E5B25D]/20 text-[#E5B25D]'
+                      }`}
+                    >
+                      {badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
-      </header>
+      ))}
+    </nav>
+  );
 
-      {/* Mobile & Tablet Slide-Over Admin Navigation Drawer (< 1024px) */}
+  const renderNavFooter = (onNavigate?: () => void) => (
+    <div className="space-y-1 border-t border-[#FAF7F2]/10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <div className="px-3 pb-2">
+        <p className="truncate text-[11px] text-[#E8DFC5]/60">Signed in as</p>
+        <p className="truncate text-xs font-medium text-[#FAF7F2]">{user.email}</p>
+      </div>
+      <button
+        type="button"
+        onClick={() => {
+          onNavigate?.();
+          onBackHome();
+        }}
+        className="flex min-h-[40px] w-full items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium text-[#E8DFC5]/80 hover:bg-[#FAF7F2]/10 hover:text-[#FAF7F2]"
+      >
+        <ArrowLeft className="h-4 w-4 text-[#E5B25D]/80" />
+        <span>View storefront</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          onNavigate?.();
+          signOutAdmin();
+        }}
+        className="flex min-h-[40px] w-full items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium text-[#E8DFC5]/80 hover:bg-[#FAF7F2]/10 hover:text-[#FAF7F2]"
+      >
+        <LogOut className="h-4 w-4 text-[#E5B25D]/80" />
+        <span>Sign out</span>
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="min-h-dvh bg-[#F6F2EA] text-[#1E1710]">
+      {/* Desktop sidebar (>= 1024px) */}
+      <aside className="no-print fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-[#1A120B] text-[#FAF7F2] lg:flex">
+        <div className="flex h-16 items-center gap-2.5 border-b border-[#FAF7F2]/10 px-5">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#B47B2B] font-display text-sm font-semibold text-[#FFFDF9]">
+            DG
+          </span>
+          <div className="min-w-0">
+            <p className="font-display truncate text-[15px] font-semibold leading-tight">
+              Deshi Gee
+            </p>
+            <p className="text-[10px] uppercase tracking-[0.14em] text-[#E5B25D]/80">
+              Operations console
+            </p>
+          </div>
+        </div>
+        {renderNav()}
+        {renderNavFooter()}
+      </aside>
+
+      {/* Mobile & tablet slide-over navigation (< 1024px) */}
       {mobileNavOpen && (
         <div className="no-print fixed inset-0 z-50 flex lg:hidden">
           <div
@@ -751,287 +851,380 @@ export function AdminDashboardView({
             aria-label="Admin navigation"
             className="relative z-10 flex h-dvh w-72 max-w-[85vw] flex-col bg-[#1A120B] text-[#FAF7F2] shadow-2xl"
           >
-            <div className="flex items-center justify-between border-b border-[#FAF7F2]/10 px-4 py-4">
-              <div>
-                <p className="font-display text-base font-semibold text-[#FAF7F2]">
-                  Deshi Gee Admin
-                </p>
-                <p className="mt-0.5 max-w-[180px] truncate text-[11px] text-[#E8DFC5]/70">
-                  {user.email}
-                </p>
+            <div className="flex h-16 items-center justify-between border-b border-[#FAF7F2]/10 px-4">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#B47B2B] font-display text-sm font-semibold text-[#FFFDF9]">
+                  DG
+                </span>
+                <p className="font-display text-[15px] font-semibold">Deshi Gee Admin</p>
               </div>
               <button
                 type="button"
                 onClick={() => setMobileNavOpen(false)}
                 aria-label="Close admin menu"
-                className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-[#FAF7F2]/15 text-[#FAF7F2] hover:bg-[#FAF7F2]/10"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-[#FAF7F2] hover:bg-[#FAF7F2]/10"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-
-            <nav className="flex-1 space-y-1.5 overflow-y-auto p-3">
-              {adminTabs.map(({ id, label }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => {
-                    setTab(id);
-                    setMobileNavOpen(false);
-                  }}
-                  className={`flex min-h-[44px] w-full items-center rounded-xl px-3.5 py-2.5 text-left text-sm font-medium transition-colors ${
-                    tab === id
-                      ? 'bg-[#B47B2B] text-[#FFFDF9]'
-                      : 'text-[#E8DFC5]/85 hover:bg-[#FAF7F2]/10 hover:text-[#FAF7F2]'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </nav>
-
-            <div className="space-y-2 border-t border-[#FAF7F2]/10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-              <button
-                type="button"
-                onClick={() => {
-                  setMobileNavOpen(false);
-                  onBackHome();
-                }}
-                className="flex min-h-[44px] w-full items-center gap-2 rounded-xl border border-[#FAF7F2]/20 px-3.5 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#FAF7F2]/10"
-              >
-                <ArrowLeft className="h-4 w-4 text-[#E5B25D]" />
-                <span>Back to Storefront</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMobileNavOpen(false);
-                  signOutAdmin();
-                }}
-                className="flex min-h-[44px] w-full items-center gap-2 rounded-xl bg-[#FAF7F2]/10 px-3.5 py-2 text-xs font-medium text-[#FAF7F2] hover:bg-[#FAF7F2]/15"
-              >
-                <LogOut className="h-4 w-4 text-[#E5B25D]" />
-                <span>Sign Out</span>
-              </button>
-            </div>
+            {renderNav(() => setMobileNavOpen(false))}
+            {renderNavFooter(() => setMobileNavOpen(false))}
           </aside>
         </div>
       )}
 
-      <section className="mx-auto min-h-[calc(100dvh-64px)] max-w-[1320px] px-4 py-6 sm:px-8 sm:py-8">
-        {/* Desktop Navigation Tabs (>= 1024px) */}
-        <div className="no-print hidden lg:flex lg:flex-wrap lg:gap-2">
-          {adminTabs.map(({ id, label }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setTab(id)}
-              className={`min-h-[44px] shrink-0 rounded-lg px-4 py-2 text-xs font-medium transition-colors whitespace-nowrap ${
-                tab === id
-                  ? 'bg-[#1E1710] text-[#FAF7F2]'
-                  : 'border border-[rgba(30,23,16,0.14)] bg-[#FFFDF9] text-[#635647] hover:text-[#1E1710]'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+      <div className="lg:pl-64">
+        {/* Top bar */}
+        <header className="no-print sticky top-0 z-20 border-b border-[rgba(30,23,16,0.08)] bg-[#F6F2EA]/90 backdrop-blur">
+          <div className="mx-auto flex h-16 max-w-[1280px] items-center justify-between gap-3 px-4 sm:px-8">
+            <div className="flex min-w-0 items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(true)}
+                aria-label="Open admin menu"
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-[rgba(30,23,16,0.14)] bg-white text-[#1E1710] hover:bg-[#F4EFE6] lg:hidden"
+              >
+                <Menu className="h-5 w-5" />
+              </button>
+              <div className="min-w-0">
+                <h1 className="truncate text-sm font-medium text-[#635647]">
+                  Admin <span className="mx-1 text-[#B9AD9C]">/</span>
+                  <span className="font-semibold text-[#1E1710]">{activeTabLabel}</span>
+                </h1>
+              </div>
+            </div>
 
-        {loadingData && (
-          <div className="mt-4 flex items-center gap-2 text-xs text-[#635647]">
-            <Loader2 className="h-4 w-4 animate-spin text-[#B47B2B]" />
-            <span>Syncing live Firestore data...</span>
+            <div className="flex shrink-0 items-center gap-2">
+              {loadingData && (
+                <span className="hidden items-center gap-1.5 text-xs text-[#635647] sm:inline-flex">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[#B47B2B]" />
+                  Syncing…
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => loadAdminWorkspace()}
+                disabled={loadingData}
+                aria-label="Refresh data"
+                className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.14)] bg-white px-3 text-xs font-medium text-[#1E1710] hover:bg-[#F4EFE6] disabled:opacity-60"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 text-[#8A5A17] ${loadingData ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
+            </div>
           </div>
-        )}
+        </header>
+
+      <section className="mx-auto min-h-[calc(100dvh-64px)] max-w-[1280px] px-4 py-6 sm:px-8 sm:py-8">
 
       {/* TAB 1: OVERVIEW */}
       {tab === 'overview' && (
-        <div className="mt-8 space-y-8">
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-            <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-5">
-              <p className="text-xs text-[#635647]">Total Orders</p>
-              <p className="font-mono mt-2 text-2xl font-semibold tabular-nums">
-                {metrics.total}
-              </p>
-            </div>
-            <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-5">
-              <p className="text-xs text-[#635647]">Pending</p>
-              <p className="font-mono mt-2 text-2xl font-semibold tabular-nums text-[#8A5A17]">
-                {metrics.pending}
-              </p>
-            </div>
-            <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-5">
-              <p className="text-xs text-[#635647]">Confirmed</p>
-              <p className="font-mono mt-2 text-2xl font-semibold tabular-nums">
-                {metrics.confirmed}
-              </p>
-            </div>
-            <div className="rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-5">
-              <p className="text-xs text-[#635647]">Delivered</p>
-              <p className="font-mono mt-2 text-2xl font-semibold tabular-nums">
-                {metrics.delivered}
-              </p>
-            </div>
-            <div className="col-span-2 rounded-xl border border-[rgba(30,23,16,0.12)] bg-[#F2ECE1] p-5 md:col-span-1">
-              <p className="text-xs text-[#635647]">Total Sales</p>
-              <p className="font-mono mt-2 text-2xl font-semibold tabular-nums text-[#8A5A17]">
-                {formatBdt(metrics.totalSales)}
-              </p>
-            </div>
-          </div>
+        <div className="space-y-6">
+          <PageHeader
+            title="Overview"
+            description="Today's store health at a glance."
+            actions={<HelpInfoButton section="overview" />}
+          />
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="font-display text-lg font-semibold">Recent Orders</h2>
-                <HelpInfoButton section="overview" />
-              </div>
-              <div className="mt-4 divide-y divide-[rgba(30,23,16,0.08)] text-sm">
-                {orders.slice(0, 6).map((o) => (
-                  <div
-                    key={o.orderNumber}
-                    className="flex items-center justify-between py-3"
+          {/* Needs attention */}
+          {(metrics.manualReview > 0 ||
+            lowStockVariants.length > 0 ||
+            refillDueCount > 0 ||
+            pendingReviewCount > 0) && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+              <p className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+                <AlertTriangle className="h-4 w-4" />
+                Needs your attention
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {metrics.manualReview > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStatusFilter('manual_review');
+                      setTab('orders');
+                    }}
+                    className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-amber-900 ring-1 ring-amber-200 hover:bg-amber-100"
                   >
-                    <div>
-                      <p className="font-mono text-xs font-semibold">{o.orderNumber}</p>
-                      <p className="text-xs text-[#635647]">
-                        {o.customerName} · {o.itemsSummary || `${o.weight} × ${o.qty}`}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-mono text-xs font-medium tabular-nums">
-                        {formatBdt(o.totalBdt)}
-                      </p>
-                      <p className="text-[11px] uppercase text-[#8A5A17]">
-                        {o.status}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-                {orders.length === 0 && (
-                  <p className="py-6 text-xs text-[#635647]">No orders recorded yet.</p>
+                    {metrics.manualReview} order{metrics.manualReview > 1 ? 's' : ''} in risk review
+                  </button>
+                )}
+                {lowStockVariants.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setTab('store')}
+                    className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-amber-900 ring-1 ring-amber-200 hover:bg-amber-100"
+                  >
+                    Low stock: {lowStockVariants.map(([w, s]) => `${w} (${s})`).join(', ')}
+                  </button>
+                )}
+                {pendingReviewCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setTab('reviews')}
+                    className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-amber-900 ring-1 ring-amber-200 hover:bg-amber-100"
+                  >
+                    {pendingReviewCount} review{pendingReviewCount > 1 ? 's' : ''} awaiting moderation
+                  </button>
+                )}
+                {refillDueCount > 0 && (
+                  <span className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-amber-900 ring-1 ring-amber-200">
+                    {refillDueCount} refill reminder{refillDueCount > 1 ? 's' : ''} due
+                  </span>
                 )}
               </div>
             </div>
+          )}
 
-            <div className="rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-6">
-              <h2 className="font-display text-lg font-semibold">
-                Owner Notification Webhook Log
-              </h2>
-              <p className="mt-1 text-xs text-[#635647]">
-                Configure `OWNER_WEBHOOK_URL`, `GOOGLE_SHEETS_WEBHOOK_URL`, or
-                `WHATSAPP_WEBHOOK_URL` on the server environment.
-              </p>
-              <div className="mt-4 space-y-2 text-xs">
-                {webhookInfo?.recentLogs?.map((log, i) => (
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <KpiCard
+              label="Total sales"
+              value={formatBdt(metrics.totalSales)}
+              hint="Excludes cancelled orders"
+              icon={Banknote}
+              tone="green"
+            />
+            <KpiCard
+              label="Total orders"
+              value={metrics.total}
+              hint={`${metrics.delivered} delivered`}
+              icon={ShoppingBag}
+              tone="blue"
+            />
+            <KpiCard
+              label="Pending"
+              value={metrics.pending}
+              hint="Waiting for confirmation"
+              icon={Clock}
+              tone="amber"
+            />
+            <KpiCard
+              label="Confirmed"
+              value={metrics.confirmed}
+              hint="Ready to dispatch"
+              icon={CheckCircle2}
+              tone="violet"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <Card
+              title="Recent orders"
+              description="Latest 6 orders"
+              className="lg:col-span-2"
+              bodyClassName="p-0"
+              action={
+                <button
+                  type="button"
+                  onClick={() => setTab('orders')}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-[#8A5A17] hover:underline"
+                >
+                  View all
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              }
+            >
+              {orders.length === 0 ? (
+                <div className="p-5">
+                  <EmptyState
+                    title="No orders yet"
+                    description="New orders from the storefront and chatbot will appear here."
+                  />
+                </div>
+              ) : (
+                <ul className="divide-y divide-[rgba(30,23,16,0.06)]">
+                  {orders.slice(0, 6).map((o) => (
+                    <li key={o.orderNumber}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTab('orders');
+                          setSelectedOrder(o);
+                        }}
+                        className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left hover:bg-[#FAF7F2]"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-mono text-xs font-semibold">{o.orderNumber}</p>
+                          <p className="truncate text-xs text-[#635647]">
+                            {o.customerName} · {o.itemsSummary || `${o.weight} × ${o.qty}`}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <span className="font-mono text-xs font-semibold tabular-nums">
+                            {formatBdt(o.totalBdt)}
+                          </span>
+                          <StatusBadge status={o.status} />
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+
+            <Card
+              title="Order notifications"
+              description="Owner webhook dispatch log"
+            >
+              <div className="space-y-2 text-xs">
+                {webhookInfo?.recentLogs?.slice(0, 6).map((log, i) => (
                   <div
                     key={i}
-                    className="rounded-lg border border-[rgba(30,23,16,0.10)] bg-[#FAF7F2] p-3"
+                    className="rounded-lg border border-[rgba(30,23,16,0.08)] bg-[#FAF7F2] p-3"
                   >
-                    <div className="flex justify-between font-mono">
-                      <span>{log.orderNumber || 'Order'}</span>
-                      <span>{log.status}</span>
+                    <div className="flex items-center justify-between gap-2 font-mono">
+                      <span className="truncate">{log.orderNumber || 'Order'}</span>
+                      <StatusBadge
+                        status={log.status}
+                        tone={log.status === 'sent' ? 'green' : log.status === 'failed' ? 'red' : 'neutral'}
+                      />
                     </div>
                     <p className="mt-1 text-[#635647]">{log.detail}</p>
                   </div>
                 ))}
                 {(!webhookInfo || webhookInfo.recentLogs.length === 0) && (
-                  <p className="py-4 text-[#635647]">
-                    No webhook dispatches recorded in this server session yet.
-                  </p>
+                  <EmptyState
+                    title="No dispatches yet"
+                    description="Set OWNER_WEBHOOK_URL, GOOGLE_SHEETS_WEBHOOK_URL or WHATSAPP_WEBHOOK_URL on the server to get order alerts."
+                  />
                 )}
               </div>
-            </div>
+            </Card>
           </div>
         </div>
       )}
 
+
       {/* TAB 2: ORDERS & PRINT RECEIPT */}
       {tab === 'orders' && (
-        <div className="mt-8 space-y-6">
-          <div className="no-print flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-            <input
-              type="text"
-              value={orderSearch}
-              onChange={(e) => setOrderSearch(e.target.value)}
-              placeholder="Search Order ID, phone, or customer..."
-              className="min-h-[42px] w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3.5 py-2 text-base focus:border-[#B47B2B] focus:outline-none sm:max-w-xs sm:text-sm"
-            />
-            <select
-              value={statusFilter}
-              onChange={(e) =>
-                setStatusFilter(e.target.value as 'all' | OrderStatus | 'manual_review')
-              }
-              className="min-h-[42px] w-full rounded-lg border border-[rgba(30,23,16,0.18)] bg-[#FFFDF9] px-3 py-2 text-base sm:w-auto sm:text-sm"
-            >
-              <option value="all">All Statuses</option>
-              <option value="manual_review">
-                Manual Risk Review ({metrics.manualReview})
-              </option>
-              <option value="pending">Pending</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="processing">Processing</option>
-              <option value="shipped">Shipped</option>
-              <option value="delivered">Delivered</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-            <button
-              type="button"
-              onClick={handleExportOrdersCsv}
-              disabled={filteredOrders.length === 0}
-              className="inline-flex min-h-[42px] shrink-0 items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.2)] bg-[#FFFDF9] px-4 py-2 text-xs font-medium text-[#1E1710] hover:bg-[#F2ECE1] disabled:opacity-50"
-            >
-              <Download className="h-3.5 w-3.5 text-[#8A5A17]" />
-              <span>Export CSV ({filteredOrders.length})</span>
-            </button>
-            <HelpInfoButton section="orders" />
+        <div className="space-y-5">
+          <PageHeader
+            title="Orders"
+            description="Search, filter and manage customer orders."
+            actions={
+              <>
+                <HelpInfoButton section="orders" />
+                <button
+                  type="button"
+                  onClick={handleExportOrdersCsv}
+                  disabled={filteredOrders.length === 0}
+                  className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.14)] bg-white px-3.5 text-xs font-medium text-[#1E1710] hover:bg-[#F4EFE6] disabled:opacity-50"
+                >
+                  <Download className="h-3.5 w-3.5 text-[#8A5A17]" />
+                  <span>Export CSV ({filteredOrders.length})</span>
+                </button>
+              </>
+            }
+          />
+
+          <div className="no-print space-y-3">
+            <div className="relative max-w-md">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8A7867]" />
+              <input
+                type="search"
+                value={orderSearch}
+                onChange={(e) => setOrderSearch(e.target.value)}
+                placeholder="Search order ID, phone or customer"
+                aria-label="Search orders"
+                className="min-h-[42px] w-full rounded-lg border border-[rgba(30,23,16,0.16)] bg-white pl-9 pr-3 text-base text-[#1E1710] placeholder:text-[#8A7867] focus:border-[#B47B2B] focus:outline-none focus:ring-2 focus:ring-[#B47B2B]/20 sm:text-sm"
+              />
+            </div>
+            <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0">
+              {(
+                [
+                  ['all', 'All', orders.length],
+                  ['pending', 'Pending', metrics.pending],
+                  ['confirmed', 'Confirmed', metrics.confirmed],
+                  ['processing', 'Processing', orders.filter((o) => o.status === 'processing').length],
+                  ['shipped', 'Shipped', orders.filter((o) => o.status === 'shipped').length],
+                  ['delivered', 'Delivered', metrics.delivered],
+                  ['cancelled', 'Cancelled', orders.filter((o) => o.status === 'cancelled').length],
+                  ['manual_review', 'Risk review', metrics.manualReview],
+                ] as [typeof statusFilter, string, number][]
+              ).map(([value, label, count]) => (
+                <FilterChip
+                  key={value}
+                  active={statusFilter === value}
+                  onClick={() => setStatusFilter(value)}
+                  count={count}
+                >
+                  {label}
+                </FilterChip>
+              ))}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-            <div className="no-print space-y-3 lg:col-span-7">
-              {filteredOrders.map((order) => (
-                <button
-                  key={order.orderNumber}
-                  type="button"
-                  onClick={() => setSelectedOrder(order)}
-                  className={`block w-full cursor-pointer rounded-xl border p-4 text-left transition-colors ${
-                    selectedOrder?.orderNumber === order.orderNumber
-                      ? 'border-[#B47B2B] bg-[#F2ECE1]'
-                      : 'border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] hover:bg-[#FAF7F2]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-sm font-semibold">
-                        {order.orderNumber}
-                      </span>
-                      {order.reviewStatus === 'manual_review' && (
-                        <span className="rounded bg-amber-100 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-amber-900">
-                          Review · Risk {order.riskScore ?? 0}
+            <div
+              className={`no-print overflow-hidden rounded-2xl border border-[rgba(30,23,16,0.08)] bg-white shadow-[0_1px_2px_rgba(30,23,16,0.04)] ${
+                selectedOrder ? 'lg:col-span-7' : 'lg:col-span-12'
+              }`}
+            >
+              {filteredOrders.length > 0 && (
+                <div className="hidden grid-cols-[1.4fr_1fr_auto] gap-4 border-b border-[rgba(30,23,16,0.06)] bg-[#FAF7F2] px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-[#8A7867] md:grid">
+                  <span>Order</span>
+                  <span>Status</span>
+                  <span className="text-right">Total</span>
+                </div>
+              )}
+              <ul className="divide-y divide-[rgba(30,23,16,0.06)]">
+                {filteredOrders.map((order) => {
+                  const isSelected = selectedOrder?.orderNumber === order.orderNumber;
+                  return (
+                    <li key={order.orderNumber}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedOrder(order)}
+                        aria-current={isSelected ? 'true' : undefined}
+                        className={`grid w-full cursor-pointer grid-cols-[1fr_auto] gap-x-4 gap-y-2 px-5 py-3.5 text-left transition-colors md:grid-cols-[1.4fr_1fr_auto] md:items-center ${
+                          isSelected ? 'bg-[#F4EFE6]' : 'hover:bg-[#FAF7F2]'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-sm font-semibold">
+                              {order.orderNumber}
+                            </span>
+                            {order.reviewStatus === 'manual_review' && (
+                              <StatusBadge
+                                status="manual_review"
+                                label={`Risk ${order.riskScore ?? 0}`}
+                              />
+                            )}
+                            {order.duplicateWarning && (
+                              <StatusBadge status="duplicate" label="Duplicate?" tone="amber" />
+                            )}
+                          </div>
+                          <p className="mt-0.5 truncate text-xs text-[#635647]">
+                            {order.customerName} · {order.phone} · {order.district}
+                          </p>
+                        </div>
+                        <span className="text-right font-mono text-sm font-semibold tabular-nums text-[#1E1710] md:order-3">
+                          {formatBdt(order.totalBdt)}
                         </span>
-                      )}
-                      {order.duplicateWarning && (
-                        <span className="rounded bg-orange-100 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-orange-900">
-                          Dup Check
-                        </span>
-                      )}
-                    </div>
-                    <span className="font-mono text-sm font-semibold tabular-nums text-[#8A5A17]">
-                      {formatBdt(order.totalBdt)}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap justify-between gap-2 text-xs text-[#635647]">
-                    <span>
-                      {order.customerName} · {order.phone} · {order.district}
-                    </span>
-                    <span className="uppercase">
-                      {order.status} · {order.paymentMethod} ({order.paymentStatus})
-                    </span>
-                  </div>
-                </button>
-              ))}
+                        <div className="col-span-2 flex flex-wrap items-center gap-1.5 md:col-span-1 md:order-2">
+                          <StatusBadge status={order.status} />
+                          <StatusBadge
+                            status={order.paymentStatus}
+                            label={
+                              order.paymentStatus === 'cod_due'
+                                ? 'COD due'
+                                : `${order.paymentMethod.toUpperCase()} · ${order.paymentStatus.replace(/_/g, ' ')}`
+                            }
+                          />
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
               {filteredOrders.length === 0 && (
-                <p className="text-sm text-[#635647]">No matching orders found.</p>
+                <div className="p-5">
+                  <EmptyState
+                    title="No matching orders"
+                    description="Try a different search or clear the status filter."
+                  />
+                </div>
               )}
             </div>
 
@@ -1380,334 +1573,197 @@ export function AdminDashboardView({
 
       {/* TAB 3: STORE, STOCK, DELIVERY & CONTACT CONFIG */}
       {tab === 'store' && (
-        <form
-          onSubmit={handleSaveSettings}
-          className="mt-8 grid grid-cols-1 gap-6 rounded-2xl border border-[rgba(30,23,16,0.12)] bg-[#FFFDF9] p-4 sm:p-6 md:grid-cols-3"
-        >
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="font-display text-lg font-semibold">
-                Single-Product Pricing &amp; Stock
-              </h2>
-              <HelpInfoButton section="store_pricing_stock" />
-            </div>
-            {(['250g', '500g', '1kg'] as const).map((w) => {
-              const priceKey = w === '250g' ? 'price250g' : w === '500g' ? 'price500g' : 'price1kg';
-              const stockKey = w === '250g' ? 'stock250g' : w === '500g' ? 'stock500g' : 'stock1kg';
-              return (
-                <div key={w} className="grid grid-cols-2 gap-3 rounded-xl bg-[#FAF7F2] p-3">
-                  <div>
-                    <label className="block text-xs text-[#635647]">{w} Price (৳)</label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={draftSettings[priceKey]}
-                      onChange={(e) =>
-                        setDraftSettings({
-                          ...draftSettings,
-                          [priceKey]: Number(e.target.value),
-                        })
-                      }
-                      className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] bg-white px-2.5 py-1.5 font-mono text-base sm:text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-[#635647]">{w} Stock</label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={draftSettings[stockKey]}
-                      onChange={(e) =>
-                        setDraftSettings({
-                          ...draftSettings,
-                          [stockKey]: Number(e.target.value),
-                        })
-                      }
-                      className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] bg-white px-2.5 py-1.5 font-mono text-base sm:text-sm"
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+        <form onSubmit={handleSaveSettings} className="space-y-6 pb-24">
+          <PageHeader
+            title="Pricing, stock & delivery"
+            description="Everything customers see about price, availability, delivery and how to reach you."
+          />
 
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="font-display text-lg font-semibold">
-                Bangladesh Delivery &amp; MFS Numbers
-              </h2>
-              <HelpInfoButton section="store_delivery_payments" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-[#635647]">Dhaka City (৳)</label>
-                <input
-                  type="number"
-                  min={0}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <Card
+              title="Jar pricing & stock"
+              description="One product, three sizes."
+              action={<HelpInfoButton section="store_pricing_stock" />}
+              bodyClassName="space-y-3 p-5"
+            >
+              {(['250g', '500g', '1kg'] as const).map((w) => {
+                const priceKey = w === '250g' ? 'price250g' : w === '500g' ? 'price500g' : 'price1kg';
+                const stockKey = w === '250g' ? 'stock250g' : w === '500g' ? 'stock500g' : 'stock1kg';
+                const stock = Number(draftSettings[stockKey]);
+                return (
+                  <div
+                    key={w}
+                    className="rounded-xl border border-[rgba(30,23,16,0.08)] bg-[#FAF7F2] p-3"
+                  >
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-sm font-semibold">{w} jar</span>
+                      {stock <= 10 && (
+                        <StatusBadge
+                          status={stock === 0 ? 'failed' : 'pending'}
+                          label={stock === 0 ? 'Out of stock' : 'Low stock'}
+                        />
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <NumberField
+                        label="Price"
+                        prefix="৳"
+                        min={1}
+                        value={draftSettings[priceKey]}
+                        onChange={(n) => setDraftSettings({ ...draftSettings, [priceKey]: n })}
+                      />
+                      <NumberField
+                        label="Stock (jars)"
+                        value={draftSettings[stockKey]}
+                        onChange={(n) => setDraftSettings({ ...draftSettings, [stockKey]: n })}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </Card>
+
+            <Card
+              title="Delivery fees & timing"
+              description="Four delivery zones across Bangladesh."
+              action={<HelpInfoButton section="store_delivery_payments" />}
+              bodyClassName="space-y-4 p-5"
+            >
+              <div className="grid grid-cols-2 gap-3">
+                <NumberField
+                  label="Dhaka city"
+                  prefix="৳"
                   value={draftSettings.insideDhakaFee}
-                  onChange={(e) =>
-                    setDraftSettings({
-                      ...draftSettings,
-                      insideDhakaFee: Number(e.target.value),
-                    })
-                  }
-                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
+                  onChange={(n) => setDraftSettings({ ...draftSettings, insideDhakaFee: n })}
                 />
-              </div>
-              <div>
-                <label className="block text-xs text-[#635647]">Dhaka Suburban (৳)</label>
-                <input
-                  type="number"
-                  min={0}
+                <NumberField
+                  label="Dhaka suburban"
+                  prefix="৳"
                   value={draftSettings.dhakaSuburbanFee ?? 0}
-                  onChange={(e) =>
-                    setDraftSettings({
-                      ...draftSettings,
-                      dhakaSuburbanFee: Number(e.target.value),
-                    })
-                  }
-                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
+                  onChange={(n) => setDraftSettings({ ...draftSettings, dhakaSuburbanFee: n })}
                 />
-              </div>
-              <div>
-                <label className="block text-xs text-[#635647]">Nationwide (৳)</label>
-                <input
-                  type="number"
-                  min={0}
+                <NumberField
+                  label="Nationwide"
+                  prefix="৳"
                   value={draftSettings.outsideDhakaFee}
-                  onChange={(e) =>
-                    setDraftSettings({
-                      ...draftSettings,
-                      outsideDhakaFee: Number(e.target.value),
-                    })
-                  }
-                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
+                  onChange={(n) => setDraftSettings({ ...draftSettings, outsideDhakaFee: n })}
                 />
-              </div>
-              <div>
-                <label className="block text-xs text-[#635647]">Remote Districts (৳)</label>
-                <input
-                  type="number"
-                  min={0}
+                <NumberField
+                  label="Remote districts"
+                  prefix="৳"
                   value={draftSettings.remoteDistrictFee ?? 0}
-                  onChange={(e) =>
-                    setDraftSettings({
-                      ...draftSettings,
-                      remoteDistrictFee: Number(e.target.value),
-                    })
-                  }
-                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
+                  onChange={(n) => setDraftSettings({ ...draftSettings, remoteDistrictFee: n })}
                 />
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-[#635647]">Suburban ETA</label>
-                <input
-                  type="text"
-                  placeholder="Unset"
+              <div className="grid grid-cols-2 gap-3">
+                <TextField
+                  label="Suburban delivery time"
+                  placeholder="Not set"
                   value={draftSettings.estimatedSuburbanDays ?? ''}
-                  onChange={(e) =>
-                    setDraftSettings({
-                      ...draftSettings,
-                      estimatedSuburbanDays: e.target.value,
-                    })
-                  }
-                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 text-base sm:text-xs"
+                  onChange={(v) => setDraftSettings({ ...draftSettings, estimatedSuburbanDays: v })}
                 />
-              </div>
-              <div>
-                <label className="block text-xs text-[#635647]">Remote ETA</label>
-                <input
-                  type="text"
-                  placeholder="Unset"
+                <TextField
+                  label="Remote delivery time"
+                  placeholder="Not set"
                   value={draftSettings.estimatedRemoteDays ?? ''}
-                  onChange={(e) =>
-                    setDraftSettings({
-                      ...draftSettings,
-                      estimatedRemoteDays: e.target.value,
-                    })
-                  }
-                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 text-base sm:text-xs"
+                  onChange={(v) => setDraftSettings({ ...draftSettings, estimatedRemoteDays: v })}
                 />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-[#635647]">
-                  Cutoff Hour (BST 0-23, 0=Unset)
-                </label>
-                <input
-                  type="number"
-                  min={0}
+                <NumberField
+                  label="Dispatch cut-off hour"
+                  hint="(BST 0–23, 0 = not set)"
                   max={23}
                   value={draftSettings.dispatchCutoffHourBst ?? 0}
-                  onChange={(e) =>
-                    setDraftSettings({
-                      ...draftSettings,
-                      dispatchCutoffHourBst: Number(e.target.value),
-                    })
-                  }
-                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
+                  onChange={(n) => setDraftSettings({ ...draftSettings, dispatchCutoffHourBst: n })}
+                />
+                <NumberField
+                  label="Free delivery from"
+                  prefix="৳"
+                  value={draftSettings.freeDeliveryThreshold}
+                  onChange={(n) => setDraftSettings({ ...draftSettings, freeDeliveryThreshold: n })}
                 />
               </div>
-              <div>
-                <label className="block text-xs text-[#635647]">
-                  High-Value COD Flag (৳, 0=Unset)
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  value={draftSettings.codHighValueThresholdBdt ?? 0}
-                  onChange={(e) =>
-                    setDraftSettings({
-                      ...draftSettings,
-                      codHighValueThresholdBdt: Number(e.target.value),
-                    })
-                  }
-                  className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs text-[#635647]">
-                Free Delivery Threshold (৳)
-              </label>
-              <input
-                type="number"
-                min={0}
-                value={draftSettings.freeDeliveryThreshold}
-                onChange={(e) =>
-                  setDraftSettings({
-                    ...draftSettings,
-                    freeDeliveryThreshold: Number(e.target.value),
-                  })
-                }
-                className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-[#635647]">bKash Number</label>
-              <input
-                type="text"
-                value={draftSettings.bkashNumber}
-                onChange={(e) =>
-                  setDraftSettings({ ...draftSettings, bkashNumber: e.target.value })
-                }
-                className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-[#635647]">Nagad Number</label>
-              <input
-                type="text"
-                value={draftSettings.nagadNumber}
-                onChange={(e) =>
-                  setDraftSettings({ ...draftSettings, nagadNumber: e.target.value })
-                }
-                className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-[#635647]">
-                Advance MFS Discount (%)
-              </label>
-              <input
-                type="number"
-                min={0}
-                max={25}
-                value={draftSettings.advanceDiscountPct}
-                onChange={(e) =>
-                  setDraftSettings({
-                    ...draftSettings,
-                    advanceDiscountPct: Number(e.target.value),
-                  })
-                }
-                className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
-              />
-            </div>
-            <label className="flex items-center gap-2 text-xs text-[#635647]">
-              <input
-                type="checkbox"
-                checked={Boolean(draftSettings.codConfirmEnabled)}
-                onChange={(e) =>
-                  setDraftSettings({
-                    ...draftSettings,
-                    codConfirmEnabled: e.target.checked,
-                  })
-                }
-              />
-              <span>
-                Enable COD Phone Confirm Policy (SMS Provider: Not configured)
-              </span>
-            </label>
-          </div>
+            </Card>
 
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="font-display text-lg font-semibold">
-                Contact, Origin &amp; Social Links
-              </h2>
-              <HelpInfoButton section="store_contact_social" />
-            </div>
-            <div>
-              <label className="block text-xs text-[#635647]">WhatsApp Number</label>
-              <input
-                type="text"
-                value={draftSettings.whatsappNumber}
-                onChange={(e) =>
-                  setDraftSettings({ ...draftSettings, whatsappNumber: e.target.value })
-                }
-                className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
+            <Card
+              title="Payments & COD"
+              description="Manual mobile-banking numbers and COD safety checks."
+              bodyClassName="space-y-4 p-5"
+            >
+              <div className="grid grid-cols-2 gap-3">
+                <TextField
+                  label="bKash number"
+                  mono
+                  value={draftSettings.bkashNumber}
+                  onChange={(v) => setDraftSettings({ ...draftSettings, bkashNumber: v })}
+                />
+                <TextField
+                  label="Nagad number"
+                  mono
+                  value={draftSettings.nagadNumber}
+                  onChange={(v) => setDraftSettings({ ...draftSettings, nagadNumber: v })}
+                />
+                <NumberField
+                  label="Advance payment discount"
+                  hint="(%)"
+                  max={25}
+                  value={draftSettings.advanceDiscountPct}
+                  onChange={(n) => setDraftSettings({ ...draftSettings, advanceDiscountPct: n })}
+                />
+                <NumberField
+                  label="High-value COD flag"
+                  hint="(৳, 0 = not set)"
+                  value={draftSettings.codHighValueThresholdBdt ?? 0}
+                  onChange={(n) => setDraftSettings({ ...draftSettings, codHighValueThresholdBdt: n })}
+                />
+              </div>
+              <ToggleField
+                label="COD phone confirmation"
+                description="SMS provider is not configured, so confirmation stays manual."
+                checked={Boolean(draftSettings.codConfirmEnabled)}
+                onChange={(v) => setDraftSettings({ ...draftSettings, codConfirmEnabled: v })}
               />
-            </div>
-            <div>
-              <label className="block text-xs text-[#635647]">Support Phone</label>
-              <input
-                type="text"
-                value={draftSettings.supportPhone}
-                onChange={(e) =>
-                  setDraftSettings({ ...draftSettings, supportPhone: e.target.value })
-                }
-                className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-[#635647]">Support Email</label>
-              <input
+            </Card>
+
+            <Card
+              title="Contact & origin"
+              description="Shown on the storefront and used by the chatbot."
+              action={<HelpInfoButton section="store_contact_social" />}
+              bodyClassName="space-y-4 p-5"
+            >
+              <div className="grid grid-cols-2 gap-3">
+                <TextField
+                  label="WhatsApp number"
+                  mono
+                  value={draftSettings.whatsappNumber}
+                  onChange={(v) => setDraftSettings({ ...draftSettings, whatsappNumber: v })}
+                />
+                <TextField
+                  label="Support phone"
+                  mono
+                  value={draftSettings.supportPhone}
+                  onChange={(v) => setDraftSettings({ ...draftSettings, supportPhone: v })}
+                />
+              </div>
+              <TextField
+                label="Support email"
                 type="email"
                 value={draftSettings.supportEmail}
-                onChange={(e) =>
-                  setDraftSettings({ ...draftSettings, supportEmail: e.target.value })
-                }
-                className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 text-base sm:text-sm"
+                onChange={(v) => setDraftSettings({ ...draftSettings, supportEmail: v })}
               />
-            </div>
-            <div>
-              <label className="block text-xs text-[#635647]">Business Address</label>
-              <input
-                type="text"
+              <TextField
+                label="Business address"
                 value={draftSettings.businessAddress}
-                onChange={(e) =>
-                  setDraftSettings({ ...draftSettings, businessAddress: e.target.value })
-                }
-                className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 text-base sm:text-sm"
+                onChange={(v) => setDraftSettings({ ...draftSettings, businessAddress: v })}
               />
-            </div>
-            <div>
-              <label className="block text-xs text-[#635647]">Active Batch Code</label>
-              <input
-                type="text"
+              <TextField
+                label="Active batch code"
+                mono
                 value={draftSettings.activeBatchCode}
-                onChange={(e) =>
-                  setDraftSettings({
-                    ...draftSettings,
-                    activeBatchCode: e.target.value.toUpperCase(),
-                  })
+                onChange={(v) =>
+                  setDraftSettings({ ...draftSettings, activeBatchCode: v.toUpperCase() })
                 }
-                className="mt-1 w-full rounded border border-[rgba(30,23,16,0.18)] px-2.5 py-1.5 font-mono text-base sm:text-sm"
               />
-            </div>
+            </Card>
           </div>
 
           <StorefrontImpactPreview
@@ -1716,20 +1772,43 @@ export function AdminDashboardView({
             onResetDraft={() => setDraftSettings(settings)}
           />
 
-          <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[rgba(30,23,16,0.10)] pt-4 md:col-span-3">
-            <span className="text-xs font-medium text-[#8A5A17]">{settingsSavedMsg}</span>
-            <button
-              type="submit"
-              disabled={savingSettings}
-              className="inline-flex items-center gap-2 rounded-lg bg-[#B47B2B] px-6 py-2.5 text-sm font-medium text-[#FFFDF9] hover:bg-[#96621B]"
-            >
-              {savingSettings ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Check className="h-4 w-4" />
-              )}
-              <span>Save Storefront Configuration</span>
-            </button>
+          {/* Sticky save bar */}
+          <div className="no-print fixed inset-x-0 bottom-0 z-20 border-t border-[rgba(30,23,16,0.1)] bg-white/95 backdrop-blur lg:left-64">
+            <div className="mx-auto flex max-w-[1280px] items-center justify-between gap-4 px-4 py-3 sm:px-8">
+              <p
+                role="status"
+                className={`min-w-0 truncate text-xs font-medium ${
+                  settingsDirty ? 'text-amber-800' : settingsSavedMsg ? 'text-[#8A5A17]' : 'text-[#8A7867]'
+                }`}
+              >
+                {settingsDirty ? 'You have unsaved changes' : settingsSavedMsg || 'All changes saved'}
+              </p>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!settingsDirty || savingSettings}
+                  onClick={() => {
+                    setDraftSettings(settings);
+                    setSettingsSavedMsg('');
+                  }}
+                  className="min-h-[40px] rounded-lg border border-[rgba(30,23,16,0.14)] bg-white px-4 text-xs font-medium text-[#1E1710] hover:bg-[#F4EFE6] disabled:opacity-50"
+                >
+                  Discard
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingSettings || !settingsDirty}
+                  className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-[#B47B2B] px-5 text-sm font-medium text-[#FFFDF9] hover:bg-[#96621B] disabled:opacity-50"
+                >
+                  {savingSettings ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Check className="h-4 w-4" />
+                  )}
+                  <span>Save changes</span>
+                </button>
+              </div>
+            </div>
           </div>
         </form>
       )}
@@ -2152,6 +2231,7 @@ export function AdminDashboardView({
         />
       )}
       </section>
+      </div>
     </div>
   );
 }
