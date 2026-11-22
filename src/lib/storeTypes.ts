@@ -298,6 +298,8 @@ export interface OrderRecord {
   collectedAmountBdt?: number;
   /** Whether the courier has paid the collected cash out to the store. */
   settlementStatus?: SettlementStatus;
+  settledAmountBdt?: number;
+  settlementId?: string;
   deliveredAtIso?: string;
   returnedAtIso?: string;
   statusUpdatedAtIso?: string;

@@ -15,6 +15,7 @@ import {
   Download,
   ExternalLink,
   LayoutDashboard,
+  Landmark,
   Loader2,
   LogOut,
   Menu,
@@ -68,6 +69,7 @@ import { formatBdt } from '../data/deshiGeeData';
 import { AdminChatbotPanel } from './AdminChatbotPanel';
 import { AdminEcosystemPanel } from './AdminEcosystemPanel';
 import { HelpInfoButton } from './admin/AdminHelpModal';
+import { CodSettlementPanel } from './admin/CodSettlementPanel';
 import { ProfitExpensesPanel } from './admin/ProfitExpensesPanel';
 import {
   COLLECTION_LABELS,
@@ -120,7 +122,7 @@ const ORDER_FILTER_GROUPS: Record<Exclude<OrderFilterKey, 'all' | 'manual_review
   cancelled: ['cancelled'],
 };
 
-type AdminTab = 'overview' | 'orders' | 'finance' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
+type AdminTab = 'overview' | 'orders' | 'finance' | 'cod' | 'store' | 'batches' | 'reviews' | 'chatbot' | 'ecosystem';
 
 export function AdminDashboardView({
   settings,
@@ -805,6 +807,7 @@ export function AdminDashboardView({
         { id: 'overview', label: 'Overview', icon: LayoutDashboard },
         { id: 'orders', label: 'Orders', icon: ShoppingBag, badge: metrics.pending },
         { id: 'finance', label: 'Profit & Expenses', icon: Wallet },
+        { id: 'cod', label: 'COD & Settlements', icon: Landmark },
       ],
     },
     {
@@ -1731,6 +1734,11 @@ export function AdminDashboardView({
             )}
           </div>
         </div>
+      )}
+
+      {/* TAB: COD COLLECTION & SETTLEMENTS */}
+      {tab === 'cod' && (
+        <CodSettlementPanel getIdToken={async () => (user ? user.getIdToken() : '')} />
       )}
 
       {/* TAB: PROFIT & EXPENSES */}
