@@ -148,14 +148,31 @@ export function buildOrderDocument(kind: OrderDocKind, o: DocOrder, store: DocSt
   return `<!doctype html><html><head><meta charset="utf-8"/><title>${e(kind)} ${e(o.orderNumber)}</title><style>${BASE_CSS}${kind === 'label' ? LABEL_CSS : ''}</style></head><body>${body}</body></html>`;
 }
 
-/** Open a print window with the document. Returns false if the browser blocked the pop-up. */
+/** Print an order document via a hidden iframe (avoids popup blockers and works inside iframes). */
 export function printOrderDocument(html: string): boolean {
-  const w = window.open('', '_blank', 'width=820,height=900');
-  if (!w) return false;
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
-  w.focus();
-  w.setTimeout(() => w.print(), 300);
+  if (typeof document === 'undefined') return false;
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('aria-hidden', 'true');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  document.body.appendChild(iframe);
+  const cleanup = () => {
+    window.setTimeout(() => {
+      iframe.remove();
+    }, 1000);
+  };
+  iframe.onload = () => {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } finally {
+      cleanup();
+    }
+  };
+  iframe.srcdoc = html;
   return true;
 }

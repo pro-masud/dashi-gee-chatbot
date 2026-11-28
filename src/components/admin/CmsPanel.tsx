@@ -108,6 +108,8 @@ export function CmsPanel({ getIdToken }: { getIdToken: () => Promise<string> }) 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
+  const [confirmPublish, setConfirmPublish] = useState(false);
+  const [confirmRestoreId, setConfirmRestoreId] = useState<string | null>(null);
 
   const authedFetch = useCallback(async (url: string, init: RequestInit = {}) => {
     const token = await tokenRef.current();
@@ -175,11 +177,11 @@ export function CmsPanel({ getIdToken }: { getIdToken: () => Promise<string> }) 
 
   const saveDraft = () => call('/api/admin/cms', { method: 'PUT', body: JSON.stringify(draft) }, 'Draft saved. The live page is unchanged until you publish.');
   const publish = () => {
-    if (!window.confirm('Publish the saved draft to the live storefront?')) return;
+    setConfirmPublish(false);
     void call('/api/admin/cms', { method: 'POST', body: JSON.stringify({ action: 'publish', label: 'Published' }) }, 'Published. Visitors see the new content within about a minute.');
   };
   const restore = (v: CmsVersionMeta) => {
-    if (!window.confirm(`Load the version from ${dhaka.format(new Date(v.createdAtIso))} into the draft? You can review it before publishing.`)) return;
+    setConfirmRestoreId(null);
     void call('/api/admin/cms', { method: 'POST', body: JSON.stringify({ action: 'restore', versionId: v.id }) }, 'Version loaded into the draft. Review it, then publish.');
   };
 
@@ -342,7 +344,16 @@ export function CmsPanel({ getIdToken }: { getIdToken: () => Promise<string> }) 
                       <span className="block font-medium text-[#1E1710]">{dhaka.format(new Date(v.createdAtIso))}{i === 0 ? ' · current' : ''}</span>
                       <span className="block truncate text-[#8A7867]">{v.createdByEmail}</span>
                     </span>
-                    {i > 0 && <button type="button" onClick={() => restore(v)} disabled={busy} className="rounded-lg border border-[rgba(30,23,16,0.14)] px-3 py-1.5 font-medium hover:bg-[#F4EFE6] disabled:opacity-50">Restore</button>}
+                    {i > 0 && (
+                      confirmRestoreId === v.id ? (
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          <button type="button" onClick={() => restore(v)} disabled={busy} className="rounded-lg bg-[#1E1710] px-2.5 py-1.5 font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50">Confirm</button>
+                          <button type="button" onClick={() => setConfirmRestoreId(null)} className="rounded-lg border border-[rgba(30,23,16,0.14)] px-2.5 py-1.5 font-medium hover:bg-[#F4EFE6]">Cancel</button>
+                        </span>
+                      ) : (
+                        <button type="button" onClick={() => setConfirmRestoreId(v.id)} disabled={busy} className="rounded-lg border border-[rgba(30,23,16,0.14)] px-3 py-1.5 font-medium hover:bg-[#F4EFE6] disabled:opacity-50">Restore</button>
+                      )
+                    )}
                   </li>
                 ))}
               </ul>
@@ -361,7 +372,14 @@ export function CmsPanel({ getIdToken }: { getIdToken: () => Promise<string> }) 
             <button type="button" disabled={!dirty || busy} onClick={() => void saveDraft()} className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-[#1E1710] px-4 text-xs font-medium text-[#FAF7F2] hover:bg-[#35291E] disabled:opacity-50">
               {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Save draft
             </button>
-            <button type="button" disabled={busy || dirty || !(state?.hasUnpublishedChanges)} onClick={publish} className="min-h-[40px] rounded-lg bg-[#B47B2B] px-5 text-sm font-medium text-white hover:bg-[#96621B] disabled:opacity-50">Publish</button>
+            {confirmPublish ? (
+              <div className="flex items-center gap-2">
+                <button type="button" disabled={busy} onClick={publish} className="min-h-[40px] rounded-lg bg-[#B47B2B] px-4 text-xs font-semibold text-white hover:bg-[#96621B] disabled:opacity-50">Confirm publish</button>
+                <button type="button" onClick={() => setConfirmPublish(false)} className="min-h-[40px] rounded-lg border border-[rgba(30,23,16,0.14)] bg-white px-3 text-xs font-medium hover:bg-[#F4EFE6]">Cancel</button>
+              </div>
+            ) : (
+              <button type="button" disabled={busy || dirty || !(state?.hasUnpublishedChanges)} onClick={() => setConfirmPublish(true)} className="min-h-[40px] rounded-lg bg-[#B47B2B] px-5 text-sm font-medium text-white hover:bg-[#96621B] disabled:opacity-50">Publish</button>
+            )}
           </div>
         </div>
       </div>

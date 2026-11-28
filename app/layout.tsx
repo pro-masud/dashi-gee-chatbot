@@ -10,30 +10,30 @@ export const metadata: Metadata = {
   metadataBase: new URL(
     process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
   ),
-  title: 'Deshi Gee — Pure Pabna Grass-Fed Bilona Cow Ghee',
+  title: 'Deshi Gee — খাঁটি গাওয়া ঘির বিশ্বস্ত ঠিকানা | Pure Artisanal Cow Ghee',
   description:
-    'Authentic single-origin Pabna grass-fed Deshi Cow Ghee churned by traditional wooden bilona. Order 250g, 500g, or 1kg sealed jars across Bangladesh.',
+    'দেশি গরুর খাঁটি দুধের ক্রিম থেকে ধীরে জ্বাল দিয়ে তৈরি দানাদার ও সুঘ্রাণযুক্ত খাঁটি গাওয়া ঘি। সারা বাংলাদেশে হোম ডেলিভারি ও ক্যাশ অন ডেলিভারি।',
   icons: {
     icon: '/favicon.svg',
   },
   openGraph: {
     type: 'website',
     siteName: 'Deshi Gee',
-    title: 'Deshi Gee — Pure Pabna Grass-Fed Bilona Cow Ghee',
+    title: 'Deshi Gee — খাঁটি গাওয়া ঘির বিশ্বস্ত ঠিকানা',
     description:
-      'Authentic single-origin Pabna grass-fed Deshi Cow Ghee churned by traditional wooden bilona. Available in 250g, 500g, and 1kg sealed jars.',
+      'ধীরে জ্বাল দেওয়া, দানাদার আর খাঁটি সুঘ্রাণে ভরা Deshi Gee গাওয়া ঘি। পণ্য হাতে পেয়ে দেখে, ঘ্রাণ নিয়ে তারপর পরিশোধ করুন।',
     images: [
       {
-        url: '/assets/images/hero_deshi_jar_1794893673264.jpg',
-        alt: 'Sealed jar of Pabna grass-fed Deshi Cow Ghee',
+        url: '/assets/images/fresh/fresh_hero_jar_1795855973640.jpg',
+        alt: 'Deshi Gee pure golden granular cow ghee jar',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Deshi Gee — Pure Pabna Grass-Fed Bilona Cow Ghee',
+    title: 'Deshi Gee — খাঁটি গাওয়া ঘির বিশ্বস্ত ঠিকানা',
     description:
-      'Authentic single-origin Pabna grass-fed Deshi Cow Ghee churned by traditional wooden bilona.',
+      'দেশি গরুর দুধ থেকে ঐতিহ্যবাহী উপায়ে তৈরি দানাদার খাঁটি গাওয়া ঘি।',
   },
 };
 
@@ -43,14 +43,8 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const serializedSettings = JSON.parse(JSON.stringify(settings)) as typeof settings;
 
   return (
-    <html lang="en" data-theme="light" suppressHydrationWarning>
+    <html lang="bn" data-lang="bn" data-sf-theme="light" suppressHydrationWarning>
       <head>
-        <script
-          dangerouslySetInnerHTML={{
-            __html:
-              "try{var t=localStorage.getItem('dg-theme');document.documentElement.setAttribute('data-sf-theme',t==='light'?'light':'dark')}catch(e){document.documentElement.setAttribute('data-sf-theme','dark')}",
-          }}
-        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
           rel="preconnect"
@@ -58,7 +52,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           crossOrigin="anonymous"
         />
         <link
-          href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..600&family=Hind+Siliguri:wght@400;500;600;700&family=Noto+Serif+Bengali:wght@500;600;700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+Bengali:wght@400;500;600;700;800&family=Noto+Serif+Bengali:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
           rel="stylesheet"
         />
         <script

@@ -89,11 +89,11 @@ export function BatchVerifyView({
         <span>{bn ? 'স্টোরফ্রন্টে ফিরে যান' : 'Back to Deshi Gee'}</span>
       </button>
 
-      <div className="mt-5 sm:mt-6">
-        <p className="text-xs font-medium uppercase tracking-widest text-[var(--c-gold-text)]">
+      <div className="mt-6">
+        <p className="text-xs font-medium text-[var(--c-gold-text)]">
           {bn ? 'ব্যাচ ও উৎস যাচাইকরণ' : 'Batch Provenance & Verification'}
         </p>
-        <h1 className="font-display mt-2 text-2xl font-semibold tracking-tight text-[var(--c-ink)] sm:text-4xl">
+        <h1 className="font-display mt-2 text-3xl font-semibold tracking-tight text-[var(--c-ink)] sm:text-5xl">
           {bn
             ? 'জারের ব্যাচ নম্বর ও ল্যাব তথ্য যাচাই করুন'
             : 'Verify Jar Batch & Lab Transparency'}
@@ -102,7 +102,7 @@ export function BatchVerifyView({
 
       <form
         onSubmit={handleSubmit}
-        className="mt-7 flex flex-col gap-3 rounded-3xl border border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-band)]/80 p-5 sm:flex-row sm:p-6 shadow-xs"
+        className="mt-8 flex flex-col gap-3 rounded-xl border border-[rgb(var(--c-tint)/0.12)] bg-[var(--c-card)] p-5 sm:flex-row sm:p-6"
       >
         <input
           type="text"
@@ -110,15 +110,15 @@ export function BatchVerifyView({
           onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
           placeholder={bn ? 'জারের গায়ে থাকা ব্যাচ কোড লিখুন' : 'Enter batch code from jar label'}
           aria-label="Batch code"
-          className="min-h-[46px] flex-1 rounded-xl border border-[rgb(var(--c-tint)/0.16)] bg-[var(--c-card)] px-4 py-2.5 font-mono text-base uppercase text-[var(--c-ink)] shadow-xs focus:border-[#B47B2B] focus:outline-none sm:text-sm"
+          className="min-h-[48px] flex-1 rounded-lg border border-[rgb(var(--c-tint)/0.16)] bg-[var(--c-bg)] px-4 py-2.5 font-mono text-base uppercase text-[var(--c-ink)] focus:border-[var(--c-accent)] focus:outline-none sm:text-sm"
         />
         <button
           type="submit"
           disabled={loading || !codeInput.trim()}
-          className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#B47B2B] to-[#96621B] px-7 py-2.5 text-sm font-bold text-[var(--c-on-gold)] shadow-xs hover:scale-[1.01] disabled:opacity-50 transition-all"
+          className="btn-primary min-h-[48px] px-7"
         >
           {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin text-[#FFFDF9]" />
+            <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <Search className="h-4 w-4" />
           )}

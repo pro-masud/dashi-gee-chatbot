@@ -746,7 +746,7 @@ export function TrackOrderView({
           <button
             type="submit"
             disabled={loading}
-            className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#B47B2B] to-[#96621B] px-5 py-2.5 text-sm font-bold text-[var(--c-on-gold)] shadow-xs hover:scale-[1.01] disabled:opacity-60 transition-all"
+            className="btn-primary min-h-[46px] w-full"
           >
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin text-[#FFFDF9]" />

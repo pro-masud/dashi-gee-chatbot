@@ -926,7 +926,7 @@ export function BagCheckoutDrawer({
                 </div>
                 <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-[var(--c-elev)]">
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-[#B47B2B] to-[#D4AF37] transition-all duration-300"
+                    className="h-full rounded-full bg-[var(--c-accent)] transition-all duration-300"
                     style={{ width: `${freeProgressPct}%` }}
                   />
                 </div>
@@ -1297,7 +1297,7 @@ export function BagCheckoutDrawer({
               <button
                 type="button"
                 onClick={handleProceedCheckout}
-                className="mt-3.5 min-h-[50px] w-full rounded-xl bg-gradient-to-r from-[#B47B2B] via-[#C98A2C] to-[#96621B] px-5 py-3 text-sm font-bold text-[var(--c-on-gold)] shadow-[0_8px_20px_-4px_rgba(180,123,43,0.35)] hover:scale-[1.01] transition-all"
+                className="btn-primary mt-3.5 min-h-[50px] w-full"
               >
                 {bn ? 'চেকআউটে এগিয়ে যান' : 'Proceed to Checkout'} · {formatBdt(grandTotal)}
               </button>
@@ -1306,9 +1306,9 @@ export function BagCheckoutDrawer({
                 type="submit"
                 form="deshi-checkout-form"
                 disabled={submitting}
-                className="mt-3.5 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#B47B2B] via-[#C98A2C] to-[#96621B] px-5 py-3 text-sm font-bold text-[var(--c-on-gold)] shadow-[0_8px_20px_-4px_rgba(180,123,43,0.35)] hover:scale-[1.01] disabled:opacity-60 transition-all"
+                className="btn-primary mt-3.5 min-h-[50px] w-full"
               >
-                {submitting && <Loader2 className="h-4 w-4 animate-spin text-[#FFFDF9]" />}
+                {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
                 <span>
                   {submitting
                     ? bn

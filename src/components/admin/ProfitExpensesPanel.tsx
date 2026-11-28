@@ -143,8 +143,10 @@ export function ProfitExpensesPanel({ getIdToken }: { getIdToken: () => Promise<
     }
   };
 
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
   const handleDeleteExpense = async (exp: ExpenseRecord) => {
-    if (!window.confirm(`Delete ${EXPENSE_LABELS[exp.type].en} of ${money(exp.amountBdt)} on ${exp.date}? This is logged.`)) return;
+    setConfirmDeleteId(null);
     const res = await authedFetch(`/api/admin/finance/expenses?id=${encodeURIComponent(exp.id)}`, { method: 'DELETE' });
     const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
     if (!res.ok || !data.ok) {
@@ -440,14 +442,33 @@ export function ProfitExpensesPanel({ getIdToken }: { getIdToken: () => Promise<
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
                   <span className="font-mono text-sm font-semibold tabular-nums">{money(exp.amountBdt)}</span>
-                  <button
-                    type="button"
-                    onClick={() => void handleDeleteExpense(exp)}
-                    aria-label={`Delete ${EXPENSE_LABELS[exp.type].en} expense`}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-[rgba(30,23,16,0.14)] text-[#635647] hover:border-red-300 hover:text-red-700"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  {confirmDeleteId === exp.id ? (
+                    <span className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteExpense(exp)}
+                        className="rounded-lg bg-red-700 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-red-800"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="rounded-lg border border-[rgba(30,23,16,0.14)] px-2.5 py-1.5 text-xs font-medium text-[#635647] hover:bg-[#F4EFE6]"
+                      >
+                        Cancel
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteId(exp.id)}
+                      aria-label={`Delete ${EXPENSE_LABELS[exp.type].en} expense`}
+                      className="flex h-9 w-9 items-center justify-center rounded-lg border border-[rgba(30,23,16,0.14)] text-[#635647] hover:border-red-300 hover:text-red-700"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               </li>
             ))}

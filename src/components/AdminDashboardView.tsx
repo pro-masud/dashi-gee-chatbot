@@ -191,6 +191,7 @@ export function AdminDashboardView({
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [pipelineMsg, setPipelineMsg] = useState('');
   const [partialAmount, setPartialAmount] = useState('');
+  const [partialInputOrderId, setPartialInputOrderId] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
   const [auditLogs, setAuditLogs] = useState<OrderAuditLogRecord[]>([]);
   const [loadingAuditLogs, setLoadingAuditLogs] = useState(false);
@@ -1631,7 +1632,9 @@ export function AdminDashboardView({
                           phone: settings.supportPhone || '',
                           address: settings.businessAddress || '',
                         });
-                        if (!printOrderDocument(html)) window.alert('Allow pop-ups for this site to print documents.');
+                        if (!printOrderDocument(html)) {
+                          setPipelineMsg('Unable to open print preview in this browser.');
+                        }
                       }}
                       className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-[rgba(30,23,16,0.16)] bg-white px-3 text-[11px] font-medium hover:bg-[#F4EFE6]"
                     >
@@ -1729,15 +1732,24 @@ export function AdminDashboardView({
                         <div>
                           <label className="block text-[11px] text-[#635647]">Collection status</label>
                           <select
-                            value={selectedOrder.collectionStatus || 'awaiting'}
+                            value={
+                              partialInputOrderId === selectedOrder.orderNumber
+                                ? 'partial'
+                                : selectedOrder.collectionStatus || 'awaiting'
+                            }
                             disabled={pipelineBusy}
                             onChange={(e) => {
                               const next = e.target.value as CollectionStatus;
                               if (next === 'partial') {
-                                const amt = Number(window.prompt('Amount collected so far (BDT)?', partialAmount || ''));
-                                if (!Number.isFinite(amt) || amt <= 0) return;
-                                void handleOrderPipelineUpdate(selectedOrder, { collectionStatus: next, collectedAmountBdt: amt });
+                                setPartialAmount(
+                                  typeof selectedOrder.collectedAmountBdt === 'number' &&
+                                    selectedOrder.collectedAmountBdt > 0
+                                    ? String(selectedOrder.collectedAmountBdt)
+                                    : ''
+                                );
+                                setPartialInputOrderId(selectedOrder.orderNumber);
                               } else {
+                                setPartialInputOrderId(null);
                                 void handleOrderPipelineUpdate(selectedOrder, { collectionStatus: next });
                               }
                             }}
@@ -1749,6 +1761,45 @@ export function AdminDashboardView({
                               </option>
                             ))}
                           </select>
+                          {partialInputOrderId === selectedOrder.orderNumber && (
+                            <div className="mt-2 flex items-center gap-1.5">
+                              <input
+                                type="number"
+                                min={1}
+                                value={partialAmount}
+                                onChange={(e) => setPartialAmount(e.target.value)}
+                                placeholder="Amount collected (BDT)"
+                                aria-label="Amount collected so far in BDT"
+                                className="w-full rounded border border-[rgba(30,23,16,0.2)] bg-white px-2.5 py-1.5 text-xs"
+                              />
+                              <button
+                                type="button"
+                                disabled={pipelineBusy}
+                                onClick={() => {
+                                  const amt = Number(partialAmount);
+                                  if (!Number.isFinite(amt) || amt <= 0) {
+                                    setPipelineMsg('Enter a valid collected amount greater than 0.');
+                                    return;
+                                  }
+                                  setPartialInputOrderId(null);
+                                  void handleOrderPipelineUpdate(selectedOrder, {
+                                    collectionStatus: 'partial',
+                                    collectedAmountBdt: amt,
+                                  });
+                                }}
+                                className="shrink-0 rounded bg-[#1E1710] px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-[#3A2F24] disabled:opacity-50"
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPartialInputOrderId(null)}
+                                className="shrink-0 rounded border border-[rgba(30,23,16,0.2)] px-2 py-1.5 text-[11px] text-[#635647] hover:bg-[#EFE7DA]"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          )}
                           {typeof selectedOrder.collectedAmountBdt === 'number' && selectedOrder.collectedAmountBdt > 0 && (
                             <p className="mt-1 font-mono text-[11px] text-[#8A5A17]">
                               Collected {formatBdt(selectedOrder.collectedAmountBdt)} of {formatBdt(selectedOrder.totalBdt)}
